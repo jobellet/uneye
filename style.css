@@ -1,0 +1,121 @@
+/* Basic Reset / Box Sizing */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+    line-height: 1.6;
+    background-color: #f4f7f6;
+    color: #333;
+    padding: 10px;
+}
+
+#app-container {
+    display: flex;
+    flex-direction: row; /* Arrange controls and plots side-by-side */
+    gap: 20px; /* Space between controls panel and plots area */
+    min-height: calc(100vh - 20px); /* Full viewport height minus body padding */
+}
+
+#controls-panel {
+    flex-basis: 280px; /* Fixed width for the control panel */
+    flex-shrink: 0; /* Prevent shrinking */
+    padding: 15px;
+    background-color: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    overflow-y: auto; /* Allow scrolling if content overflows */
+}
+
+#controls-panel > div {
+    margin-bottom: 15px; /* Space between control groups */
+}
+#controls-panel > hr {
+    margin-top: 15px;
+    margin-bottom: 15px;
+    border: 0;
+    border-top: 1px solid #eee;
+}
+
+
+#controls-panel label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: #555;
+}
+
+#controls-panel input[type="file"],
+#controls-panel input[type="number"],
+#controls-panel button {
+    width: 100%;
+    padding: 10px;
+    margin-top: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1em;
+}
+
+#controls-panel input[type="checkbox"] {
+    margin-right: 5px;
+    vertical-align: middle;
+}
+#controls-panel label[for="enable-smoothing"] {
+    display: inline; /* Keep checkbox and label on same line */
+    font-weight: normal;
+}
+
+
+#controls-panel button {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s ease-in-out;
+}
+
+#controls-panel button:hover {
+    background-color: #0056b3;
+}
+
+#controls-panel button#mark-saccade-mode.active { /* Special style for active marking mode */
+    background-color: #28a745; /* Green */
+}
+#controls-panel button#mark-saccade-mode.active:hover {
+    background-color: #1e7e34;
+}
+
+
+#plots-area {
+    flex-grow: 1; /* Take remaining space */
+    display: flex;
+    flex-direction: column; /* Stack plots vertically */
+    gap: 15px; /* Space between plots */
+}
+
+#plots-area .js-plotly-plot,
+#plots-area .plotly { /* Target Plotly's generated elements */
+    width: 100% !important; /* Ensure plots take full width of their container */
+    height: 100% !important; /* Ensure plots take full height */
+}
+
+
+#position-plot,
+#velocity-plot {
+    flex-grow: 1; /* Each plot takes equal available space in the column */
+    background-color: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    min-height: 300px; /* Minimum height for visibility */
+}
+
+/* Style for the horizontal rule if used for visual separation */
+hr {
+    border: 0;
+    height: 1px;
+    background-color: #ddd;
+    margin: 20px 0;
+}

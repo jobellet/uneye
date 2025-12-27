@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Saccade Labeler</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <div id="app-container">
+        <div id="controls-panel">
+            <div>
+                <label for="file-input">Load Eye Data (CSV/TXT/DAT):</label>
+                <input type="file" id="file-input" accept=".csv,.txt,.dat">
+            </div>
+            <hr>
+            <div>
+                <input type="checkbox" id="enable-smoothing">
+                <label for="enable-smoothing">Enable Smoothing</label>
+            </div>
+            <div>
+                <label for="smoothing-window">Window Size:</label>
+                <input type="number" id="smoothing-window" value="5" min="3" step="2" style="width: 50px;">
+            </div>
+            <hr>
+            <div>
+                <button id="mark-saccade-mode">Enter Saccade Marking Mode</button>
+            </div>
+            <div>
+                <button id="clear-last-saccade">Clear Last Saccade</button>
+            </div>
+            <div>
+                <button id="clear-all-saccades">Clear All Saccades</button>
+            </div>
+            <hr>
+            <div>
+                <button id="save-labels-button">Save Labels</button>
+            </div>
+            <!-- Other controls will go here -->
+        </div>
+        <div id="plots-area">
+            <div id="position-plot"></div>
+            <div id="velocity-plot"></div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
