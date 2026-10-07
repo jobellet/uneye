@@ -24,10 +24,11 @@ namespace {
 
 struct Args {
     std::string model = "models/combined.bin", mode, xf, yf, lf, out_labels;
+    double window_ms = 200;  // time bin seen by the network
     int window = 200;
     Config cfg;
     SimConfig sim;
-    bool realtime = false, sweep = false, per_sample = false;
+    bool realtime = false, sweep = false, per_sample = false, fast = false;
 };
 
 bool ends_with(const std::string& s, const std::string& e) { return s.size() >= e.size() && s.compare(s.size() - e.size(), e.size(), e) == 0; }
@@ -66,7 +67,7 @@ struct Score {
     std::vector<double> infer_us;
 };
 
-struct Run { std::vector<std::pair<int64_t,int64_t>> onsets; std::vector<int> pred; std::vector<Event> events; std::vector<int64_t> infer_ns; };
+struct Run { std::vector<int> fpred; std::vector<Event> fevents; std::vector<std::pair<int64_t,int64_t>> fonsets; std::vector<std::pair<int64_t,int64_t>> onsets; std::vector<int> pred; std::vector<Event> events; std::vector<int64_t> infer_ns; };
 
 void score_trace(Score& S, const std::vector<int>& truth, const std::vector<int>& pred,
                  const std::vector<Event>& dets, const std::vector<std::pair<int64_t,int64_t>>& onsets, const std::vector<double>& x, const std::vector<double>& y,
@@ -114,7 +115,7 @@ double pct(std::vector<double> v, double q) {
     return v[size_t(q * (v.size() - 1))];
 }
 
-void report(const Args& a, const Score& S, int lookahead) {
+void report(const Args& a, const Score& S, int lookahead, const char* tag = "committed") {
     const double P = double(S.tp) / std::max<int64_t>(S.tp + S.fp, 1), R = double(S.tp) / std::max<int64_t>(S.tp + S.fn, 1);
     const double F1 = 2 * P * R / std::max(P + R, 1e-12);
     const double N = double(S.tp + S.fp + S.fn + S.tn);
@@ -122,8 +123,8 @@ void report(const Args& a, const Score& S, int lookahead) {
     const double pe = ((S.tp + S.fp) * double(S.tp + S.fn) + (S.fn + S.tn) * double(S.fp + S.tn)) / (N * N);
     const double kappa = (po - pe) / std::max(1 - pe, 1e-12);
     const int64_t nt = S.ev_true[0] + S.ev_true[1], nh = S.ev_hit[0] + S.ev_hit[1];
-    std::printf("lookahead=%3d  F1=%.3f kappa=%.3f | events: recall=%.3f (micro %.3f, sacc %.3f) precision=%.3f | onset-known latency ms: median=%.0f p95=%.0f (micro %.0f) | event-end latency median=%.0f | onset pos err median=%.0f ms",
-                lookahead, F1, kappa, double(nh) / std::max<int64_t>(nt, 1),
+    std::printf("%-9s lookahead=%3d  F1=%.3f kappa=%.3f | events: recall=%.3f (micro %.3f, sacc %.3f) precision=%.3f | onset-known latency ms: median=%.0f p95=%.0f (micro %.0f) | event-end latency median=%.0f | onset pos err median=%.0f ms",
+                tag, lookahead, F1, kappa, double(nh) / std::max<int64_t>(nt, 1),
                 double(S.ev_hit[0]) / std::max<int64_t>(S.ev_true[0], 1), double(S.ev_hit[1]) / std::max<int64_t>(S.ev_true[1], 1),
                 double(S.ev_det_ok) / std::max<int64_t>(S.ev_det, 1), pct(S.lat_on, 0.5), pct(S.lat_on, 0.95), pct(S.lat_on_micro, 0.5), pct(S.lat, 0.5), pct(S.onset_err, 0.5));
     if (!a.sweep) {
@@ -140,14 +141,27 @@ Run stream_trace(StreamingDetector& det, const Args& a, const std::vector<double
     Run r; r.pred.assign(x.size(), 0);
     det.on_label = [&](const Label& l) { if (l.index >= 0 && size_t(l.index) < r.pred.size()) r.pred[l.index] = l.cls; };
     det.on_event = [&](const Event& e) { r.events.push_back(e); };
+    if (a.fast) {
+        r.fpred.assign(x.size(), 0);
+        det.on_fast = [&](const Fast& f) { if (f.index >= 0 && size_t(f.index) < r.fpred.size()) r.fpred[f.index] = f.cls; };
+    }
     det.on_onset = [&](int64_t st) { r.onsets.push_back({st, det.samples() - 1}); };
     const auto t0 = Clock::now();
     for (size_t i = 0; i < x.size(); ++i) {
         if (pace) std::this_thread::sleep_until(t0 + std::chrono::nanoseconds(int64_t(1e9 * i / a.cfg.fs)));
         det.push(x[i], y[i]);
-        if (det.last_infer_ns() && (det.samples() % a.cfg.hop) == 0) r.infer_ns.push_back(det.last_infer_ns());
+        if (det.last_infer_ns() && (det.samples() % a.cfg.hop) == 0 && det.samples() >= det.config().hop) r.infer_ns.push_back(det.last_infer_ns());
     }
     det.finish();
+    if (a.fast) {  // events from runs of immediate labels; onset known fast_confirm samples after it starts
+        const int cf = a.cfg.fast_confirm;
+        for (size_t i = 0; i < r.fpred.size();) {
+            if (!r.fpred[i]) { ++i; continue; }
+            size_t j = i; while (j + 1 < r.fpred.size() && r.fpred[j + 1]) ++j;
+            if (int(j - i + 1) >= cf) { r.fevents.push_back({1, int64_t(i), int64_t(j), int64_t(j) + 2}); r.fonsets.push_back({int64_t(i), int64_t(i) + cf - 1}); }
+            i = j + 1;
+        }
+    }
     return r;
 }
 
@@ -180,7 +194,8 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string s = argv[i];
         if (s == "--model") a.model = need(i);
-        else if (s == "--window") a.window = std::atoi(need(i));
+        else if (s == "--window-ms") a.window_ms = std::atof(need(i));
+        else if (s == "--fast") { a.fast = true; a.cfg.hop = 1; }
         else if (s == "--hop") a.cfg.hop = std::atoi(need(i));
         else if (s == "--lookahead") a.cfg.lookahead = std::atoi(need(i));
         else if (s == "--fs") { a.cfg.fs = a.sim.fs = std::atof(need(i)); }
@@ -200,7 +215,9 @@ int main(int argc, char** argv) {
         else if (s == "--per-sample") a.per_sample = true;
         else { std::fprintf(stderr, "unknown option %s\n", s.c_str()); return 2; }
     }
-    if (a.mode.empty()) { std::fprintf(stderr, "usage: uneye_rt --model M (--sim | --replay X.csv Y.csv [Labels.csv] | --stdin) [--window 200 --hop 5 --lookahead 25 --fs 1000 --realtime --sweep-lookahead]\n"); return 2; }
+    a.cfg.window_ms = a.window_ms;
+    a.window = window_samples(a.cfg.fs, a.window_ms);
+    if (a.mode.empty()) { std::fprintf(stderr, "usage: uneye_rt --model M (--sim | --replay X.csv Y.csv [Labels.csv] | --stdin) [--window-ms 200 --hop 1 --fast --lookahead 25 --fs 1000 --realtime --sweep-lookahead]\n"); return 2; }
     if (a.mode == "stdin") { run_live(a); return 0; }
 
     // gather traces
@@ -216,20 +233,21 @@ int main(int argc, char** argv) {
         if (!a.lf.empty()) {
             for (auto& r : read_csv(a.lf)) { std::vector<int> l(r.size()); for (size_t i = 0; i < r.size(); ++i) l[i] = int(r[i]); L.push_back(l); }
         }
-        std::printf("replaying %zu trials of %zu samples @ %.0f Hz\n", X.size(), X[0].size(), a.cfg.fs);
+        std::printf("replaying %zu trials of %zu samples @ %.0f Hz, time bin %.0f ms = %d samples, hop %d\n", X.size(), X[0].size(), a.cfg.fs, a.window_ms, a.window, a.cfg.hop);
     }
     std::vector<int> las = a.sweep ? std::vector<int>{0, 5, 10, 15, 25, 40, 60, 80} : std::vector<int>{a.cfg.lookahead};
     for (int la : las) {
         a.cfg.lookahead = la;
-        Score S;
+        Score S, SF;
         StreamingDetector det(make_engine(a), a.cfg);
         for (size_t k = 0; k < X.size(); ++k) {
             Run r = stream_trace(det, a, X[k], Y[k], a.realtime);
-            for (auto ns : r.infer_ns) S.infer_us.push_back(ns / 1000.0);
+            for (auto ns : r.infer_ns) { S.infer_us.push_back(ns / 1000.0); SF.infer_us.push_back(ns / 1000.0); }
+            if (a.fast && k < L.size()) score_trace(SF, L[k], r.fpred, r.fevents, r.fonsets, X[k], Y[k], a.cfg.fs);
             if (k < L.size()) score_trace(S, L[k], r.pred, r.events, r.onsets, X[k], Y[k], a.cfg.fs);
             else for (auto& e : r.events) std::printf("EVENT onset=%lld offset=%lld\n", (long long)e.onset, (long long)e.offset);
         }
-        if (!L.empty()) report(a, S, la);
+        if (!L.empty()) { report(a, S, la); if (a.fast) report(a, SF, 0, "fast"); }
     }
     return 0;
 }

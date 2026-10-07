@@ -4,8 +4,8 @@ C++ port of the U'n'Eye inference pipeline that labels saccades and microsaccade
 **while the eye signal is being recorded** (sample by sample), instead of on a finished recording.
 
 ```
-gaze sample (x,y) ──► diff (dX,dY) ──► ring buffer (W samples) ──► U-Net ──► P(saccade) per sample
-                                         every `hop` samples      (ONNX Runtime or native C++)
+gaze sample (x,y) ──► diff (dX,dY) ──► 200 ms ring buffer ──► U-Net ──► P(saccade) per sample
+                                         every `hop` samples (default 1)      (ONNX Runtime or native C++)
                                                                           │
                        events (onset/offset)  ◄── min-duration / merge ◄── threshold, after `lookahead` samples
 ```
@@ -73,8 +73,9 @@ were trained on 1000 Hz (and 500 Hz for `dataset3`) data; other rates are not re
 ## Knobs that trade accuracy for latency
 
 * `lookahead` (samples): a sample's label is final once this many newer samples exist. Bigger = more context = a bit more accurate, later.
-* `hop` (samples): network is run every `hop` samples; latency adds up to `hop`.
-* `window` (samples): context length; compute cost grows linearly. 200 is plenty (the network sees about ±60 samples).
+* `window_ms` (default 200 ms = 200 samples at 1 kHz): the time bin the network sees; `window_samples(fs, ms)` converts it (multiple of 25 samples). The ONNX file has a fixed window, so re-export with `--window` when you change it or the sampling rate.
+* `hop` (default 1): the newest 200 ms bin is evaluated on every new sample.
+* **Fast labels** (`on_fast`, `on_fast_onset`, CLI `--fast`): result of the network for the newest sample right after it arrives, with no lookahead. The committed labels (`on_label`, `on_event`) arrive `lookahead` samples later and are more accurate.
 * `provisional_p()`: probability of the newest sample with zero lookahead, for gaze-contingent triggers.
 
 ## Caveats
@@ -100,3 +101,15 @@ Real data = `data/dataset1` setB, 1000 trials × 1 s, human labels, 1921 events 
 * Compute: one network call takes ~0.12 ms (ONNX Runtime) or ~0.28 ms (native C++), once every 5 samples, on a normal CPU core. This is far below the 5 ms between calls at 1 kHz, so there is a large margin. Run with `--realtime` to test pacing on your machine.
 * `ctest`: C++ engines match PyTorch to < 2e-5.
 * The weights were partly trained on these datasets; expect somewhat lower numbers on a new recording. Not tested yet: a real live tracker, blinks, other sampling rates.
+
+### Fast mode: evaluate the newest 200 ms bin on every sample
+
+`uneye_rt --model models/combined.onnx --replay ... --fast --lookahead 10` (200 trials of dataset1 setB):
+
+| Output | F1 | Event recall (micro) | Event precision | Onset known after (median / p95) |
+|---|---|---|---|---|
+| Fast (no lookahead, every sample) | 0.71 | 0.958 (0.948) | 0.63 | 10 / 20 ms |
+| Committed (lookahead 10 ms) | 0.86 | 0.961 (0.951) | 0.79 | 17 / 25 ms |
+
+* Fast onset = 3 consecutive saccade labels (`fast_confirm`). It is about 7 ms earlier than the committed one but has more false alarms and its onset time is ~8 ms late/early, because the newest samples sit at the edge of the bin. Use it for triggers, and the committed labels for analysis.
+* One call per sample: 0.12 ms (ONNX) / 0.27 ms (native), p99 0.2 / 0.5 ms, within the 1 ms sample interval. A 10 s paced run (`--realtime`) finished in 10.03 s.

@@ -1,5 +1,6 @@
 // Online (sample-by-sample) saccade / microsaccade labeling with U'n'Eye.
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -9,9 +10,18 @@
 
 namespace uneye {
 
+// Number of samples in a time bin of `ms` milliseconds, rounded up to a multiple of mp^2 (=25), as the U-Net needs.
+inline int window_samples(double fs, double ms, int mp = 5) {
+    const int q = mp * mp;
+    const int n = int(ms * fs / 1000.0 + 0.5);
+    return std::max(q, (n + q - 1) / q * q);
+}
+
 struct Config {
     double fs = 1000.0;          // sampling rate of the incoming stream (Hz); models are trained at 1000 (or 500) Hz
-    int hop = 5;                 // run the network every `hop` samples
+    double window_ms = 200.0;    // length of the time bin the network sees (use window_samples() to build the engine)
+    int hop = 1;                 // run the network every `hop` samples (1 = on every new sample, as fast as possible)
+    int fast_confirm = 3;        // consecutive fast labels needed before on_fast_onset fires
     int lookahead = 25;          // a sample is labelled once `lookahead` newer samples exist (latency = lookahead ms @1kHz)
     double threshold = 0.5;      // saccade probability threshold (2-class models)
     double min_sacc_dur_ms = 6;  // drop events shorter than this (2-class models)
@@ -25,6 +35,13 @@ struct Event {
     int64_t onset = 0;      // first sample index (0-based)
     int64_t offset = 0;     // last sample index (inclusive)
     int64_t confirmed = 0;  // number of samples received when the event became known (latency = confirmed - 1 - onset)
+};
+
+// Immediate (zero-lookahead) result for the newest sample of the current time bin.
+struct Fast {
+    int64_t index;  // = newest sample
+    int cls;
+    float p_sacc;
 };
 
 struct Label {
@@ -49,6 +66,8 @@ public:
     // callbacks (optional)
     std::function<void(const Label&)> on_label;   // every sample, in order, `lookahead` late
     std::function<void(const Event&)> on_event;   // every finished event (after min-duration / merging)
+    std::function<void(const Fast&)> on_fast;     // after EVERY network call: label of the newest sample (no lookahead)
+    std::function<void(int64_t)> on_fast_onset;   // fast_confirm consecutive fast saccade labels; arg = first sample
     std::function<void(int64_t)> on_onset;        // provisional: event running for >= min duration, not yet finished
 
     // latest un-committed probability for the newest sample (no lookahead, noisy edge) – for ultra-low-latency use
@@ -77,6 +96,7 @@ private:
     std::vector<float> win_, prob_;
     float provisional_ = 0;
     int64_t last_ns_ = 0;
+    int fast_run_ = 0;
 
     // event state machine (runs on committed labels)
     int run_cls_ = 0;

@@ -12,6 +12,7 @@ StreamingDetector::StreamingDetector(std::unique_ptr<Engine> engine, const Confi
     // same conversions as uneye/classifier.py::predict (2-class models only)
     min_dur_ = C_ == 2 ? int(cfg_.min_sacc_dur_ms / ms) : 1;
     min_dist_ = C_ == 2 ? int(cfg_.min_sacc_dist_ms * (cfg_.fs / 1000.0)) : 0;
+    cfg_.hop = std::max(1, cfg_.hop);
     if (cfg_.lookahead >= W_ - cfg_.hop) cfg_.lookahead = W_ - cfg_.hop - 1;
     ring_.assign(size_t(2) * W_, 0.f);
     win_.assign(size_t(2) * W_, 0.f);
@@ -47,6 +48,15 @@ void StreamingDetector::run_network() {
     eng_->infer(win_.data(), prob_.data());
     last_ns_ = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
     provisional_ = 1.f - prob_[W_ - 1];  // P(not fixation) at newest sample
+    if (on_fast || on_fast_onset) {
+        int cls = 0; float best = prob_[W_ - 1];
+        for (int c = 1; c < C_; ++c)
+            if (prob_[size_t(c) * W_ + W_ - 1] > best) { best = prob_[size_t(c) * W_ + W_ - 1]; cls = c; }
+        if (C_ == 2) cls = provisional_ > cfg_.threshold ? 1 : 0;
+        if (on_fast) on_fast({n_ - 1, cls, provisional_});
+        fast_run_ = cls ? fast_run_ + 1 : 0;
+        if (fast_run_ == cfg_.fast_confirm && on_fast_onset) on_fast_onset(n_ - cfg_.fast_confirm);
+    }
     commit(n_ - cfg_.lookahead, prob_, start);
 }
 
@@ -104,7 +114,7 @@ void StreamingDetector::reset() {
     n_ = committed_ = last_infer_n_ = 0;
     px_ = py_ = 0; have_prev_ = false;
     std::fill(ring_.begin(), ring_.end(), 0.f);
-    provisional_ = 0; last_ns_ = 0;
+    provisional_ = 0; last_ns_ = 0; fast_run_ = 0;
     run_cls_ = 0; run_start_ = 0; run_announced_ = false; have_pending_ = false;
 }
 
