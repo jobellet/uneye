@@ -1,0 +1,1 @@
+{"label_delay_samples": 10, "receptive_field": 131, "note": "run uneye_rt with --label-delay <label_delay_samples>"}

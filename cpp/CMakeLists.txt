@@ -9,8 +9,19 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native")
 
 option(ONNXRUNTIME_ROOT "Path to an unpacked onnxruntime release (enables the ONNX back-end)" "")
 
-add_library(uneye_rt STATIC src/native_engine.cpp src/causal_engine.cpp src/onnx_engine.cpp src/detector.cpp)
+find_package(Threads REQUIRED)
+option(UNEYE_SANITIZE "address | thread: build everything with that sanitizer (plus UBSan for address and libstdc++ assertions)" "")
+if(UNEYE_SANITIZE STREQUAL "address")
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -D_GLIBCXX_ASSERTIONS -g)
+  add_link_options(-fsanitize=address,undefined)
+elseif(UNEYE_SANITIZE STREQUAL "thread")
+  add_compile_options(-fsanitize=thread -g)
+  add_link_options(-fsanitize=thread)
+endif()
+
+add_library(uneye_rt STATIC src/native_engine.cpp src/causal_engine.cpp src/gaze_engine.cpp src/onnx_engine.cpp src/detector.cpp)
 target_include_directories(uneye_rt PUBLIC include)
+set_source_files_properties(src/gaze_engine.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")   # the safety-relevant file must compile without any warning
 if(ONNXRUNTIME_ROOT)
   target_compile_definitions(uneye_rt PUBLIC UNEYE_WITH_ONNX)
   target_include_directories(uneye_rt PUBLIC ${ONNXRUNTIME_ROOT}/include)
@@ -23,7 +34,16 @@ add_executable(uneye_rt_cli tools/uneye_rt.cpp)
 target_link_libraries(uneye_rt_cli uneye_rt)
 set_target_properties(uneye_rt_cli PROPERTIES OUTPUT_NAME uneye_rt)
 
+add_executable(gaze_replay tools/gaze_replay.cpp)
+target_link_libraries(gaze_replay uneye_rt)
+target_compile_options(gaze_replay PRIVATE -Wall -Wextra)
+
 enable_testing()
 add_executable(test_parity tests/test_parity.cpp)
 target_link_libraries(test_parity uneye_rt)
 add_test(NAME parity COMMAND test_parity ${CMAKE_SOURCE_DIR})
+
+add_executable(test_gaze tests/test_gaze_engine.cpp)
+target_link_libraries(test_gaze uneye_rt Threads::Threads)
+target_compile_options(test_gaze PRIVATE -Wall -Wextra -Werror)
+add_test(NAME gaze_engine COMMAND test_gaze ${CMAKE_SOURCE_DIR})
