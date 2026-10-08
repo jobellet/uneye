@@ -31,11 +31,27 @@ def sample_metrics(tp, fp, fn, tn):
     return dict(kappa=kappa, mcc=mcc, f1=f1, precision=prec, recall=rec)
 
 
+def match_events(P, L, thr=0.5, min_event=3):
+    """event matching per recording. Returns lists of (trial, start, end): tp (true events found), fn (missed), fp (false alarms)
+    and the matched pairs [((trial,s,e), (trial,ps,pe))]"""
+    pred, truth = P > thr, L > 0
+    tp, fn, fp, pairs = [], [], [], []
+    for k in range(truth.shape[0]):
+        te = runs(truth[k]); pe = [r for r in runs(pred[k]) if r[1] - r[0] + 1 >= min_event]
+        used = set()
+        for (s, e) in te:
+            hit = next((j for j, (ps, pe2) in enumerate(pe) if j not in used and ps <= e and pe2 >= s), None)
+            if hit is None: fn.append((k, s, e))
+            else: used.add(hit); tp.append((k, s, e)); pairs.append(((k, s, e), (k, *pe[hit])))
+        fp += [(k, *r) for j, r in enumerate(pe) if j not in used]
+    return dict(tp=tp, fn=fn, fp=fp, pairs=pairs)
+
+
 def event_counts(P, L, thr, min_event=3):
-    """per-recording event matching. Returns hits, n_true, n_pred, n_pred_ok, delays(samples), onset_err(samples)"""
+    """per-recording event matching. Returns hits, n_true, n_pred, n_pred_ok, delays(samples), onset_err(samples), offset_err(samples)"""
     pred, truth = P > thr, L > 0
     hits = n_true = n_pred = n_ok = 0
-    delay, onset_err = [], []
+    delay, onset_err, offset_err = [], [], []
     for k in range(truth.shape[0]):
         te = runs(truth[k])
         pe = [r for r in runs(pred[k]) if r[1] - r[0] + 1 >= min_event]
@@ -44,23 +60,25 @@ def event_counts(P, L, thr, min_event=3):
             for j, (ps, pe2) in enumerate(pe):
                 if j not in used and ps <= e and pe2 >= s:
                     used.add(j); hits += 1
-                    onset_err.append(ps - s); delay.append(ps + min_event - 1 - s)
+                    onset_err.append(ps - s); offset_err.append(pe2 - e); delay.append(ps + min_event - 1 - s)
                     break
         n_ok += len(used)
-    return hits, n_true, n_pred, n_ok, delay, onset_err
+    return hits, n_true, n_pred, n_ok, delay, onset_err, offset_err
 
 
-def evaluate_probs(P, L, fs, thr=0.5, min_event=3, with_ap=True):
+def evaluate_probs(P, L, fs, thr=0.5, min_event=3, with_ap=True, extra_delay_ms=0.0):
     """P, L: (n_trials, T) saccade probability / labels (>0 = saccade) of ONE sampling rate."""
     m = sample_metrics(*confusion(P > thr, L > 0))
     if with_ap:
         m["pr_auc"] = float(average_precision_score((L > 0).ravel(), P.ravel()))
-    hits, nt, npred, nok, delay, onerr = event_counts(P, L, thr, min_event)
+    hits, nt, npred, nok, delay, onerr, offerr = event_counts(P, L, thr, min_event)
     ms = 1000.0 / fs
     m["ev_recall"] = hits / max(nt, 1)
     m["ev_precision"] = nok / max(npred, 1)
     m["ev_f1"] = 2 * m["ev_recall"] * m["ev_precision"] / max(m["ev_recall"] + m["ev_precision"], 1e-12)
-    m["alarm_delay_ms"] = float(np.median(delay)) * ms if delay else float("nan")
+    m["alarm_delay_ms"] = float(np.median(delay)) * ms + extra_delay_ms if delay else float("nan")   # + the deliberate lookahead
+    m["onset_err_ms"] = float(np.median(np.abs(onerr))) * ms if onerr else float("nan")      # |detected - human| onset / offset, as in the paper
+    m["offset_err_ms"] = float(np.median(np.abs(offerr))) * ms if offerr else float("nan")
     m["false_alarms_per_min"] = (npred - nok) / (P.size / fs / 60)
     m["n_events"] = nt
     return m
@@ -76,7 +94,11 @@ def tune_threshold(P, L, metric="kappa", grid=np.arange(0.1, 0.91, 0.05)):
 
 
 def pool(results):
-    """average a list of per-dataset metric dicts, weighted by the number of true events"""
+    """average a list of per-dataset metric dicts, weighted by the number of true events (NaN values are skipped)"""
     keys = [k for k in results[0] if k != "n_events"]
-    w = np.array([r["n_events"] for r in results], float); w /= w.sum()
-    return {k: float(np.nansum([r[k] * wi for r, wi in zip(results, w)])) for k in keys}
+    w = np.array([r["n_events"] for r in results], float)
+    out = {}
+    for k in keys:
+        v = np.array([r[k] for r in results], float); ok = np.isfinite(v)
+        out[k] = float((v[ok] * w[ok]).sum() / w[ok].sum()) if ok.any() and w[ok].sum() > 0 else float("nan")
+    return out

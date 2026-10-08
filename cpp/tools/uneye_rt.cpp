@@ -210,6 +210,7 @@ int main(int argc, char** argv) {
         else if (s == "--min-dur") a.cfg.min_sacc_dur_ms = std::atof(need(i));
         else if (s == "--min-dist") a.cfg.min_sacc_dist_ms = std::atof(need(i));
         else if (s == "--scale") a.cfg.input_scale = std::atof(need(i));
+        else if (s == "--label-delay") a.cfg.label_delay = std::atoi(need(i));
         else if (s == "--sim") a.mode = "sim";
         else if (s == "--stdin") a.mode = "stdin";
         else if (s == "--replay") { a.mode = "replay"; a.xf = need(i); a.yf = need(i); if (i + 1 < argc && argv[i + 1][0] != '-') a.lf = argv[++i]; }

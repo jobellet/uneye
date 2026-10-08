@@ -38,7 +38,8 @@ void StreamingDetector::step_causal() {
     for (int c = 1; c < C_; ++c) if (sprob_[c] > best) { best = sprob_[c]; cls = c; }
     provisional_ = 1.f - sprob_[0];
     if (C_ == 2) cls = provisional_ > cfg_.threshold ? 1 : 0;
-    const int64_t idx = n_ - 1;
+    const int64_t idx = n_ - 1 - cfg_.label_delay;     // the label is for the sample label_delay samples ago
+    if (idx < 0) return;
     if (on_fast) on_fast({idx, cls, provisional_});
     fast_run_ = cls ? fast_run_ + 1 : 0;
     if (fast_run_ == cfg_.fast_confirm && on_fast_onset) on_fast_onset(idx - cfg_.fast_confirm + 1);
@@ -149,7 +150,7 @@ void StreamingDetector::reset() {
 
 void StreamingDetector::finish() {
     if (step_) {
-        if (run_cls_ != 0) close_run(n_ - 1);
+        if (run_cls_ != 0) close_run(n_ - 1 - cfg_.label_delay);
         run_cls_ = 0;
         flush_pending(n_ + min_dist_ + 1, true);
         return;
