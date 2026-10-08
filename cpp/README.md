@@ -120,3 +120,8 @@ Real data = `data/dataset1` setB, 1000 trials × 1 s, human labels, 1921 events 
 (one step per sample, 53 µs) and its label is final at once. Use it exactly like the other models:
 `uneye_rt --model models/causal.bin --replay ... --fast` or `--stdin`. On the last sample of a 200 ms bin it reaches F1 0.79 / 0.79 / 0.60
 on datasets 1 / 2 / 3, against 0.68 / 0.66 / 0.59 for the original U-Net.
+
+### Causal model trained with lookahead
+A causal model trained with `lookahead_ms = L` outputs at time t the label of sample t-L (see `online/README_architectures.md`). Export it with
+`online/export_causal.py` (the `.json` next to the `.bin` gives the delay in samples) and run `uneye_rt --model causal.bin --stdin --label-delay <samples>`.
+Check on 200 replayed dataset-1 trials with a TCN trained with L = 10 ms: kappa 0.73 without the delay flag (wrong alignment), 0.87 with `--label-delay 10`.

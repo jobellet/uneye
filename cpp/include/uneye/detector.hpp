@@ -29,6 +29,7 @@ struct Config {
     double min_sacc_dist_ms = 1; // merge events closer than this (1 = off)
     double inf_correction = 1.5; // replacement for inf velocity
     double input_scale = 1.0;    // multiply input positions to obtain degrees
+    int label_delay = 0;         // causal model trained with lookahead L: its output at time t describes sample t-L (see online/export_causal.py .json)
 };
 
 struct Event {

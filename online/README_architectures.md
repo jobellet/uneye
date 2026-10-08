@@ -1,64 +1,40 @@
-# Causal architectures + self-supervised pretraining (JEPA) for online detection with few labels
+# Which causal network, trained how, for the project?
 
-Notebook: [`UnEye_online_architectures.ipynb`](UnEye_online_architectures.ipynb) (Colab / Kaggle ready; set `QUICK = False` for the real run).
-Code: `archs.py` (backbones), `jepa.py` (SSL), `weak_labels.py`, `experiment.py` (data, training, grid), `metrics.py`.
+Notebook: [`UnEye_online_architectures.ipynb`](UnEye_online_architectures.ipynb) (Colab / Kaggle ready; `QUICK = False` for the real run).
+Code: `archs.py` (backbones), `experiment.py` (data, training, teacher-student, plan runner), `metrics.py`, `viz.py` (figures), `weak_labels.py`, `export_causal.py`.
 Regenerate the notebook with `python3 make_notebook.py`.
 
-## Run on Colab / Kaggle
-1. Open the notebook (Colab: *File → Open notebook → GitHub*, paste `jobellet/uneye`, branch `claude/pipeline-cpp-onyx-isignal-krrw75`; Kaggle: import the file and switch *Internet* on).
-2. Turn on a GPU (optional; the S4D and GRU models are much faster on GPU, the TCNs run fine on CPU).
-3. The first cell clones the repository (the data is in it) and installs the few missing packages. Run all cells.
+## What version 1 showed (360 runs: 4 backbones x 5 strategies x 6 N x 3 seeds, Kaggle 2 x T4)
+Pooled kappa on set B, threshold 0.5, mean of 3 seeds:
 
-## State of the art checked (October 2026) and what it led to
-* **JEPA for sensor time series** is new and promising but not settled: HAR-JEPA for wearable IMU data ([arXiv 2607.16350](https://arxiv.org/abs/2607.16350)), CHARM ([2605.31580](https://arxiv.org/abs/2605.31580)), ECG/I-JEPA variants ([2607.01145](https://arxiv.org/abs/2607.01145)), automotive monitoring ([2602.09985](https://arxiv.org/abs/2602.09985)), and an analysis that finds *mixed* evidence for forecasting gains ([2609.31680](https://arxiv.org/abs/2609.31680)). I found **no published use of JEPA / self-supervised pretraining for saccade detection** (closest: semi-supervised event-camera tracking, SaccadeX, WACV 2026), so here it is a hypothesis to test, not a known win.
-* **State-space models** (S4D, LRU, Mamba) have a fixed-size recurrent state, so the cost per new sample does not depend on the history: a good fit for streaming. The official Mamba kernels need a GPU; S4D is simple, runs on CPU and has an exact recurrent form (`S4DLayer.step`, checked against the FFT form to 5e-6).
-* **Metrics**: see the notebook (section 1).
-
-## The architectures
-| name | idea | params | receptive field |
-|---|---|---|---|
-| `tcn` | causal dilated convs + residual (previous PR) | 43 k | 131 samples |
-| `tcn_lite` | depthwise-separable version, ~3x fewer MACs | 17 k | 131 samples |
-| `s4d` | 4 diagonal state-space layers (16 complex states / channel), GLU mixing | 32 k | unlimited, decaying; O(1) state per step |
-| `gru` | causal conv stem + 2-layer GRU | 29 k | unlimited |
-
-All take the same input as U'n'Eye (velocity dX, dY, plus speed) and are checked to be strictly causal.
-
-## Self-supervision without labels
-* **`jepa`**: context encoder sees a corrupted signal (masked blocks, noise, random rotation); an EMA target encoder sees the clean signal; small predictors forecast the target *embedding* at t, t+5, t+10, t+20. Stop-gradient + EMA + a variance term prevent collapse (monitor `emb_std`).
-* **`recon`** (ablation): same, but predicts the raw future velocity instead of a latent. Tests whether the latent target is what helps.
-* **`weak`**: supervised pretraining on pseudo-labels from the classic Engbert-Kliegl velocity-threshold detector – free, noisy labels.
-* All pretraining uses only set-A recordings (optionally dataset 4), never labels and never set B.
-* Downstream: fine-tune on N human-labeled trials (all weights, or only the head for a linear probe).
-
-## Pilot result (CPU, `tcn` backbone only, 2 seeds, short pretraining) – read before the big run
-
-Pooled kappa on set B (threshold 0.5), mean of 2 seeds. Pretraining: 1200 steps (~3 min) on the 2350 set-A recordings without labels.
-Original U'n'Eye on the last sample of a 200 ms bin (trained with all ~2350 labeled recordings): kappa 0.637.
-
-| labeled trials | scratch | JEPA + fine-tune | JEPA, frozen (linear probe) | raw-signal SSL + fine-tune | weak labels + fine-tune |
+| labeled trials | TCN scratch | TCN weak-label pretrain | TCN-lite scratch | GRU scratch | S4D best |
 |---|---|---|---|---|---|
-| 5 | 0.27 (0.00 / 0.53) | 0.50 (0.48 / 0.52) | 0.45 | 0.47 | **0.54** (0.48 / 0.60) |
-| 20 | 0.66 | **0.68** | 0.54 | 0.68 | 0.65 |
-| 100 | **0.73** | 0.60 (0.66 with tuned threshold) | 0.58 | 0.57 (0.67 tuned) | 0.72 |
+| 5 | 0.26 (one seed failed) | 0.52 | 0.36 | 0.56 | 0.33 |
+| 10 | 0.63 | 0.64 | 0.57 | 0.60 | 0.55 |
+| 20 | 0.67 | 0.66 | 0.63 | 0.66 | 0.59 |
+| 50 | 0.70 | 0.69 | 0.65 | 0.66 | 0.53 |
+| 100 | 0.74 | 0.71 | 0.67 | 0.68 | 0.53 |
+| 300 | **0.75** | 0.74 | 0.69 | 0.68 | 0.46 |
 
-What this does and does not show:
-* **With 5 labeled trials, any pretraining makes training reliable** (one of the two scratch runs never left the "no saccade" solution; kappa 0.00). With 5 trials a kappa of about 0.5 is reached, and the original U-Net with all labels gets 0.64.
-* **From 20 trials on, pretraining gives no clear gain** over training from scratch (+0.02, inside the seed noise), and at 100 trials fine-tuning a JEPA encoder was *worse* at the default threshold (0.60 vs 0.73; the gap shrinks to 0.66 vs 0.73 with a tuned threshold, so part of it is calibration).
-* **JEPA (latent target) was not better than the simple raw-signal predictor**, and the free weak-label pretraining (Engbert-Kliegl pseudo-labels, 22 s) was as good as or better than JEPA (165 s) at 5 and 100 labels. In this pilot the JEPA idea is therefore **not yet supported** for this task; it may need much longer pretraining, more unlabeled data (dataset 4), a lower fine-tuning learning rate, or gradual unfreezing. These are the first things to try in the notebook.
-* The pilot is small: 2 seeds, one backbone, short pretraining. Differences below about 0.05 are noise. The first version of the pilot had an early-stopping flaw that made the scratch baseline artificially bad (kappa 0 at N=100); it is fixed (`min_epochs`), and any similar protocol problem would produce the same kind of false "JEPA wins".
-* S4D, GRU and light TCN are implemented and tested for causality and speed but **not yet trained in this study**.
+* **Causal TCN from scratch** is the best model from about 50 labeled trials on and still improves with more labels (0.77 with ~2350 labels). With 20 labels it already beats the original U'n'Eye evaluated on the last 200 ms bin (0.64, trained with all labels).
+* **JEPA / raw-signal self-supervised pretraining gave no gain** from 20 labels on and got *worse* with more labels (TCN 0.68 at N=20 to 0.58 at N=300, a sign that the fine-tuning recipe, not only the idea, was wrong); frozen-encoder probes plateaued at 0.52-0.58. They were removed.
+* **S4D** was unstable (0.46-0.59, worse with more labels); **GRU** is stable but plateaus at 0.66-0.68; **TCN-lite** is 0.04-0.06 below TCN with 2.6x fewer parameters.
+* Free pseudo-labels from the classic Engbert-Kliegl detector (`weak_ft`) were as good as JEPA at small N and cost seconds.
 
-## Speed (version 2 of the experiment code)
-The runs are tiny (43 k parameters, batches of 32 x 700 samples), so a GPU is *launch-bound*, not compute-bound: the CPU thread that launches the kernels is at 100 % while the GPU waits. What was changed:
-* **Data on the device.** `experiment.Bank` keeps all trials on the GPU and draws a batch with a few gather operations (before: a Python loop over trials and a host-to-device copy at every step).
-* **Vectorised masking** in `jepa.corrupt` (before: a Python double loop = hundreds of tiny kernels per step) and a **fused EMA update** (`torch._foreach_*`).
-* **No host synchronisation per step**: JEPA loss statistics stay on the device and are read once per epoch; `cudnn.benchmark` is on.
-* **Several jobs at once**: `run_grid(..., devices=default_devices(2))` starts one worker process per GPU x 2 (never more than the CPU cores). All independent runs (pretraining per backbone, then every strategy x N x seed) are spread over all GPUs, longest first. The old code used one process and one GPU.
-* **Resume**: finished runs are in `results_grid.json`; `resume=True` skips them.
+## Version 2: finalists, plus three new questions
+Candidates: **TCN** (main), **TCN-lite** ("cheap"), **GRU** (one-point reference). Strategies: `scratch`, `weak_ft`, and new:
+* **`distill`**: the original non-causal U'n'Eye is trained on the N labels, labels all set-A recordings (soft probabilities), and the causal network learns from those labels plus the true ones. Tests whether unlabeled recordings help through a teacher that sees the future.
+* **Lookahead L**: the network output at time t is the label of sample t-L (still real time, L ms late; the network gets L ms of future context). Everything else equal, the gap to the offline model is probably mostly this missing future. Quick check (TCN from scratch, 300 labels, one run): kappa 0.73 without delay, **0.87 with 10 ms**, reproduced by the C++ engine (`uneye_rt --label-delay 10`).
+* **The right baseline**: the original U'n'Eye trained on the **same N labeled trials**, offline and on the last sample of a 200 ms bin (the teacher is trained anyway).
 
-Measured on a 4-core CPU box (no GPU available here): the same small grid took 272 s in one process and 111 s with 4 worker processes (2.4x). The GPU gain was **not measured** here; expect more than on CPU, because the second GPU is used and each GPU is shared by 2 processes, but check the `elapsed` time printed per run.
-Remaining single-thread work per run: the event-level metrics (Python loops over trials) at the end of each run.
+All methods use the same labeled subset for a given (N, seed), so the notebook reports **paired differences** (is a strategy better than scratch in the same seeds?). Metrics: kappa, MCC, event F1, |onset|/|offset| error (ms, as in Bellet et al.), alarm delay (includes L), false alarms per minute.
+Figures follow the paper: learning curves (Fig 7A), per-metric boxplots with a reference line (Fig 4), example traces with label bars (Fig 3), main-sequence plots of hits / false alarms / misses (Fig 5).
+The last section trains the chosen design on all labels and exports it to the C++ engine (full TCN only), including the label delay.
+
+Not changed from v1 on purpose: model selection by validation **loss** (with 3 validation trials at N=10 a validation kappa is too noisy), L2 1e-4, positive-class weight 3, rotation augmentation, early stopping not before epoch 15. Weak labels now ignore blink/dropout samples (v1 produced overflow warnings from non-finite eye positions).
+
+## Speed
+Data live on the GPU (`experiment.Bank`), no per-step host sync, and all independent runs are spread over all GPUs with several worker processes per GPU (`run_plan(..., devices=default_devices(2))`). Finished runs are stored in `results_v2.json`; `resume=True` skips them. (On a 4-core CPU box the same small grid went from 272 s to 111 s; the GPU gain has not been measured here.)
 
 ## Honest status
-The code and the notebook are tested here only at small scale (CPU). The full grid (four backbones, 3 seeds, N up to 300, longer pretraining) is meant to be run on Colab/Kaggle.
+v2 was tested here only at small scale (QUICK notebook run on CPU, a 6-run sanity grid at N=30). The 170-run grid is for Colab/Kaggle. One training run per (design, N, seed); differences below ~0.02 kappa should not be over-interpreted.
