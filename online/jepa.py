@@ -28,15 +28,14 @@ def random_rotate(v):
 
 
 def corrupt(v, mask_frac=0.3, block=(8, 40), noise=0.005):
-    """zero random blocks of velocity (about mask_frac of the time axis) and add white noise"""
+    """zero random blocks of velocity (about mask_frac of the time axis) and add white noise. Fully vectorised (no Python loop)."""
     b, _, t = v.shape
-    keep = torch.ones(b, 1, t, device=v.device)
-    for i in range(b):
-        n_blocks = max(1, int(mask_frac * t / np.mean(block)))
-        for _ in range(n_blocks):
-            L = np.random.randint(block[0], block[1] + 1); s = np.random.randint(0, max(t - L, 1))
-            keep[i, :, s:s + L] = 0
-    return v * keep + noise * torch.rand(b, 1, 1, device=v.device) * torch.randn_like(v)
+    nb = max(1, int(round(mask_frac * t / np.mean(block))))
+    ln = torch.randint(block[0], block[1] + 1, (b, nb, 1), device=v.device)
+    st = (torch.rand(b, nb, 1, device=v.device) * (t - ln).clamp(min=1)).long()
+    pos = torch.arange(t, device=v.device)
+    masked = ((pos >= st) & (pos < st + ln)).any(1, keepdim=True)          # (b,1,t)
+    return v * (~masked) + noise * torch.rand(b, 1, 1, device=v.device) * torch.randn_like(v)
 
 
 class JEPA(nn.Module):
@@ -53,10 +52,10 @@ class JEPA(nn.Module):
 
     @torch.no_grad()
     def update_target(self):
-        for pt, pc in zip(self.tgt.parameters(), self.ctx.parameters()):
-            pt.mul_(self.ema).add_(pc.detach(), alpha=1 - self.ema)
-        for bt, bc in zip(self.tgt.buffers(), self.ctx.buffers()):
-            bt.copy_(bc)
+        tp, cp = list(self.tgt.parameters()), [p.detach() for p in self.ctx.parameters()]
+        torch._foreach_mul_(tp, self.ema)                       # fused: one kernel launch per list, not per tensor
+        torch._foreach_add_(tp, cp, alpha=1 - self.ema)
+        torch._foreach_copy_(list(self.tgt.buffers()), list(self.ctx.buffers()))
 
     def loss(self, v, mask_frac=0.3):
         v = random_rotate(v)
@@ -80,4 +79,4 @@ class JEPA(nn.Module):
         zf = z.transpose(0, 1).reshape(z.shape[1], -1)
         std = torch.sqrt(zf.var(1) + 1e-4)
         var_loss = F.relu(1.0 - std).mean()
-        return total + 0.1 * var_loss, {"pred": float(total.detach()), "var": float(var_loss.detach()), "emb_std": float(std.mean().detach())}
+        return total + 0.1 * var_loss, torch.stack([total.detach(), var_loss.detach(), std.mean().detach()])  # stats stay on the device (no sync)

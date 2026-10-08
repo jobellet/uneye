@@ -31,12 +31,15 @@ REPO, BRANCH = "https://github.com/jobellet/uneye", "claude/pipeline-cpp-onyx-is
 if not os.path.exists("../data/dataset1"):          # running on Colab / Kaggle: get the code and the data
     if not os.path.exists("uneye"):
         subprocess.run(["git", "clone", "-q", "-b", BRANCH, REPO], check=True)
+    else:                                            # already cloned in this session: get the latest code, keep results_grid.json
+        subprocess.run(["git", "-C", "uneye", "pull", "-q", "origin", BRANCH], check=False)
     os.chdir("uneye/online")
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "scikit-learn", "scikit-image", "scipy", "pandas", "matplotlib"], check=True)
 sys.path.insert(0, os.getcwd())
 import time, json, copy, numpy as np, pandas as pd, torch, matplotlib.pyplot as plt
 import archs, jepa, experiment as E, metrics as Mx
-print("device:", E.DEVICE, "| torch", torch.__version__)
+print("device:", E.DEVICE, "| GPUs:", torch.cuda.device_count(), "| CPU cores:", os.cpu_count(), "| torch", torch.__version__)
+if QUICK: print("*** QUICK MODE: smoke test only, the numbers below are meaningless. Set QUICK = False for the real run. ***")
 """)
 
 M("""
@@ -131,8 +134,13 @@ BACKBONES  = ("tcn", "tcn_lite", "s4d", "gru") if not QUICK else ("tcn",)
 STRATEGIES = ("scratch", "jepa_ft", "jepa_probe", "recon_ft", "weak_ft") if not QUICK else ("scratch", "jepa_ft")
 N_LABELS   = (5, 10, 20, 50, 100, 300) if not QUICK else (5,)
 SEEDS      = (0, 1, 2) if not QUICK else (0,)
+WORKERS_PER_GPU = 2     # the models are tiny: one process cannot fill a GPU (it is launch-bound). 2-3 processes per GPU use it much better.
+                        # all GPUs are used (Kaggle: 2 x T4). Set to 1 to run everything in this process, one job at a time.
+DEVICES = E.default_devices(WORKERS_PER_GPU) if WORKERS_PER_GPU > 1 else None
+print("worker processes:", DEVICES or "this process only")
 t0 = time.time()
-rows, hist = E.run_grid(data, BACKBONES, STRATEGIES, N_LABELS, SEEDS, cfg=cfg, save="results_grid.json")
+rows, hist = E.run_grid(data, BACKBONES, STRATEGIES, N_LABELS, SEEDS, cfg=cfg, save="results_grid.json", devices=DEVICES,
+                        resume=True)   # finished runs stored in results_grid.json are kept and skipped: you can interrupt and restart
 df = pd.DataFrame(rows); df.to_csv("results_grid.csv", index=False)
 print(f"total {(time.time()-t0)/60:.1f} min")
 """)
@@ -154,7 +162,7 @@ for ax, bb in zip(axes[0], BACKBONES):
         ax.errorbar(d.n_labels, d["mean"], d["std"].fillna(0), marker="o", capsize=2, label=st)
     ax.axhline(ref["kappa" if metric.startswith("kappa") else metric.split("@")[0]], ls="--", c="gray", label="U-Net (all labels)")
     ax.set_xscale("log"); ax.set_title(bb); ax.set_xlabel("labeled trials"); ax.spines[["top", "right"]].set_visible(False)
-axes[0][0].set_ylabel(metric); axes[0][-1].legend(fontsize=7)
+axes[0][0].set_ylabel(metric + (" (QUICK RUN - meaningless)" if QUICK else "")); axes[0][-1].legend(fontsize=7)
 plt.tight_layout(); plt.show()
 """)
 C("""

@@ -49,5 +49,16 @@ What this does and does not show:
 * The pilot is small: 2 seeds, one backbone, short pretraining. Differences below about 0.05 are noise. The first version of the pilot had an early-stopping flaw that made the scratch baseline artificially bad (kappa 0 at N=100); it is fixed (`min_epochs`), and any similar protocol problem would produce the same kind of false "JEPA wins".
 * S4D, GRU and light TCN are implemented and tested for causality and speed but **not yet trained in this study**.
 
+## Speed (version 2 of the experiment code)
+The runs are tiny (43 k parameters, batches of 32 x 700 samples), so a GPU is *launch-bound*, not compute-bound: the CPU thread that launches the kernels is at 100 % while the GPU waits. What was changed:
+* **Data on the device.** `experiment.Bank` keeps all trials on the GPU and draws a batch with a few gather operations (before: a Python loop over trials and a host-to-device copy at every step).
+* **Vectorised masking** in `jepa.corrupt` (before: a Python double loop = hundreds of tiny kernels per step) and a **fused EMA update** (`torch._foreach_*`).
+* **No host synchronisation per step**: JEPA loss statistics stay on the device and are read once per epoch; `cudnn.benchmark` is on.
+* **Several jobs at once**: `run_grid(..., devices=default_devices(2))` starts one worker process per GPU x 2 (never more than the CPU cores). All independent runs (pretraining per backbone, then every strategy x N x seed) are spread over all GPUs, longest first. The old code used one process and one GPU.
+* **Resume**: finished runs are in `results_grid.json`; `resume=True` skips them.
+
+Measured on a 4-core CPU box (no GPU available here): the same small grid took 272 s in one process and 111 s with 4 worker processes (2.4x). The GPU gain was **not measured** here; expect more than on CPU, because the second GPU is used and each GPU is shared by 2 processes, but check the `elapsed` time printed per run.
+Remaining single-thread work per run: the event-level metrics (Python loops over trials) at the end of each run.
+
 ## Honest status
 The code and the notebook are tested here only at small scale (CPU). The full grid (four backbones, 3 seeds, N up to 300, longer pretraining) is meant to be run on Colab/Kaggle.

@@ -19,6 +19,7 @@ from weak_labels import engbert_kliegl
 
 SETS = ("1", "2", "3")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+torch.backends.cudnn.benchmark = True      # fixed shapes: let cuDNN pick the fastest kernels
 
 
 # ----------------------------------------------------------------------------- data
@@ -26,6 +27,7 @@ class Data:
     """all trials as velocity tensors. trials[(split, set)] = (V (n,2,T), L (n,T), fs)"""
 
     def __init__(self, sets=SETS, n_test=300, extra_unlabeled=False, data_dir=None):
+        self.kwargs = dict(sets=sets, n_test=n_test, extra_unlabeled=extra_unlabeled, data_dir=data_dir)   # to rebuild the data in worker processes
         if data_dir:
             import common; common.DATA = data_dir
         self.sets, self.tr, self.te, self.raw = sets, {}, {}, {}
@@ -62,16 +64,34 @@ class Data:
         return group(sel[nv:]), group(sel[:nv])
 
 
-def sample_batch(groups, batch, crop):
-    flat = [(g, i) for g, (V, L) in enumerate(groups) for i in range(V.shape[0])]
-    idx = np.random.randint(len(flat), size=batch)
-    vs, ls = [], []
-    T = min(crop, min(V.shape[2] for V, _ in groups))
-    for j in idx:
-        g, i = flat[j]; V, L = groups[g]
-        s = np.random.randint(0, V.shape[2] - T + 1)
-        vs.append(V[i, :, s:s + T]); ls.append(L[i, s:s + T])
-    return torch.from_numpy(np.stack(vs)), torch.from_numpy(np.stack(ls))
+class Bank:
+    """All trials of a list of (V (n,2,T), L (n,T) or None) groups, kept ON THE COMPUTE DEVICE.
+    A batch is drawn with a few gather operations: no Python loop over trials, no host->device copy per step."""
+
+    def __init__(self, groups, device=None, rotate=True):
+        device = device or DEVICE
+        self.V = [torch.as_tensor(V, device=device) for V, _ in groups]
+        self.L = [None if L is None else torch.as_tensor(L, device=device) for _, L in groups]
+        n = np.array([v.shape[0] for v in self.V], float)
+        self.p, self.rotate, self.device = n / n.sum(), rotate, device
+        self.ch = torch.arange(2, device=device)[None, :, None]
+
+    def sample(self, batch, crop):
+        T = min(crop, min(v.shape[2] for v in self.V))
+        counts = np.random.multinomial(batch, self.p)          # how many trials from each group (CPU, no GPU sync)
+        pos0 = torch.arange(T, device=self.device)
+        vs, ls = [], []
+        for k, c in enumerate(counts):
+            if c == 0: continue
+            V, L = self.V[k], self.L[k]
+            i = torch.randint(V.shape[0], (c,), device=self.device)
+            s = torch.randint(V.shape[2] - T + 1, (c,), device=self.device)
+            pos = s[:, None] + pos0                                # (c,T)
+            vs.append(V[i[:, None, None], self.ch, pos[:, None, :]])
+            if L is not None: ls.append(L[i[:, None], pos])
+        v = torch.cat(vs)
+        if self.rotate: v = random_rotate(v)
+        return v, (torch.cat(ls) if ls else None)
 
 
 def onehot(L):
@@ -81,17 +101,20 @@ def onehot(L):
 # ----------------------------------------------------------------------------- supervised training / fine-tuning
 def train_supervised(model, train, val, pos_weight=3.0, lr=1e-3, l2=1e-4, max_epochs=60, steps=20, batch=32,
                      crop=700, patience=4, min_epochs=15, freeze_backbone=False, log=None):
-    """original uneye logic: Adam, lr halved when validation gets worse (best weights restored), stop after > patience bad epochs.
+    """original uneye logic: Adam, lr halved when validation gets worse (best weights restored), stop after > patience bad epochs
+    (not before `min_epochs`, so that every strategy, including training from scratch, gets the same minimum training).
     One 'epoch' = `steps` random minibatches (so that epochs are comparable for any number of labeled trials).
     No lr decay / early stopping before `min_epochs`: otherwise a from-scratch net, which first sits on the
-    'predict no saccade' plateau, is stopped before it learns anything and the baseline is unfairly weak."""
+    'predict no saccade' plateau, is stopped before it learns anything and the baseline is unfairly weak.
+    Speed: data lives on the device (Bank), no per-step host sync."""
     model.to(DEVICE)
     if freeze_backbone:
         for p in model.backbone.parameters(): p.requires_grad = False
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.Adam(params, lr=lr)
     cw = torch.tensor([1.0, pos_weight]).view(1, 2, 1).to(DEVICE)
-    vt = [(torch.from_numpy(V).to(DEVICE), onehot(torch.from_numpy(L)).to(DEVICE)) for V, L in val]
+    bank = train if isinstance(train, Bank) else Bank(train, DEVICE, rotate=True)
+    vt = [(torch.from_numpy(V).to(DEVICE), onehot(torch.from_numpy(L).to(DEVICE))) for V, L in val]
 
     def val_loss():
         model.eval()
@@ -104,10 +127,9 @@ def train_supervised(model, train, val, pos_weight=3.0, lr=1e-3, l2=1e-4, max_ep
         model.train()
         if freeze_backbone: model.backbone.eval()
         for _ in range(steps):
-            v, l = sample_batch(train, batch, crop)
-            v, l = v.to(DEVICE), l.to(DEVICE)
-            loss = mc_loss(model(v), onehot(l), cw)  # sample_batch (below) rotates v at random
-            opt.zero_grad(); loss.backward(); opt.step()
+            v, l = bank.sample(batch, crop)
+            loss = mc_loss(model(v), onehot(l), cw)
+            opt.zero_grad(set_to_none=True); loss.backward(); opt.step()
         vl = val_loss()
         if best is None or vl < best:
             best, bad, best_w = vl, 0, copy.deepcopy(model.state_dict())
@@ -122,18 +144,10 @@ def train_supervised(model, train, val, pos_weight=3.0, lr=1e-3, l2=1e-4, max_ep
     return model
 
 
-# rotation augmentation: rotating the velocity vector = rotating the position trace. Applied inside the loss call.
-_orig_sample_batch = sample_batch
-def sample_batch(groups, batch, crop):  # noqa: F811  (adds on-the-fly rotation to the labeled batches)
-    v, l = _orig_sample_batch(groups, batch, crop)
-    return random_rotate(v), l
-
-
 def pretrain_jepa(backbone, data, epochs=40, steps=30, batch=48, crop=500, lr=2e-3, target="latent", horizons=(0, 5, 10, 20),
                   mask_frac=0.3, log=None):
     """label-free pretraining on all set-A recordings (and dataset 4 if loaded). Returns the context backbone + loss history."""
-    pool_v = data.unlabeled()
-    groups = [(V, np.zeros(V.shape[::2], np.float32)) for V in pool_v]
+    bank = Bank([(V, None) for V in data.unlabeled()], DEVICE, rotate=False)
     jepa = JEPA(backbone, horizons, target=target).to(DEVICE)
     opt = torch.optim.AdamW([p for p in jepa.parameters() if p.requires_grad], lr=lr, weight_decay=1e-2)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=epochs * steps)
@@ -141,13 +155,13 @@ def pretrain_jepa(backbone, data, epochs=40, steps=30, batch=48, crop=500, lr=2e
     for ep in range(epochs):
         jepa.train(); acc = []
         for _ in range(steps):
-            v, _ = _orig_sample_batch(groups, batch, crop)
-            v = v.to(DEVICE)
-            loss, info = jepa.loss(v, mask_frac)
-            opt.zero_grad(); loss.backward(); opt.step(); sched.step()
+            v, _ = bank.sample(batch, crop)
+            loss, stats = jepa.loss(v, mask_frac)
+            opt.zero_grad(set_to_none=True); loss.backward(); opt.step(); sched.step()
             if target == "latent": jepa.update_target()
-            acc.append(info)
-        hist.append({k: float(np.mean([a[k] for a in acc])) for k in acc[0]})
+            acc.append(stats)
+        m = torch.stack(acc).mean(0).tolist()                      # one host sync per epoch
+        hist.append(dict(zip(("pred", "var", "emb_std"), m)))
         if log: log(f"  jepa ep {ep+1:3d} " + " ".join(f"{k} {v:.4f}" for k, v in hist[-1].items()))
     return backbone, hist
 
@@ -222,60 +236,126 @@ def latency_ms(model, window=200, reps=50):
 STRATEGIES = ("scratch", "jepa_ft", "jepa_probe", "recon_ft", "weak_ft")
 FULL = dict(pre_epochs=40, pre_steps=30, ft_epochs=60, ft_steps=20)
 QUICK = dict(pre_epochs=2, pre_steps=5, ft_epochs=3, ft_steps=5)
+_PRE_KIND = {"jepa_ft": "jepa", "jepa_probe": "jepa", "recon_ft": "recon", "weak_ft": "weak"}
 
 
 def _seed(s):
     np.random.seed(s); torch.manual_seed(s)
 
 
+def default_devices(workers_per_gpu=2):
+    """one worker slot per GPU x workers_per_gpu (tiny models cannot fill a GPU alone); on CPU one slot per 2 cores"""
+    cores = os.cpu_count() or 2
+    if torch.cuda.is_available():
+        devs = [f"cuda:{i}" for i in range(torch.cuda.device_count())] * workers_per_gpu
+        return devs[:max(cores, torch.cuda.device_count())]       # never more worker processes than CPU cores (each needs a core)
+    return ["cpu"] * max(1, cores // 2)
+
+
+# --- jobs: module-level functions so that they can run in worker processes (they use the process-global _DATA / DEVICE)
+_DATA = None
+
+
+def _init_worker(dev_queue, data_kwargs):
+    global DEVICE, _DATA
+    DEVICE = dev_queue.get()
+    torch.set_num_threads(1)                      # several processes: avoid CPU oversubscription
+    if DEVICE.startswith("cuda"): torch.cuda.set_device(DEVICE)
+    _DATA = Data(**data_kwargs)
+
+
+def _job_pretrain(kind, bb, channels, cfg):
+    _seed(123); t = time.time()
+    net = archs.build(bb, channels)
+    if kind == "weak":
+        if bb.startswith("tcn"): archs.init_like_uneye(net)
+        pretrain_weak(net, _DATA, max_epochs=cfg["ft_epochs"], steps=cfg["ft_steps"])
+        state, h = net.state_dict(), None
+    else:
+        b, h = pretrain_jepa(net.backbone, _DATA, cfg["pre_epochs"], cfg["pre_steps"], target="latent" if kind == "jepa" else "raw")
+        state = b.state_dict()
+    return (bb, kind), {k: v.cpu() for k, v in state.items()}, h, time.time() - t
+
+
+def _job_finetune(bb, st, n, sd, channels, cfg, state):
+    _seed(1000 + sd); t = time.time()
+    train, val = _DATA.labeled_budget(n, sd)
+    net = archs.build(bb, channels)
+    if st == "scratch":
+        if bb.startswith("tcn"): archs.init_like_uneye(net)
+    elif st in ("jepa_ft", "jepa_probe", "recon_ft"): net.backbone.load_state_dict(state)
+    elif st == "weak_ft": net.load_state_dict(state)
+    train_supervised(net, train, val, max_epochs=cfg["ft_epochs"], steps=cfg["ft_steps"],
+                     freeze_backbone=(st == "jepa_probe"), lr=(1e-3 if st in ("scratch", "jepa_probe") else 5e-4))
+    r = evaluate(net, _DATA, val)
+    row = dict(backbone=bb, strategy=st, n_labels=n, seed=sd, params=count_params(net), seconds=time.time() - t)
+    for tag in r:
+        for k, v in r[tag]["pooled"].items(): row[f"{k}@{tag}"] = v
+        row[f"thr@{tag}"] = r[tag]["thr"]
+        for s_, m in r[tag]["per_set"].items(): row[f"kappa_set{s_}@{tag}"] = m["kappa"]
+    return row
+
+
+class JobRunner:
+    """Runs independent jobs, one worker process per entry of `devices` (spawned once, data loaded once per worker).
+    len(devices) <= 1 -> jobs run in this process."""
+
+    def __init__(self, data, devices, log=print):
+        global _DATA
+        self.parallel, self.ex = len(devices) > 1, None
+        if not self.parallel:
+            _DATA = data
+            return
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor
+        ctx = mp.get_context("spawn")
+        q = ctx.Queue()
+        for d in devices: q.put(d)
+        log(f"[parallel] {len(devices)} worker processes on {sorted(set(devices))}")
+        self.ex = ProcessPoolExecutor(len(devices), mp_context=ctx, initializer=_init_worker, initargs=(q, data.kwargs))
+
+    def run(self, jobs):  # yields results as they finish
+        if not self.parallel:
+            for fn, args in jobs: yield fn(*args)
+            return
+        from concurrent.futures import as_completed
+        for f in as_completed([self.ex.submit(fn, *args) for fn, args in jobs]):
+            yield f.result()
+
+    def close(self):
+        if self.ex: self.ex.shutdown()
+
+
 def run_grid(data, backbones=("tcn",), strategies=("scratch", "jepa_ft"), n_labels=(5, 20, 100), seeds=(0,), cfg=None,
-             channels=48, log=print, save=None):
-    """Returns a list of result rows (one per backbone x strategy x N x seed). Pretraining is done once per backbone/strategy."""
+             channels=48, log=print, save=None, devices=None, resume=True):
+    """Returns (rows, hist): one row per backbone x strategy x N x seed.
+    devices=None -> this process only; devices=default_devices() -> independent jobs run in parallel on all GPUs
+    (pretraining of every backbone/kind first, then all fine-tuning runs, longest first).
+    resume=True: runs already stored in `save` (json written after every finished run) are kept and skipped, so an interrupted
+    or slow run can be restarted without losing finished work."""
     import json
     cfg = dict(FULL, **(cfg or {}))
+    devices = devices or [DEVICE]
     rows, pre, hist = [], {}, {}
-    for bb in backbones:
-        for st in strategies:
-            if st in ("jepa_ft", "jepa_probe") and (bb, "jepa") not in pre:
-                _seed(123); t = time.time()
-                net = archs.build(bb, channels)
-                b, h = pretrain_jepa(net.backbone, data, cfg["pre_epochs"], cfg["pre_steps"], log=None)
-                pre[(bb, "jepa")] = copy.deepcopy(b.state_dict()); hist[(bb, "jepa")] = h
-                log(f"[pretrain] {bb} JEPA: {time.time()-t:.0f}s, pred loss {h[0]['pred']:.3f} -> {h[-1]['pred']:.3f}, emb std {h[-1]['emb_std']:.2f}")
-            if st == "recon_ft" and (bb, "recon") not in pre:
-                _seed(123); t = time.time()
-                net = archs.build(bb, channels)
-                b, h = pretrain_jepa(net.backbone, data, cfg["pre_epochs"], cfg["pre_steps"], target="raw", log=None)
-                pre[(bb, "recon")] = copy.deepcopy(b.state_dict())
-                log(f"[pretrain] {bb} raw-reconstruction SSL: {time.time()-t:.0f}s")
-            if st == "weak_ft" and (bb, "weak") not in pre:
-                _seed(123); t = time.time()
-                net = archs.build(bb, channels)
-                if bb.startswith("tcn"): archs.init_like_uneye(net)
-                pretrain_weak(net, data, max_epochs=cfg["ft_epochs"], steps=cfg["ft_steps"])
-                pre[(bb, "weak")] = copy.deepcopy(net.state_dict())
-                log(f"[pretrain] {bb} weak-label (Engbert-Kliegl) pretraining: {time.time()-t:.0f}s")
-    for bb in backbones:
-        for st in strategies:
-            for n in n_labels:
-                for sd in seeds:
-                    _seed(1000 + sd); t = time.time()
-                    train, val = data.labeled_budget(n, sd)
-                    net = archs.build(bb, channels)
-                    if st == "scratch":
-                        if bb.startswith("tcn"): archs.init_like_uneye(net)
-                    elif st in ("jepa_ft", "jepa_probe"): net.backbone.load_state_dict(pre[(bb, "jepa")])
-                    elif st == "recon_ft": net.backbone.load_state_dict(pre[(bb, "recon")])
-                    elif st == "weak_ft": net.load_state_dict(pre[(bb, "weak")])
-                    train_supervised(net, train, val, max_epochs=cfg["ft_epochs"], steps=cfg["ft_steps"],
-                                     freeze_backbone=(st == "jepa_probe"), lr=(1e-3 if st in ("scratch", "jepa_probe") else 5e-4))
-                    r = evaluate(net, data, val)
-                    row = dict(backbone=bb, strategy=st, n_labels=n, seed=sd, params=count_params(net), seconds=time.time() - t)
-                    for tag in r:
-                        for k, v in r[tag]["pooled"].items(): row[f"{k}@{tag}"] = v
-                        row[f"thr@{tag}"] = r[tag]["thr"]
-                        for s_, m in r[tag]["per_set"].items(): row[f"kappa_set{s_}@{tag}"] = m["kappa"]
-                    rows.append(row)
-                    log(f"{bb:9s} {st:10s} N={n:4d} seed {sd}: kappa {row['kappa@0.5']:.3f} (tuned {row['kappa@tuned']:.3f}) mcc {row['mcc@0.5']:.3f} f1 {row['f1@0.5']:.3f} ev_f1 {row['ev_f1@0.5']:.3f}  [{row['seconds']:.0f}s]")
-                    if save: json.dump(rows, open(save, "w"))
+    if resume and save and os.path.exists(save):
+        rows = json.load(open(save))
+    done = {(r["backbone"], r["strategy"], r["n_labels"], r["seed"]) for r in rows}
+    todo = [(bb, st, n, sd) for bb in backbones for st in strategies for n in n_labels for sd in seeds if (bb, st, n, sd) not in done]
+    if done: log(f"[resume] {len(done)} runs already finished, {len(todo)} left")
+    kinds = sorted({(bb, _PRE_KIND[st]) for bb, st, _, _ in todo if st in _PRE_KIND})
+    t0 = time.time()
+    runner = JobRunner(data, devices, log)
+    for (bb, kind), state, h, secs in runner.run([(_job_pretrain, (kind, bb, channels, cfg)) for bb, kind in kinds]):
+        pre[(bb, kind)], hist[(bb, kind)] = state, h
+        log(f"[pretrain] {bb} {kind}: {secs:.0f}s" + (f", loss {h[0]['pred']:.3f} -> {h[-1]['pred']:.3f}, emb std {h[-1]['emb_std']:.2f}" if h else ""))
+    cost = lambda bb, n: (n + 20) * (4 if bb in ("s4d", "gru") else 1)
+    jobs = [(_job_finetune, (bb, st, n, sd, channels, cfg, pre.get((bb, _PRE_KIND.get(st))))) for bb, st, n, sd in todo]
+    jobs.sort(key=lambda j: -cost(j[1][0], j[1][2]))
+    for row in runner.run(jobs):
+        rows.append(row)
+        log(f"{row['backbone']:9s} {row['strategy']:10s} N={row['n_labels']:4d} seed {row['seed']}: kappa {row['kappa@0.5']:.3f} "
+            f"(tuned {row['kappa@tuned']:.3f}) mcc {row['mcc@0.5']:.3f} f1 {row['f1@0.5']:.3f} ev_f1 {row['ev_f1@0.5']:.3f}  "
+            f"[{row['seconds']:.0f}s, {len(rows) - len(done)}/{len(jobs)}, elapsed {(time.time() - t0) / 60:.1f} min]")
+        if save: json.dump(rows, open(save, "w"))
+    runner.close()
     return rows, hist
