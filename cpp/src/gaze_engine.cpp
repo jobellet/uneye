@@ -436,7 +436,8 @@ struct GazeEngine::Impl {
             }
             k = e + 1;
             if (e - s0 + 1 < cfg.min_event_samples) continue;
-            Event ev;
+            if (o.n_events >= kMaxEvents) break;               // explicit bound (the loop condition already guarantees it)
+            Event& ev = o.events[static_cast<size_t>(o.n_events)];   // filled in place (o was value-initialised above)
             ev.onset = s0; ev.offset = e; ev.ongoing = (e == n - 1);
             ev.provisional = e > n - 1 - refine_delay;
             const Bin& b0 = (s0 - 1 >= first) ? bin(s0 - 1) : bin(s0);
@@ -450,8 +451,6 @@ struct GazeEngine::Impl {
             if (ev.ongoing && last_prediction_valid && last_prediction_onset == s0) ev.predicted_amplitude_deg = last_prediction_amp;
             const double amp = ev.ongoing ? ev.predicted_amplitude_deg : ev.amplitude_deg;
             ev.cls = amp < cfg.micro_amplitude_deg ? EventClass::Microsaccade : EventClass::Saccade;
-            if (o.n_events >= kMaxEvents) break;               // explicit bound (the loop condition already guarantees it)
-            o.events[static_cast<size_t>(o.n_events)] = ev;
             ++o.n_events;
         }
     }
