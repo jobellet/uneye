@@ -80,9 +80,11 @@ def onehot(L):
 
 # ----------------------------------------------------------------------------- supervised training / fine-tuning
 def train_supervised(model, train, val, pos_weight=3.0, lr=1e-3, l2=1e-4, max_epochs=60, steps=20, batch=32,
-                     crop=700, patience=3, freeze_backbone=False, log=None):
+                     crop=700, patience=4, min_epochs=15, freeze_backbone=False, log=None):
     """original uneye logic: Adam, lr halved when validation gets worse (best weights restored), stop after > patience bad epochs.
-    One 'epoch' = `steps` random minibatches (so that epochs are comparable for any number of labeled trials)."""
+    One 'epoch' = `steps` random minibatches (so that epochs are comparable for any number of labeled trials).
+    No lr decay / early stopping before `min_epochs`: otherwise a from-scratch net, which first sits on the
+    'predict no saccade' plateau, is stopped before it learns anything and the baseline is unfairly weak."""
     model.to(DEVICE)
     if freeze_backbone:
         for p in model.backbone.parameters(): p.requires_grad = False
@@ -109,6 +111,8 @@ def train_supervised(model, train, val, pos_weight=3.0, lr=1e-3, l2=1e-4, max_ep
         vl = val_loss()
         if best is None or vl < best:
             best, bad, best_w = vl, 0, copy.deepcopy(model.state_dict())
+        elif ep <= min_epochs:
+            pass  # initial plateau (a from-scratch net first predicts 'no saccade'): no lr decay / early stopping yet
         else:
             bad += 1; model.load_state_dict(best_w)
             for g in opt.param_groups: g["lr"] *= 0.5
