@@ -77,9 +77,11 @@ The beginning of a saccade is **not predictable** from the data before it starts
 | no heap allocation after construction | global `operator new` counter over 57 000 pushes + snapshots with both networks | 0 allocations |
 | deterministic | two engines, 20 000 samples, bit-by-bit; and `reset()` replay | identical |
 | survives hostile input | 400 000 pushes with NaN, inf, +-1e308, denormals, absurd / backwards / NaN timestamps, 400-sample dropout bursts, long gaps | no crash, every output within its invariants; run under **AddressSanitizer + UndefinedBehaviorSanitizer** with `_GLIBCXX_ASSERTIONS`: no report |
-| thread-safe hand-off | reader thread -> `SpscQueue` -> engine thread, 30 000 samples | identical to the single-thread run; ThreadSanitizer run: result pending at the time of this commit (updated below once finished) |
+| thread-safe hand-off | reader thread -> `SpscQueue` -> engine thread, 30 000 samples | identical to the single-thread run; run under **ThreadSanitizer**: no report |
 | guards | blink margin, glitch, out of range, backwards time, unsupported rate, NaN / always-saccade / no network on a motionless eye | all as specified (no saccade is ever declared on a motionless eye) |
-| compile hygiene | `-Wall -Wextra -Werror` on the engine source | clean |
+| compile hygiene | `-Wall -Wextra -Werror` on the engine source, at -O3, and with the address+undefined and thread sanitizers | clean (a GCC false-positive under ThreadSanitizer was removed by filling the output in place; the output was verified bit-identical afterwards) |
+
+All six test sections pass in the normal build, under AddressSanitizer + UndefinedBehaviorSanitizer and under ThreadSanitizer (final code, one run each). This is evidence from synthetic and replayed data on one machine, not a proof.
 
 Timing (replay of 600 000 samples, `-O3 -march=native`, two networks included): `push()` median 0.12 ms, p99 0.24 ms, p99.99 about 0.35-0.5 ms. Occasional single pushes of 1-20 ms were seen on the shared cloud machine used for testing; these come from the operating system (scheduling, page faults), not from the algorithm, which is O(1) per sample. A hard real-time guarantee needs a real-time kernel / pinned core / pre-faulted memory on the target machine; the engine does not provide that by itself.
 
