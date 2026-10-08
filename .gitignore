@@ -9,3 +9,7 @@ online/saccadenet_example.onnx
 online/results_v2.*
 online/final_causal.*
 online/final_model.pt
+free_results/
+demo_gaze/
+free_saccade/__pycache__/
+__pycache__/
