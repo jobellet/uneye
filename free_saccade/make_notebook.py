@@ -31,7 +31,7 @@ Set `QUICK = True` for a smoke test (minutes). `False` is the real run.
 C("""
 import os, sys, subprocess, glob, time
 QUICK = True            # <- set to False for the real experiment
-REPO, BRANCH = "https://github.com/jobellet/uneye", "claude/pipeline-cpp-onyx-isignal-krrw75"   # use "master" once merged
+REPO, BRANCH = "https://github.com/jobellet/uneye", "master"
 if os.path.basename(os.getcwd()) == "free_saccade": os.chdir("..")   # run from the repository
 if not os.path.exists("data/dataset1"):             # Colab / Kaggle: get the code (and the labeled recordings used for the sanity check)
     if not os.path.exists("uneye"):

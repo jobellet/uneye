@@ -33,7 +33,7 @@ Set `QUICK = True` for a smoke test (a few minutes). `False` runs about 170 stud
 C("""
 import os, sys, subprocess
 QUICK = True            # <- set to False for the real experiment
-REPO, BRANCH = "https://github.com/jobellet/uneye", "claude/pipeline-cpp-onyx-isignal-krrw75"   # use "master" once merged
+REPO, BRANCH = "https://github.com/jobellet/uneye", "master"
 if not os.path.exists("../data/dataset1"):          # running on Colab / Kaggle: get the code and the data
     if not os.path.exists("uneye"):
         subprocess.run(["git", "clone", "-q", "-b", BRANCH, REPO], check=True)
