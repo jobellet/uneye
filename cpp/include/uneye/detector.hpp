@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 
+#include "uneye/causal_engine.hpp"
 #include "uneye/engine.hpp"
 
 namespace uneye {
@@ -53,6 +54,8 @@ struct Label {
 class StreamingDetector {
 public:
     StreamingDetector(std::unique_ptr<Engine> engine, const Config& cfg);
+    // Causal network: one cheap step per sample, labels are final immediately (no window, no lookahead).
+    StreamingDetector(std::unique_ptr<StepEngine> engine, const Config& cfg);
 
     // Feed one gaze sample (degrees; NaN = missing/blink). May emit labels / events.
     void push(double x, double y);
@@ -78,18 +81,22 @@ public:
     int64_t last_infer_ns() const { return last_ns_; }
 
 private:
+    void init_common();
     void run_network();
+    void step_causal();
     void commit(int64_t upto, const std::vector<float>& prob, int64_t win_start);
     void feed_label(int64_t idx, int cls, float p);
     void close_run(int64_t end_idx);
     void flush_pending(int64_t now, bool force);
 
     std::unique_ptr<Engine> eng_;
+    std::unique_ptr<StepEngine> step_;
+    std::vector<float> sprob_;
     Config cfg_;
     int W_, C_;
     int min_dur_, min_dist_;
     int64_t n_ = 0, committed_ = 0, last_infer_n_ = 0;
-    double px_ = 0, py_ = 0;
+    double px_ = 0, py_ = 0, last_dx_ = 0, last_dy_ = 0;
     bool have_prev_ = false;
     std::vector<float> dxy_;     // ring of last W (dX,dY) pairs, linearised on demand
     std::vector<float> ring_;    // 2*W

@@ -9,7 +9,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native")
 
 option(ONNXRUNTIME_ROOT "Path to an unpacked onnxruntime release (enables the ONNX back-end)" "")
 
-add_library(uneye_rt STATIC src/native_engine.cpp src/onnx_engine.cpp src/detector.cpp)
+add_library(uneye_rt STATIC src/native_engine.cpp src/causal_engine.cpp src/onnx_engine.cpp src/detector.cpp)
 target_include_directories(uneye_rt PUBLIC include)
 if(ONNXRUNTIME_ROOT)
   target_compile_definitions(uneye_rt PUBLIC UNEYE_WITH_ONNX)

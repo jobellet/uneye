@@ -6,17 +6,44 @@
 
 namespace uneye {
 
+StreamingDetector::StreamingDetector(std::unique_ptr<StepEngine> engine, const Config& cfg)
+    : step_(std::move(engine)), cfg_(cfg), W_(1), C_(step_->classes()) {
+    cfg_.lookahead = 0;
+    sprob_.assign(C_, 0.f);
+    init_common();
+}
+
 StreamingDetector::StreamingDetector(std::unique_ptr<Engine> engine, const Config& cfg)
     : eng_(std::move(engine)), cfg_(cfg), W_(eng_->window()), C_(eng_->classes()) {
+    init_common();
+    ring_.assign(size_t(2) * W_, 0.f);
+    win_.assign(size_t(2) * W_, 0.f);
+    prob_.assign(size_t(C_) * W_, 0.f);
+}
+
+void StreamingDetector::init_common() {
     const double ms = 1000.0 / cfg_.fs;
     // same conversions as uneye/classifier.py::predict (2-class models only)
     min_dur_ = C_ == 2 ? int(cfg_.min_sacc_dur_ms / ms) : 1;
     min_dist_ = C_ == 2 ? int(cfg_.min_sacc_dist_ms * (cfg_.fs / 1000.0)) : 0;
     cfg_.hop = std::max(1, cfg_.hop);
-    if (cfg_.lookahead >= W_ - cfg_.hop) cfg_.lookahead = W_ - cfg_.hop - 1;
-    ring_.assign(size_t(2) * W_, 0.f);
-    win_.assign(size_t(2) * W_, 0.f);
-    prob_.assign(size_t(C_) * W_, 0.f);
+    if (!step_ && cfg_.lookahead >= W_ - cfg_.hop) cfg_.lookahead = W_ - cfg_.hop - 1;
+}
+
+void StreamingDetector::step_causal() {
+    const auto t0 = std::chrono::steady_clock::now();
+    step_->step(float(last_dx_), float(last_dy_), sprob_.data());
+    last_ns_ = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+    int cls = 0; float best = sprob_[0];
+    for (int c = 1; c < C_; ++c) if (sprob_[c] > best) { best = sprob_[c]; cls = c; }
+    provisional_ = 1.f - sprob_[0];
+    if (C_ == 2) cls = provisional_ > cfg_.threshold ? 1 : 0;
+    const int64_t idx = n_ - 1;
+    if (on_fast) on_fast({idx, cls, provisional_});
+    fast_run_ = cls ? fast_run_ + 1 : 0;
+    if (fast_run_ == cfg_.fast_confirm && on_fast_onset) on_fast_onset(idx - cfg_.fast_confirm + 1);
+    feed_label(idx, cls, provisional_);
+    committed_ = n_;
 }
 
 void StreamingDetector::push(double x, double y) {
@@ -28,6 +55,7 @@ void StreamingDetector::push(double x, double y) {
     if (std::isinf(dx)) dx = cfg_.inf_correction;
     if (std::isinf(dy)) dy = cfg_.inf_correction;
     if (std::isfinite(x) && std::isfinite(y)) { px_ = x; py_ = y; have_prev_ = true; }
+    if (step_) { last_dx_ = dx; last_dy_ = dy; ++n_; step_causal(); return; }
     const size_t slot = size_t(n_ % W_) * 2;
     ring_[slot] = float(dx); ring_[slot + 1] = float(dy);
     ++n_;
@@ -114,11 +142,18 @@ void StreamingDetector::reset() {
     n_ = committed_ = last_infer_n_ = 0;
     px_ = py_ = 0; have_prev_ = false;
     std::fill(ring_.begin(), ring_.end(), 0.f);
+    if (step_) step_->reset();
     provisional_ = 0; last_ns_ = 0; fast_run_ = 0;
     run_cls_ = 0; run_start_ = 0; run_announced_ = false; have_pending_ = false;
 }
 
 void StreamingDetector::finish() {
+    if (step_) {
+        if (run_cls_ != 0) close_run(n_ - 1);
+        run_cls_ = 0;
+        flush_pending(n_ + min_dist_ + 1, true);
+        return;
+    }
     // commit remaining samples with the newest window (edge effects accepted)
     if (n_ > last_infer_n_ || committed_ < n_) {
         if (n_ > last_infer_n_) {

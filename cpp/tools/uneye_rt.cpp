@@ -33,6 +33,13 @@ struct Args {
 
 bool ends_with(const std::string& s, const std::string& e) { return s.size() >= e.size() && s.compare(s.size() - e.size(), e.size(), e) == 0; }
 
+std::unique_ptr<Engine> make_engine(const Args& a);
+
+std::unique_ptr<StreamingDetector> make_detector(const Args& a) {
+    if (is_causal_file(a.model)) return std::make_unique<StreamingDetector>(make_causal_engine(a.model), a.cfg);
+    return std::make_unique<StreamingDetector>(make_engine(a), a.cfg);
+}
+
 std::unique_ptr<Engine> make_engine(const Args& a) {
     if (ends_with(a.model, ".onnx")) {
         // classes from sidecar json is overkill: probe via file name convention -> use 2 unless "andersson"
@@ -166,7 +173,7 @@ Run stream_trace(StreamingDetector& det, const Args& a, const std::vector<double
 }
 
 void run_live(const Args& a) {
-    StreamingDetector det(make_engine(a), a.cfg);
+    auto detp = make_detector(a); auto& det = *detp;
     det.on_event = [&](const Event& e) {
         std::printf("EVENT cls=%d onset=%lld offset=%lld dur_ms=%.1f known_at=%lld\n", e.cls, (long long)e.onset, (long long)e.offset,
                     (e.offset - e.onset + 1) * 1000.0 / a.cfg.fs, (long long)(e.confirmed - 1));
@@ -239,7 +246,7 @@ int main(int argc, char** argv) {
     for (int la : las) {
         a.cfg.lookahead = la;
         Score S, SF;
-        StreamingDetector det(make_engine(a), a.cfg);
+        auto detp = make_detector(a); auto& det = *detp;
         for (size_t k = 0; k < X.size(); ++k) {
             Run r = stream_trace(det, a, X[k], Y[k], a.realtime);
             for (auto ns : r.infer_ns) { S.infer_us.push_back(ns / 1000.0); SF.infer_us.push_back(ns / 1000.0); }
