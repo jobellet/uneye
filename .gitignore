@@ -6,3 +6,6 @@ online/weights_causal
 online/results_online.json
 online/results_grid.*
 online/saccadenet_example.onnx
+online/results_v2.*
+online/final_causal.*
+online/final_model.pt
