@@ -113,3 +113,10 @@ Real data = `data/dataset1` setB, 1000 trials × 1 s, human labels, 1921 events 
 
 * Fast onset = 3 consecutive saccade labels (`fast_confirm`). It is about 7 ms earlier than the committed one but has more false alarms and its onset time is ~8 ms late/early, because the newest samples sit at the edge of the bin. Use it for triggers, and the committed labels for analysis.
 * One call per sample: 0.12 ms (ONNX) / 0.27 ms (native), p99 0.2 / 0.5 ms, within the 1 ms sample interval. A 10 s paced run (`--realtime`) finished in 10.03 s.
+
+## Causal network (past bins only)
+
+`models/causal.bin` is a forward-only network trained for online detection (see `online/README.md`). It runs as a stateful filter
+(one step per sample, 53 µs) and its label is final at once. Use it exactly like the other models:
+`uneye_rt --model models/causal.bin --replay ... --fast` or `--stdin`. On the last sample of a 200 ms bin it reaches F1 0.79 / 0.79 / 0.60
+on datasets 1 / 2 / 3, against 0.68 / 0.66 / 0.59 for the original U-Net.

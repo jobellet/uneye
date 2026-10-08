@@ -37,6 +37,21 @@ def causal_probs(V):  # (n,2,T) -> (n,T) P(saccade), output at t uses only <= t
         return cnet(torch.from_numpy(V))[:, 1].numpy()
 
 
+def causal_lastbin(V, W):
+    """strictly bin-limited: net on [t-W+1, t]. If W >= receptive field this equals the full causal pass."""
+    if W >= cnet.receptive_field:
+        return causal_probs(V)
+    n, _, T = V.shape
+    P = np.zeros((n, T), np.float32)
+    pad = np.concatenate([np.zeros((n, 2, W - 1), np.float32), V], 2)
+    with torch.no_grad():
+        for i in range(n):
+            win = torch.from_numpy(pad[i]).unfold(1, W, 1).permute(1, 0, 2).contiguous()   # (T,2,W)
+            for j in range(0, T, 500):
+                P[i, j:j + 500] = cnet(win[j:j + 500])[:, 1, -1].numpy()
+    return P
+
+
 def unet_offline(V):
     T = V.shape[2] // 25 * 25
     out = np.zeros((V.shape[0], V.shape[2]), np.float32)
@@ -124,14 +139,8 @@ for s in "123":
     ind = np.random.permutation(X.shape[0])[:a.n_test]
     V, Lt = velocity(X[ind], Y[ind]), L[ind]
     W = int(round(a.bin_ms * fs / 1000)); W = (W + 24) // 25 * 25
-    Pc, Pu, Po = causal_probs(V), unet_lastbin(V, W), unet_offline(V)
-    # sanity: causal net on a 200 ms bin == causal net on the whole recording (last sample)
-    chk = []
-    for i in range(3):
-        for t in (300, 500, 700):
-            x = torch.from_numpy(V[i:i + 1, :, t - W + 1:t + 1])
-            with torch.no_grad(): chk.append(abs(cnet(x)[0, 1, -1].item() - Pc[i, t]))
-    print(f"set {s}: bin {W} samples; max |causal(bin) - causal(full)| = {max(chk):.2e}", flush=True)
+    Pc, Pu, Po = causal_lastbin(V, W), unet_lastbin(V, W), unet_offline(V)
+    print(f"set {s}: bin {W} samples (causal receptive field {cnet.receptive_field})", flush=True)
     for name, P in (("causal", Pc), ("unet_lastbin", Pu), ("unet_offline", Po)):
         results[f"set{s}/{name}"] = metrics(P, Lt, fs, 0.5, a.min_event)
         allP[name].append(P)
