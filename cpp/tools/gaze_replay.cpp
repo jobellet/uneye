@@ -69,7 +69,8 @@ double pct(std::vector<double>& v, double q) { if (v.empty()) return 0; std::sor
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::string xf, yf, fastp, refp, outp = "gaze_out.bin", mode = "fused", fault = "none";
+    std::string xf, yf, fastp, refp, winp; int win_age = 80, win_hop = 10; float win_blend = 0.5f;
+    std::string outp = "gaze_out.bin", mode = "fused", fault = "none";
     long fault_start = 3000; int trials = 1 << 30; double loss = 0, spike = 0; bool continuous = false;
     Config cfg;
     auto need = [&](int& i) -> const char* { if (i + 1 >= argc) { std::fprintf(stderr, "missing value for %s\n", argv[i]); std::exit(2); } return argv[++i]; };
@@ -77,6 +78,7 @@ int main(int argc, char** argv) {
         std::string s = argv[i];
         if (s == "--x") xf = need(i); else if (s == "--y") yf = need(i);
         else if (s == "--fast") fastp = need(i); else if (s == "--refine") refp = need(i);
+        else if (s == "--window") winp = need(i); else if (s == "--window-age") win_age = std::atoi(need(i)); else if (s == "--window-hop") win_hop = std::atoi(need(i)); else if (s == "--window-blend") win_blend = static_cast<float>(std::atof(need(i)));
         else if (s == "--out") outp = need(i); else if (s == "--mode") mode = need(i);
         else if (s == "--fault") fault = need(i); else if (s == "--fault-start") fault_start = std::atol(need(i));
         else if (s == "--loss") loss = std::atof(need(i)); else if (s == "--spike") spike = std::atof(need(i));
@@ -95,6 +97,7 @@ int main(int argc, char** argv) {
     Models m;
     if (!fastp.empty()) m.fast = std::make_unique<FaultyEngine>(make_causal_engine(fastp), fk, fault_start);
     if (!refp.empty()) { m.refine = std::make_unique<FaultyEngine>(make_causal_engine(refp), fk, fault_start); m.refine_delay = 10; }
+    if (!winp.empty()) { m.window = make_native_engine(winp, 200); m.window_age = win_age; m.window_hop = win_hop; m.window_blend = win_blend; }
     GazeEngine eng(cfg, std::move(m));
 
     auto X = read_csv(xf), Y = read_csv(yf);
@@ -117,18 +120,19 @@ int main(int argc, char** argv) {
             eng.push(s, o);
             ns.push_back(static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count()));
             ++total; if (o.health != Health::Ok) ++unhealthy;
-            const float amp = 0;
             eng.snapshot(snap);
             // age-30 bin = the label after the delayed network and the blink margins have had their say
             float st30 = -1;
             if (snap.n_bins > 30) st30 = static_cast<float>(snap.bins[static_cast<size_t>(snap.n_bins - 1 - 30)].state);
+            float st95 = -1;
+            if (snap.n_bins > 95) st95 = static_cast<float>(snap.bins[static_cast<size_t>(snap.n_bins - 1 - 95)].state);
             float ev_cls = -1, ev_pred = 0;
             for (int e = 0; e < snap.n_events; ++e) if (snap.events[static_cast<size_t>(e)].ongoing) { ev_cls = static_cast<float>(snap.events[static_cast<size_t>(e)].cls); ev_pred = snap.events[static_cast<size_t>(e)].predicted_amplitude_deg; }
             const float row[kCols] = {static_cast<float>(k), static_cast<float>(o.index), static_cast<float>(t), static_cast<float>(o.state), o.p_saccade, static_cast<float>(o.source),
                 static_cast<float>(o.flags), static_cast<float>(o.health), st30,
                 static_cast<float>(o.forecast.at10.x), static_cast<float>(o.forecast.at10.y), static_cast<float>(o.forecast.at10.scale_x), static_cast<float>(o.forecast.at10.scale_y),
                 static_cast<float>(o.forecast.at20.x), static_cast<float>(o.forecast.at20.y), static_cast<float>(o.forecast.at20.scale_x), static_cast<float>(o.forecast.at20.scale_y),
-                static_cast<float>(o.event_onset), o.forecast.ballistic ? 1.0f : 0.0f, ev_pred, ev_cls, static_cast<float>(o.revised_first), static_cast<float>(o.revised_last), amp};
+                static_cast<float>(o.event_onset), o.forecast.ballistic ? 1.0f : 0.0f, ev_pred, ev_cls, static_cast<float>(o.revised_first), static_cast<float>(o.revised_last), st95};
             out.insert(out.end(), row, row + kCols);
         }
     }
@@ -136,7 +140,9 @@ int main(int argc, char** argv) {
     const int32_t hdr[2] = {static_cast<int32_t>(out.size() / kCols), kCols};
     f.write(reinterpret_cast<const char*>(hdr), sizeof hdr);
     f.write(reinterpret_cast<const char*>(out.data()), static_cast<std::streamsize>(out.size() * sizeof(float)));
+    long over1 = 0, over5 = 0; for (double v : ns) { if (v > 1e6) ++over1; if (v > 5e6) ++over5; }
     const auto st = eng.stats();
+    std::printf("pushes slower than 1 ms: %ld, slower than 5 ms: %ld (of %zu)\n", over1, over5, ns.size());
     std::printf("%ld samples, %.3f%% not Ok | push() time: median %.0f ns, p99 %.0f ns, p99.99 %.0f ns, max %.0f ns  (snapshot per sample excluded)\n",
                 total, 100.0 * unhealthy / std::max(total, 1L), pct(ns, 0.5), pct(ns, 0.99), pct(ns, 0.9999), pct(ns, 1.0));
     std::printf("network watchdog: trust dropped %lld x (invalid output %lld, stuck %lld, veto-rate %lld, missed clear saccades %lld, flicker %lld)\n", (long long)(st.trust_drops_invalid + st.trust_drops_stuck + st.trust_drops_veto + st.trust_drops_miss + st.trust_drops_flicker), (long long)st.trust_drops_invalid, (long long)st.trust_drops_stuck, (long long)st.trust_drops_veto, (long long)st.trust_drops_miss, (long long)st.trust_drops_flicker);

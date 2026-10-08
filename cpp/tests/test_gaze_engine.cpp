@@ -50,11 +50,12 @@ static std::vector<Sample> synth(int n, uint64_t seed, bool blinks) {
     return v;
 }
 
-static Models load_models(const std::string& root) {
+static Models load_models(const std::string& root, bool with_window = true) {
     Models m;
     m.fast = make_causal_engine(root + "/models/causal.bin");
     m.refine = make_causal_engine(root + "/models/tcn_l10.bin");
     m.refine_delay = 10;
+    if (with_window) m.window = make_native_engine(root + "/models/combined.bin", 200);   // the original U'n'Eye as the third (finalizing) stage
     return m;
 }
 
@@ -78,7 +79,7 @@ int main(int argc, char** argv) {
     const std::string root = argc > 1 ? argv[1] : ".";
     const auto data = synth(60000, 1, true);
 
-    section("1. no heap allocation in steady state (push + snapshot), with networks");
+    section("1. no heap allocation in steady state (push + snapshot), with all three networks");
     {
         GazeEngine eng(Config{}, load_models(root));
         Output o; Snapshot snap;
@@ -179,6 +180,27 @@ int main(int argc, char** argv) {
         bool ok = true; for (size_t i = 0; i < N; ++i) ok = ok && same(ref[i], got[i]);
         CHECK(ok, "threaded run differs from the single-threaded run");
         std::printf("  %zu samples through the queue: %s\n", N, ok ? "identical" : "DIFFERENT");
+    }
+
+    section("7. window stage (U'n'Eye finalizes bins at age 80): bins reach stage 2, a broken window network changes nothing");
+    {
+        auto sm = synth(4000, 11, false);
+        GazeEngine eng(Config{}, load_models(root)); Output o; Snapshot snap;
+        for (size_t i = 0; i < sm.size(); ++i) eng.push(sm[i], o);
+        eng.snapshot(snap);
+        int st2 = 0, st1 = 0, final_n = 0;
+        for (int k = 0; k < snap.n_bins; ++k) { const auto& b = snap.bins[static_cast<size_t>(k)]; if (b.stage == 2) ++st2; if (b.stage == 1) ++st1; if (b.final) ++final_n; }
+        std::printf("  last 100 bins: stage 2 (finalized by the window network): %d, stage 1: %d, final: %d\n", st2, st1, final_n);
+        CHECK(st2 >= 5 && st2 <= 100, "old bins must be finalized by the window network");
+        CHECK(snap.bins[static_cast<size_t>(snap.n_bins - 1)].stage == 0, "the newest bin has only the fast label");
+        struct NanWin : Engine { int window() const override { return 200; } int classes() const override { return 2; } void infer(const float*, float* p) override { for (int i = 0; i < 400; ++i) p[i] = NAN; } };
+        Models m = load_models(root, false); m.window = std::make_unique<NanWin>();
+        GazeEngine bad(Config{}, std::move(m)); GazeEngine ref(Config{}, load_models(root, false));
+        Output ob, orf; bool ok = true;
+        for (size_t i = 0; i < sm.size(); ++i) { bad.push(sm[i], ob); ref.push(sm[i], orf); ok = ok && ob.state == orf.state && ob.flags == orf.flags; }
+        CHECK(ok, "a window network that outputs NaN must not change any label");
+        CHECK(bad.stats().window_invalid > 0 && bad.stats().window_runs == bad.stats().window_invalid, "every NaN window run must be counted as invalid");
+        std::printf("  NaN window network: %lld runs, all discarded; labels identical to the engine without a window network: %s\n", (long long)bad.stats().window_runs, ok ? "yes" : "NO");
     }
 
     std::printf("\n%s (%d failed checks)\n", g_fail == 0 ? "ALL CHECKS PASSED" : "FAILURES", g_fail);

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <stdexcept>
 
 #include "uneye/gaze_tables.hpp"
 
@@ -33,6 +34,7 @@ struct Bin {
     State state = State::Unknown;
     Source source = Source::None;
     uint8_t revisions = 0;
+    uint8_t stage = 0;                    // 0 fast, 1 refined by the 10 ms network, 2 finalized by the window network
     bool valid = false, above = false, weak = false, strong = false, heur = false, final_ = false;
 };
 
@@ -54,6 +56,9 @@ struct GazeEngine::Impl {
     Models models;
     int refine_delay;
     bool rate_ok;
+    int wlen = 0, wage = 0, whop = 0;                       // window network: length, age at which bins are finalized, run every whop samples
+    std::array<float, 2 * 256> win_in{};
+    std::array<float, 5 * 256> win_out{};
 
     std::array<Bin, kRing> ring;
     int64_t n = 0;                                          // next bin index
@@ -91,6 +96,15 @@ struct GazeEngine::Impl {
     Impl(const Config& c, Models m) : cfg(c), models(std::move(m)), refine_delay(models.refine_delay), rate_ok(std::fabs(c.fs_hz - 1000.0) <= 100.0) {
         if (refine_delay < 1) refine_delay = 1;
         if (refine_delay > 64) refine_delay = 64;
+        if (models.window) {
+            wlen = models.window->window();
+            if (wlen < 50 || wlen > 256 || models.window->classes() != 2) throw std::invalid_argument("window network: need 50..256 samples and 2 classes");
+            whop = std::min(std::max(models.window_hop, 1), 64);
+            wage = std::min(std::max(models.window_age, refine_delay + 1), wlen - 1 - whop);
+            if (wage < refine_delay + 1) throw std::invalid_argument("window network: window too short for the chosen age");
+            win_in.fill(0.0f);
+            models.window->infer(win_in.data(), win_out.data());   // warm-up: the network sizes its work buffers here, never again
+        }
         reset_state();
     }
 
@@ -277,10 +291,45 @@ struct GazeEngine::Impl {
             } else if (o.state != State::Blink && o.state != State::Invalid && !models.fast) {
                 fuse(o, 0, false, false);                         // heuristic-only engine: final label once the run is complete
             }
-            o.final_ = true;
+            o.stage = 1; o.final_ = !models.window;
             if (o.state != old || std::fabs(o.p - oldp) > 0.5f) { ++o.revisions; mark_revised(r); }
         }
         if (b.state == State::Unknown) { b.state = State::Fixation; b.source = Source::Guard; }
+        if (models.window && whop > 0 && (n % whop) == 0) run_window();
+    }
+
+    // ------------------------------------------------------------------ third stage: the window network finalizes the bins that just reached `wage`
+    void run_window() noexcept {
+        const int64_t first_pos = n - wlen;                    // bin index of window position 0 (negative: before the recording: zeros)
+        for (int j = 0; j < wlen; ++j) {
+            const int64_t k = first_pos + j;
+            const bool have = k >= 0 && in_ring(k);
+            win_in[static_cast<size_t>(2 * j)] = have ? bin(k).dx : 0.0f;
+            win_in[static_cast<size_t>(2 * j + 1)] = have ? bin(k).dy : 0.0f;
+        }
+        models.window->infer(win_in.data(), win_out.data());
+        ++st.window_runs;
+        bool ok = true;                                        // every output of the window must be a probability, or the whole run is discarded
+        for (int j = 0; j < wlen && ok; ++j) {
+            const float p0 = win_out[static_cast<size_t>(j)], p1 = win_out[static_cast<size_t>(wlen + j)];
+            ok = std::isfinite(p0) && std::isfinite(p1) && p0 >= -1e-4f && p0 <= 1.0001f && p1 >= -1e-4f && p1 <= 1.0001f && std::fabs(p0 + p1 - 1.0f) < 0.02f;
+        }
+        if (!ok) { ++st.window_invalid; return; }               // keep the labels of the previous stage
+        // conservative guard rail: while the watchdog distrusts the networks (health Degraded) a third network must not overrule the
+        // heuristic fallback; the bins are only marked final
+        const bool apply = nn_trust;
+        for (int age = wage; age < wage + whop; ++age) {
+            const int64_t k = n - 1 - age;
+            if (!in_ring(k)) continue;
+            Bin& o = bin(k);
+            const int j = wlen - 1 - age;
+            const State old = o.state; const float oldp = o.p;
+            if (apply && o.state != State::Blink && o.state != State::Invalid && cfg.mode != Mode::HeuristicOnly && models.fast)
+                fuse(o, models.window_blend * oldp + (1.0f - models.window_blend) * win_out[static_cast<size_t>(wlen + j)], true, true);
+            if (apply) o.stage = 2;
+            o.final_ = true;
+            if (o.state != old || std::fabs(o.p - oldp) > 0.5f) { ++o.revisions; mark_revised(k); }
+        }
     }
 
     void update_noise() noexcept {                             // Engbert & Kliegl: sd = sqrt(median(v^2) - median(v)^2), per axis
@@ -421,7 +470,7 @@ struct GazeEngine::Impl {
         for (int64_t k = first; k < n; ++k) {
             const Bin& b = bin(k);
             if (o.n_bins >= kMaxBins) break;
-            o.bins[static_cast<size_t>(o.n_bins)] = BinView{b.index, b.state, b.p, b.source, b.flags, b.revisions, b.final_};
+            o.bins[static_cast<size_t>(o.n_bins)] = BinView{b.index, b.state, b.p, b.source, b.flags, b.revisions, b.final_, b.stage};
             ++o.n_bins;
         }
         int64_t k = first;
@@ -439,7 +488,7 @@ struct GazeEngine::Impl {
             if (o.n_events >= kMaxEvents) break;               // explicit bound (the loop condition already guarantees it)
             Event& ev = o.events[static_cast<size_t>(o.n_events)];   // filled in place (o was value-initialised above)
             ev.onset = s0; ev.offset = e; ev.ongoing = (e == n - 1);
-            ev.provisional = e > n - 1 - refine_delay;
+            ev.provisional = e > n - 1 - (models.window ? wage + whop : refine_delay);
             const Bin& b0 = (s0 - 1 >= first) ? bin(s0 - 1) : bin(s0);
             const Bin& b1 = bin(e);
             const double dx = b1.x - b0.x, dy = b1.y - b0.y;

@@ -18,8 +18,8 @@ def load(path):
 
 def trial_arrays(R, ntr, T):
     """per-trial arrays indexed by the real sample number t (dropped samples stay NaN)"""
-    cols = {k: np.full((ntr, T), np.nan, np.float32) for k in ("state", "p", "source", "flags", "health", "st30", "a10x", "a10y", "s10x", "s10y", "a20x", "a20y", "s20x", "s20y", "onset", "ballistic", "pred_amp", "ev_cls")}
-    names = {3: "state", 4: "p", 5: "source", 6: "flags", 7: "health", 8: "st30", 9: "a10x", 10: "a10y", 11: "s10x", 12: "s10y", 13: "a20x", 14: "a20y", 15: "s20x", 16: "s20y", 17: "onset", 18: "ballistic", 19: "pred_amp", 20: "ev_cls"}
+    cols = {k: np.full((ntr, T), np.nan, np.float32) for k in ("state", "p", "source", "flags", "health", "st30", "a10x", "a10y", "s10x", "s10y", "a20x", "a20y", "s20x", "s20y", "onset", "ballistic", "pred_amp", "ev_cls", "st95")}
+    names = {3: "state", 4: "p", 5: "source", 6: "flags", 7: "health", 8: "st30", 9: "a10x", 10: "a10y", 11: "s10x", 12: "s10y", 13: "a20x", 14: "a20y", 15: "s20x", 16: "s20y", 17: "onset", 18: "ballistic", 19: "pred_amp", 20: "ev_cls", 23: "st95"}
     k, t = R[:, 0].astype(int), R[:, 2].astype(int)
     for c, nm in names.items(): cols[nm][k, t] = R[:, c]
     return cols
@@ -41,12 +41,14 @@ def report(path, xf, yf, lf, name=""):
     for k in range(ntr):
         for t in range(30, T):
             if np.isfinite(st30[k, t]) and st30[k, t] >= 0: final[k, t - 30] = st30[k, t] == 2
+    final95 = np.zeros_like(fast); st95 = A["st95"]
+    for k in range(ntr):
+        for t in range(95, T):
+            if np.isfinite(st95[k, t]) and st95[k, t] >= 0: final95[k, t - 95] = st95[k, t] == 2
     valid_final = np.zeros_like(fast); valid_final[:, :T - 30] = True
     out = {}
-    for nm, pred in (("age 0 (fast)", fast), ("age 30 (revised)", final)):
-        m = valid_final if "30" in nm else np.ones_like(fast)
-        # event metrics need rectangular arrays: restrict to the common length
-        Tm = T - 30 if "30" in nm else T
+    for nm, pred in (("age 0 (fast)", fast), ("age 30 (revised)", final), ("age 95 (final)", final95)):
+        Tm = T - 95 if "95" in nm else (T - 30 if "30" in nm else T)    # event metrics need rectangular arrays
         e = M.evaluate_probs(pred[:, :Tm].astype(float), L[:, :Tm], 1000, 0.5, with_ap=False)
         out[nm] = e
     print(f"\n=== {name or path}: {R.shape[0]} samples, {ntr} trials")

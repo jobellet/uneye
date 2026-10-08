@@ -17,6 +17,7 @@
 #include <memory>
 
 #include "uneye/causal_engine.hpp"
+#include "uneye/engine.hpp"
 
 namespace uneye {
 namespace gaze {
@@ -91,7 +92,8 @@ struct Output {                          // returned by every push()
     Forecast forecast;
 };
 
-struct BinView { int64_t index = -1; State state = State::Unknown; float p_saccade = 0; Source source = Source::None; uint32_t flags = 0; uint8_t revisions = 0; bool final = false; };
+// stage: 0 = fast label (age 0), 1 = relabeled by the 10 ms network, 2 = finalized by the window network (U'n'Eye). final = no further revision expected.
+struct BinView { int64_t index = -1; State state = State::Unknown; float p_saccade = 0; Source source = Source::None; uint32_t flags = 0; uint8_t revisions = 0; bool final = false; uint8_t stage = 0; };
 struct Event {
     int64_t onset = -1, offset = -1;
     bool ongoing = false, provisional = false;   // provisional: part of it is not yet confirmed by the delayed network
@@ -107,10 +109,17 @@ struct Snapshot {                        // semantic segmentation of the last wi
     std::array<Event, kMaxEvents> events{};
 };
 
-struct Models {                          // two causal networks; null = run without networks (heuristic only)
+struct Models {                          // null = run without that stage
     std::unique_ptr<StepEngine> fast;    // label of the current bin
     std::unique_ptr<StepEngine> refine;  // trained with `refine_delay` samples of lookahead: its output at time t describes bin t - refine_delay
     int refine_delay = 10;
+    // optional third stage: a non-causal window network (the original U'n'Eye, window <= 256 samples, 2 classes) run every `window_hop`
+    // samples on the last window() samples; it finalizes the bins that just reached `window_age` samples of age (so each bin is relabeled
+    // once, with window_age samples of future and window() - 1 - window_age of past context). Same physics gate as the other stages.
+    std::unique_ptr<Engine> window;
+    int window_age = 80;                 // tuned on set A (training set) only: 20, 30, 50, 60, 80 tried
+    int window_hop = 10;
+    float window_blend = 0.5f;           // 0: the window network replaces the label probability, 0.5: average with the previous stage (better than either alone on set A)
 };
 
 class GazeEngine {
@@ -126,7 +135,7 @@ public:
     int64_t samples() const noexcept;
 
     struct Stats { int64_t samples = 0, invalid = 0, vetoed = 0, overridden = 0, nn_invalid = 0, resets = 0; double veto_ema = 0;
-                   int64_t clear_events = 0, clear_missed = 0, trust_drops_flicker = 0, trust_drops_invalid = 0, trust_drops_stuck = 0, trust_drops_veto = 0, trust_drops_miss = 0; };
+                   int64_t window_runs = 0, window_invalid = 0, clear_events = 0, clear_missed = 0, trust_drops_flicker = 0, trust_drops_invalid = 0, trust_drops_stuck = 0, trust_drops_veto = 0, trust_drops_miss = 0; };
     Stats stats() const noexcept;
 
 private:
