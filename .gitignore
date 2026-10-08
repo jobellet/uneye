@@ -1,0 +1,8 @@
+cpp/build/
+__pycache__/
+online/train_causal.log
+online/runs/
+online/weights_causal
+online/results_online.json
+online/results_grid.*
+online/saccadenet_example.onnx
