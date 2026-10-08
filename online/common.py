@@ -23,8 +23,9 @@ def velocity(X, Y, inf_correction=1.5):
     return np.stack([dx, dy], 1).astype(np.float32)  # (n, 2, T)
 
 
-def mc_loss(pred, target):
+def mc_loss(pred, target, class_weight=None):
     """MCLoss of uneye/functions.py"""
     eps = 1e-7
     pred = torch.clamp(pred, min=eps, max=1 - eps)
-    return -torch.mean(target * torch.log(pred))
+    t = target if class_weight is None else target * class_weight
+    return -torch.mean(t * torch.log(pred))

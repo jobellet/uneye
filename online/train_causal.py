@@ -22,10 +22,13 @@ ap.add_argument("--lr", type=float, default=1e-3)
 ap.add_argument("--l2", type=float, default=1e-3)
 ap.add_argument("--val-samples", type=int, default=30)
 ap.add_argument("--time-limit-min", type=float, default=1e9)
+ap.add_argument("--pos-weight", type=float, default=1.0, help="weight of the saccade class in the loss")
+ap.add_argument("--dilations", default="1,2,4,8,16")
+ap.add_argument("--threads", type=int, default=4)
 ap.add_argument("--seed", type=int, default=1)
 a = ap.parse_args()
 np.random.seed(a.seed); torch.manual_seed(a.seed)
-torch.set_num_threads(4)
+torch.set_num_threads(a.threads)
 
 def rotate(X, Y, t):
     return X * math.cos(np.pi * t) + Y * math.sin(np.pi * t), -X * math.sin(np.pi * t) + Y * math.cos(np.pi * t)
@@ -49,7 +52,9 @@ for s in a.sets.split(","):
 def onehot(L):  # (n,T) -> (n,2,T)
     return torch.from_numpy(np.stack([1 - L, L], 1))
 
-net = CausalTCN(2, a.channels)
+dil = tuple(int(d) for d in a.dilations.split(','))
+net = CausalTCN(2, a.channels, dilations=dil)
+cw = torch.tensor([1.0, a.pos_weight]).view(1, 2, 1)
 for m in net.modules():  # weights_init of uneye/functions.py
     if isinstance(m, torch.nn.Conv1d):
         m.weight.data.normal_(0.0, 0.02)
@@ -61,7 +66,7 @@ def val_loss():
     net.eval()
     with torch.no_grad():
         n = sum(v.shape[0] for v, _ in Vval)
-        return float(sum(mc_loss(net(v), l) * v.shape[0] for v, l in Vval) / n + a.l2 * sum((p ** 2).sum() for p in net.parameters()))
+        return float(sum(mc_loss(net(v), l, cw) * v.shape[0] for v, l in Vval) / n + a.l2 * sum((p ** 2).sum() for p in net.parameters()))
 
 best, best_w, bad, hist, t0 = None, None, 0, [], time.time()
 for epoch in range(1, a.max_iter + 1):
@@ -75,7 +80,7 @@ for epoch in range(1, a.max_iter + 1):
     for g, idx in batches:
         V, L = groups_tr[g]
         out = net(torch.from_numpy(V[idx]))
-        loss = mc_loss(out, onehot(L[idx])) + a.l2 * sum((p ** 2).sum() for p in net.parameters())
+        loss = mc_loss(out, onehot(L[idx]), cw) + a.l2 * sum((p ** 2).sum() for p in net.parameters())
         opt.zero_grad(); loss.backward(); opt.step(); tl.append(float(loss.detach()))
     vl = val_loss(); hist.append((float(np.mean(tl)), vl))
     if best is None or vl < best:
@@ -91,5 +96,5 @@ for epoch in range(1, a.max_iter + 1):
     if (time.time() - t0) / 60 > a.time_limit_min:
         print("time limit reached"); break
 net.load_state_dict(best_w)
-torch.save({"state": net.state_dict(), "channels": a.channels, "hist": hist}, a.out)
+torch.save({"state": net.state_dict(), "channels": a.channels, "dilations": dil, "hist": hist}, a.out)
 print("saved", a.out)

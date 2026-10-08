@@ -12,7 +12,7 @@ ap.add_argument("--window", type=int, default=200)
 ap.add_argument("--golden", default="../cpp/tests/golden_causal.txt")
 a = ap.parse_args()
 ck = torch.load(a.weights, weights_only=False)
-net = CausalTCN(2, ck["channels"]); net.load_state_dict(ck["state"]); net.eval()
+net = CausalTCN(2, ck["channels"], dilations=ck.get("dilations", (1, 2, 4, 8, 16))); net.load_state_dict(ck["state"]); net.eval()
 sd = net.state_dict()
 
 with open(a.out + ".bin", "wb") as f:

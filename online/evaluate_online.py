@@ -27,7 +27,7 @@ a = ap.parse_args()
 torch.set_num_threads(4)
 
 ck = torch.load(a.causal, weights_only=False)
-cnet = CausalTCN(2, ck["channels"]); cnet.load_state_dict(ck["state"]); cnet.eval()
+cnet = CausalTCN(2, ck["channels"], dilations=ck.get("dilations", (1, 2, 4, 8, 16))); cnet.load_state_dict(ck["state"]); cnet.eval()
 sd = torch.load(a.unet, weights_only=False)
 unet = UNet(2, 5, 5); unet.load_state_dict(sd); unet.eval()
 
@@ -137,7 +137,7 @@ for s in "123":
         allP[name].append(P)
     allL.append(Lt); allfs.append(fs)
 
-thr = {"causal": tune_threshold(np.concatenate([causal_probs(v[0]) for v in val.values()]), np.concatenate([v[1] for v in val.values()]))}
+thr = {"causal": tune_threshold(np.concatenate([causal_probs(v[0]).ravel() for v in val.values()]), np.concatenate([v[1].ravel() for v in val.values()]))}
 print("validation-tuned threshold (causal):", thr["causal"])
 # pooled over datasets (event metrics need equal length -> per-dataset then weighted by sample count below)
 for name in allP:
