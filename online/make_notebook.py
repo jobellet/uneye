@@ -40,7 +40,7 @@ if not os.path.exists("../data/dataset1"):          # running on Colab / Kaggle:
     else:                                            # already cloned in this session: get the latest code, keep results_grid.json
         subprocess.run(["git", "-C", "uneye", "pull", "-q", "origin", BRANCH], check=False)
     os.chdir("uneye/online")
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "scikit-learn", "scikit-image", "scipy", "pandas", "matplotlib"], check=True)
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "scikit-learn", "scikit-image", "scipy", "pandas", "matplotlib", "onnx", "onnxruntime"], check=True)
 sys.path.insert(0, os.getcwd())
 import time, json, numpy as np, pandas as pd, torch, matplotlib.pyplot as plt
 import archs, experiment as E, metrics as Mx, viz
@@ -145,7 +145,7 @@ Set your constraints; the table lists the designs that satisfy them, best first.
 """)
 C("""
 N_DECIDE = N_LOOK[-1]
-MAX_ALARM_DELAY_MS = 20      # time from the true onset until the detector can raise an alarm (median)
+MAX_ALARM_DELAY_MS = 25      # time from the true onset until the detector can raise an alarm (median)
 MAX_FALSE_ALARMS_PER_MIN = 60
 c = df[(df.n_labels == N_DECIDE) & (df.backbone != "unet")].groupby(["backbone", "strategy", "lookahead_ms"]).agg(
     kappa=("kappa@0.5", "median"), kappa_sd=("kappa@0.5", "std"), ev_f1=("ev_f1@0.5", "median"), delay_ms=("alarm_delay_ms@0.5", "median"),
@@ -162,8 +162,10 @@ Pick the design from the tables above, train it on **all** human labels, look at
 C("""
 BACKBONE, STRATEGY, LOOKAHEAD_MS = "tcn", "scratch", 10      # <- from section 3 (the C++ engine supports the full 'tcn')
 t0 = time.time()
-final, res = E.train_final(data, BACKBONE, STRATEGY, LOOKAHEAD_MS, n="all", cfg=cfg)
-print(f"trained in {time.time()-t0:.0f}s")
+FINAL_SEEDS = (0, 1) if QUICK else (0, 1, 2, 3, 4)       # one training run is a gamble (dataset 3 varies a lot): keep the best validation loss
+final, res, seed_table = E.train_final(data, BACKBONE, STRATEGY, LOOKAHEAD_MS, n="all", seeds=FINAL_SEEDS, cfg=cfg)
+print(f"trained {len(FINAL_SEEDS)} seeds in {time.time()-t0:.0f}s; the chosen one has the lowest validation loss (test columns are for information only)")
+display(pd.DataFrame(seed_table).round(3))
 pd.DataFrame(res["0.5"]["per_set"]).T[["kappa", "mcc", "f1", "ev_recall", "ev_precision", "ev_f1", "onset_err_ms", "offset_err_ms", "alarm_delay_ms", "false_alarms_per_min"]].round(3)
 """)
 C("""

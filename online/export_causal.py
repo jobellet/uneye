@@ -39,12 +39,15 @@ def export(net, out, window=200, golden=None, lookahead_samples=0):
                "note": "run uneye_rt with --label-delay <label_delay_samples>"}, open(out + ".json", "w"))
     torch.onnx.export(net, torch.zeros(1, 2, window), out + ".onnx", input_names=["dxy"], output_names=["prob"], opset_version=13,
                       dynamo=False, dynamic_axes={"dxy": {0: "batch", 2: "time"}, "prob": {0: "batch", 2: "time"}})
-    import onnxruntime as ort
     X, Y, L, fs = load("1", "B")
     V = velocity(X[:1], Y[:1])[:, :, :400]
     ref = net(torch.from_numpy(V)).detach().numpy()
-    got = ort.InferenceSession(out + ".onnx", providers=["CPUExecutionProvider"]).run(None, {"dxy": V})[0]
-    print("receptive field", net.receptive_field, "samples; max |onnx - torch| =", np.abs(ref - got).max())
+    try:  # the check is optional: the .bin / .onnx files are already written
+        import onnxruntime as ort
+        got = ort.InferenceSession(out + ".onnx", providers=["CPUExecutionProvider"]).run(None, {"dxy": V})[0]
+        print("receptive field", net.receptive_field, "samples; max |onnx - torch| =", np.abs(ref - got).max())
+    except ImportError:
+        print("receptive field", net.receptive_field, "samples; (pip install onnxruntime to also check the ONNX file)")
     if golden:
         with open(golden, "w") as g:
             g.write("%d %d\n" % (V.shape[2], net.classes))

@@ -191,6 +191,7 @@ def train_supervised(model, train, val, pos_weight=3.0, lr=1e-3, l2=1e-4, max_ep
         if log: log(f"  ep {ep:3d} val {vl:.4f} best {best:.4f} bad {bad}")
         if bad > patience: break
     model.load_state_dict(best_w)
+    model.best_val = best
     return model
 
 
@@ -415,16 +416,28 @@ def run_plan(data, plan, cfg=None, channels=48, log=print, save=None, devices=No
 
 
 # ----------------------------------------------------------------------------- final model
-def train_final(data, backbone="tcn", strategy="scratch", lookahead_ms=0.0, n="all", seed=0, channels=48, cfg=None, log=print):
-    """train the chosen design on ALL human labels of set A (20 % of them for early stopping) -> (model, evaluation on set B)"""
+def train_final(data, backbone="tcn", strategy="scratch", lookahead_ms=0.0, n="all", seeds=(0, 1, 2, 3, 4), channels=48, cfg=None, log=print):
+    """Train the chosen design on ALL human labels of set A (20 % of them for early stopping, the same split for every seed) with several
+    training seeds and keep the model with the lowest VALIDATION loss. A single training run is a gamble: on the small dataset 3 the
+    same design gave kappa 0.61 in one run and 0.78 in another. Returns (model, evaluation of the chosen model, table with one row per seed;
+    the test kappa in the table is for information only and is never used for the choice)."""
     cfg = dict(FULL, **(cfg or {}))
     n = sum(data.tr[s][0].shape[0] for s in data.sets) if n == "all" else n
-    train_ids, val_ids = data.split(n, seed)
-    _seed(seed)
-    net = build_student(backbone, channels)
-    lr = 1e-3
-    if strategy == "weak_ft":
-        pretrain_weak(net, data, max_epochs=cfg["ft_epochs"], steps=cfg["ft_steps"]); lr = 5e-4
+    train_ids, val_ids = data.split(n, 0)
     val = data.groups(val_ids, lookahead_ms)
-    train_supervised(net, data.groups(train_ids, lookahead_ms), val, max_epochs=cfg["ft_epochs"], steps=cfg["ft_steps"], lr=lr, log=None)
-    return net, evaluate(net, data, val, lookahead_ms)
+    best, table = None, []
+    for sd in seeds:
+        _seed(sd)
+        net = build_student(backbone, channels)
+        lr = 1e-3
+        if strategy == "weak_ft":
+            pretrain_weak(net, data, max_epochs=cfg["ft_epochs"], steps=cfg["ft_steps"]); lr = 5e-4
+        train_supervised(net, data.groups(train_ids, lookahead_ms), val, max_epochs=cfg["ft_epochs"], steps=cfg["ft_steps"], lr=lr)
+        res = evaluate(net, data, val, lookahead_ms)
+        row = dict(seed=sd, val_loss=net.best_val, kappa_test=res["0.5"]["pooled"]["kappa"], ev_f1_test=res["0.5"]["pooled"]["ev_f1"],
+                   **{f"kappa_set{s}": res["0.5"]["per_set"][s]["kappa"] for s in data.sets})
+        table.append(row)
+        if best is None or net.best_val < best[0]: best = (net.best_val, net, res, sd)
+        if log: log(f"  seed {sd}: validation loss {net.best_val:.4f}")
+    for r in table: r["chosen"] = (r["seed"] == best[3])
+    return best[1], best[2], table

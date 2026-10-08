@@ -33,6 +33,33 @@ The last section trains the chosen design on all labels and exports it to the C+
 
 Not changed from v1 on purpose: model selection by validation **loss** (with 3 validation trials at N=10 a validation kappa is too noisy), L2 1e-4, positive-class weight 3, rotation augmentation, early stopping not before epoch 15. Weak labels now ignore blink/dropout samples (v1 produced overflow warnings from non-finite eye positions).
 
+## Version 2 results (Kaggle 2 x T4, 7.7 min for 170 student runs + 20 teachers, 5 seeds)
+Pooled kappa on set B (threshold 0.5), mean over 5 seeds. Seeds share the labeled subset across methods (paired).
+
+| labeled trials | U'n'Eye online (last bin) | **TCN scratch** | TCN distill | TCN weak-label | TCN-lite scratch | GRU scratch | U'n'Eye offline (target) |
+|---|---|---|---|---|---|---|---|
+| 10 | 0.56 | 0.62 | **0.66** | 0.63 | 0.49 | – | 0.73 |
+| 30 | 0.58 | 0.67 | 0.65 | 0.67 | 0.64 | 0.65 | 0.78 |
+| 100 | 0.59 | **0.72** | 0.71 | 0.72 | 0.67 | 0.68 | 0.82 |
+| 300 | 0.56 | **0.74** | 0.70 | 0.74 | 0.68 | – | 0.81 |
+
+Lookahead (TCN from scratch; `alarm delay` includes L):
+
+| L (ms) | kappa, N=30 | kappa, N=100 | event F1, N=100 | |onset error| (ms) | alarm delay (ms) | false alarms / min |
+|---|---|---|---|---|---|---|
+| 0 | 0.64 | 0.72 | 0.83 | 7.5 | 9.7 | 43 |
+| 5 | 0.71 | 0.81 | 0.84 | 3.0 | 10.1 | 39 |
+| 10 | 0.78 | 0.82 | 0.83 | 1.9 | 12.0 | 35 |
+| 20 | 0.76 | 0.83 | 0.86 | 1.9 | 20.9 | 27 |
+| 40 | 0.76 | 0.83 | 0.87 | 2.4 | 41.1 | 25 |
+
+* **A few ms of lookahead is the main lever**: 5-10 ms bring the causal TCN to the level of the offline U'n'Eye trained on the same labels (0.82 at N=100) and its onset error (1.9 ms against 2.2 ms). Beyond about 10-20 ms there is no further gain.
+* The causal TCN beats the original U'n'Eye evaluated online (last bin) at every N, including N=10, and the gap grows with N (the online U'n'Eye does not improve with more labels).
+* **Distillation** helps only with very few labels: at N=10 +0.05 kappa and +0.13 event F1 (5/5 seeds) and about a third of the false alarms; at N>=100 it is not better, and at N=300 it is worse in kappa (-0.03, 0/5 seeds) although event F1 stays slightly higher. **Weak-label pretraining** gives no consistent gain for the TCN.
+* **TCN-lite** is 0.05-0.06 below TCN at every N; **GRU** is at the TCN-lite level.
+* **False alarms** are still high without lookahead (28-53 per minute against 5-8 for the offline U'n'Eye); lookahead and distillation both reduce them. Misses are mostly small, slow movements (amplitude 0.1-0.5 deg, 20-60 deg/s), and the false alarms lie on the main sequence at amplitudes below 0.3 deg.
+* One final model trained once is high-variance, mostly on the small dataset 3 (same design: kappa 0.61 in one run, 0.78 in another), so `train_final` now trains several seeds and keeps the lowest validation loss.
+
 ## Speed
 Data live on the GPU (`experiment.Bank`), no per-step host sync, and all independent runs are spread over all GPUs with several worker processes per GPU (`run_plan(..., devices=default_devices(2))`). Finished runs are stored in `results_v2.json`; `resume=True` skips them. (On a 4-core CPU box the same small grid went from 272 s to 111 s; the GPU gain has not been measured here.)
 
