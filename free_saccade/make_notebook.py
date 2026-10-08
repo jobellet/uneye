@@ -230,6 +230,7 @@ print("saved to", os.path.abspath("free_results"))
 M("""
 ## How to read the outcome
 * If a self-supervised method has a high `inj_kappa`, high `invariance` **and** its `ILS`/`kappa` agree with the classic baselines, it is a plug-and-play candidate.
+* In a local check on the 4 labeled repository sets (see `RESULTS.md`) the label-free ILS was a weak ranker (mean within-dataset Spearman +0.21 with the real kappa; coverage +0.43; main sequence and precision were even negative). Trust `inj_kappa` and `coverage` more than `ILS`.
 * The label-free score is a **failure detector** (a method that labels noise, flickers, or finds nothing gets a low score), not a fine-grained ranker: look at the correlation printed in section 4 before ranking two methods with a small score difference.
 * Differences between sources (rows in the audit) matter: run section 7 per source if one source has a very different noise or sampling rate.
 * The honest ceiling is a **few** human labels, used only to check the final choice (or the cut), not for training. The U'n'Eye notebook of this repository shows how few are needed when a method like `weak_ft` is used.
