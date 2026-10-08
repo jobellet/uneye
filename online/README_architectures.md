@@ -31,5 +31,23 @@ All take the same input as U'n'Eye (velocity dX, dY, plus speed) and are checked
 * All pretraining uses only set-A recordings (optionally dataset 4), never labels and never set B.
 * Downstream: fine-tune on N human-labeled trials (all weights, or only the head for a linear probe).
 
+## Pilot result (CPU, `tcn` backbone only, 2 seeds, short pretraining) – read before the big run
+
+Pooled kappa on set B (threshold 0.5), mean of 2 seeds. Pretraining: 1200 steps (~3 min) on the 2350 set-A recordings without labels.
+Original U'n'Eye on the last sample of a 200 ms bin (trained with all ~2350 labeled recordings): kappa 0.637.
+
+| labeled trials | scratch | JEPA + fine-tune | JEPA, frozen (linear probe) | raw-signal SSL + fine-tune | weak labels + fine-tune |
+|---|---|---|---|---|---|
+| 5 | 0.27 (0.00 / 0.53) | 0.50 (0.48 / 0.52) | 0.45 | 0.47 | **0.54** (0.48 / 0.60) |
+| 20 | 0.66 | **0.68** | 0.54 | 0.68 | 0.65 |
+| 100 | **0.73** | 0.60 (0.66 with tuned threshold) | 0.58 | 0.57 (0.67 tuned) | 0.72 |
+
+What this does and does not show:
+* **With 5 labeled trials, any pretraining makes training reliable** (one of the two scratch runs never left the "no saccade" solution; kappa 0.00). With 5 trials a kappa of about 0.5 is reached, and the original U-Net with all labels gets 0.64.
+* **From 20 trials on, pretraining gives no clear gain** over training from scratch (+0.02, inside the seed noise), and at 100 trials fine-tuning a JEPA encoder was *worse* at the default threshold (0.60 vs 0.73; the gap shrinks to 0.66 vs 0.73 with a tuned threshold, so part of it is calibration).
+* **JEPA (latent target) was not better than the simple raw-signal predictor**, and the free weak-label pretraining (Engbert-Kliegl pseudo-labels, 22 s) was as good as or better than JEPA (165 s) at 5 and 100 labels. In this pilot the JEPA idea is therefore **not yet supported** for this task; it may need much longer pretraining, more unlabeled data (dataset 4), a lower fine-tuning learning rate, or gradual unfreezing. These are the first things to try in the notebook.
+* The pilot is small: 2 seeds, one backbone, short pretraining. Differences below about 0.05 are noise. The first version of the pilot had an early-stopping flaw that made the scratch baseline artificially bad (kappa 0 at N=100); it is fixed (`min_epochs`), and any similar protocol problem would produce the same kind of false "JEPA wins".
+* S4D, GRU and light TCN are implemented and tested for causality and speed but **not yet trained in this study**.
+
 ## Honest status
-The code and the notebook are tested here only at small scale (CPU). See the pilot results below for what was actually measured; the full grid (all four backbones, 3 seeds, N up to 300) is meant to be run on Colab/Kaggle.
+The code and the notebook are tested here only at small scale (CPU). The full grid (four backbones, 3 seeds, N up to 300, longer pretraining) is meant to be run on Colab/Kaggle.
