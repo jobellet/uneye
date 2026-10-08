@@ -147,7 +147,7 @@ class SSL:
         if self.method in ("dino", "jepa"):
             _ema(self.teacher, self.enc, m)
             if self.method == "dino": _ema(self.thead, self.head, m)
-        return float(loss)
+        return float(loss.detach())
 
     def train(self, win, steps=600, batch=64, lr=2e-3, T=128, tpos=0, verbose=True):
         self.tpos = tpos
@@ -229,7 +229,7 @@ def self_train(win, label, weight, fs, init_encoder=None, freeze=False, steps=50
             y = torch.as_tensor(lab[idx, s:s + T], device=dev); ww = torch.as_tensor(w[idx, s:s + T], device=dev)
             loss = (F.binary_cross_entropy_with_logits(net(x), y, reduction="none") * ww).sum() / (ww.sum() + 1e-6)
             opt.zero_grad(); loss.backward(); opt.step(); sched.step()
-        if verbose: print(f"  [self-train round {r + 1}/{rounds}] last loss {float(loss):.4f}")
+        if verbose: print(f"  [self-train round {r + 1}/{rounds}] last loss {float(loss.detach()):.4f}")
         if r < rounds - 1:
             p = predict_proba(net, win, fs, dev)
             conf = (p < 0.1) | (p > 0.9)

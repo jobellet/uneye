@@ -77,9 +77,16 @@ def score(pos, lab, fs, groups=None, min_events=15):
         res["straightness"].append(float(np.mean([e["amp"] / max(e["path"], 1e-9) for e in ev])))
     out = {k: (float(np.nanmean(v)) if len(v) and not np.all(np.isnan(v)) else np.nan) for k, v in res.items()}
     parts = [out[k] for k in ("persistence", "main_sequence", "coverage", "precision", "stereotypy")]
-    # parts that cannot be measured (too few events, no fast movement in the data) are skipped; a labeling without any saccade scores 0
+    # Parts that cannot be measured because the data have no fast movement are skipped. If labels exist but no usable event came out of them
+    # (e.g. everything is labeled, runs touch the window border), the missing parts count as 0. A saccade share above 15 % of the time is implausible
+    # (typical: 1-10 %) and scales the score down: without this a degenerate "everything is a saccade" labeling wins.
+    lf = float(lab.mean())
+    if lf >= 0.005:
+        for k, i_ in (("main_sequence", 1), ("precision", 3), ("stereotypy", 4)):
+            if np.isnan(parts[i_]): parts[i_] = 0.0
     ok = [p for p in parts if not np.isnan(p)]
-    out["ILS"] = float(np.mean(ok)) if (ok and lab.any()) else 0.0
+    plaus = float(np.clip(1.0 - max(lf - 0.15, 0.0) / 0.15, 0.0, 1.0))
+    out["ILS"] = float(np.mean(ok)) * plaus if (ok and lab.any()) else 0.0
     out["flips_per_s"] = flips_per_s(lab, fs)
     out["label_fraction"] = float(lab.mean())
     return out

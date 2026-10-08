@@ -134,6 +134,8 @@ class H5Source:
                 s = rng.randint(0, xy.shape[0] - T + 1); w = xy[s:s + T]
                 if np.isnan(w).any(1).mean() > max_missing: continue
                 pos.append(w); grp.append(g); got += 1
+            if got < n_per_group:
+                print(f"WARNING source '{g}': only {got}/{n_per_group} windows of {T} samples at {fs:.0f} Hz found (sequences too short or too many invalid samples)")
         return Windows(np.stack(pos).astype(np.float32), fs, np.array(grp))
 
 

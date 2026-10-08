@@ -59,9 +59,17 @@ Edit `UNIT_SCALE` if the positions are not in degrees (the audit table below sho
 C("""
 UNIT_SCALE = 1.0          # multiply positions by this to get degrees
 GROUP_COL = None          # metadata column naming the source dataset; None = guess (dataset/source/study column, else file name prefix)
-meta = next(iter(glob.glob("/kaggle/input/**/subject_h5_metadata.csv", recursive=True) + glob.glob("/kaggle/input/**/*metadata*.csv", recursive=True)), None)
+def find_meta():
+    for pat in ("/kaggle/input/**/subject_h5_metadata.csv", "/kaggle/input/**/*metadata*.csv", "/kaggle/input/**/*.csv"):
+        for f in glob.glob(pat, recursive=True):
+            try:
+                if "filename" in pd.read_csv(f, nrows=2).columns: return f
+            except Exception: pass
+    return None
+meta = find_meta()
 if meta is None:
-    print("No Kaggle dataset found: building a DEMO dataset (repository recordings without labels).")
+    print("!!! NO KAGGLE DATASET FOUND -> the results below are for the DEMO data (repository recordings), NOT for your data. !!!")
+    print("Files under /kaggle/input:", glob.glob("/kaggle/input/*") or "none  (use 'Add Input' in the Kaggle notebook to attach your dataset)")
     meta = FD.write_demo_h5("data", "demo_gaze", per_file=40 if QUICK else 150, files_per_set=3 if QUICK else 6)
 SRC_DIR = os.path.dirname(meta)
 src = FD.H5Source(SRC_DIR, meta, GROUP_COL, UNIT_SCALE)
@@ -72,13 +80,14 @@ display(audit.round(3))
 
 M("""
 ## 2. Windows
-Every source is resampled to **500 Hz** (so "20 ms" is 10 samples everywhere) and cut into windows of 512 samples (about 1 s). Windows with more than 20 % invalid samples (blinks, dropouts) are skipped; the invalid samples that remain stay `NaN`, nothing is filled with fake data. Half of the windows (disjoint) are used to **train**, the other half only to **evaluate**.
+Every source is resampled to **500 Hz** (so "20 ms" is 10 samples everywhere) and cut into windows of 256 samples (0.5 s; sources whose sequences are shorter are reported with a warning). Windows with more than 20 % invalid samples (blinks, dropouts) are skipped; the invalid samples that remain stay `NaN`, nothing is filled with fake data. Half of the windows (disjoint) are used to **train**, the other half only to **evaluate**.
 `labeled` holds the repository's human-labeled recordings, used only in section 4.
 """)
 C("""
 rng = np.random.RandomState(0)
 N_PER = 60 if QUICK else 600
-pool_all = src.sample(2 * N_PER, 512, rng)
+WIN = 256                                  # 0.5 s at 500 Hz: also fits the short sequences
+pool_all = src.sample(2 * N_PER, WIN, rng)
 perm = rng.permutation(len(pool_all)); half = len(pool_all) // 2
 train, test = pool_all.subset(np.sort(perm[:half])), pool_all.subset(np.sort(perm[half:]))
 labeled = FD.load_labeled("data", n=40 if QUICK else 150)

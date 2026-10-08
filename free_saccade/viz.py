@@ -48,8 +48,8 @@ def duration_plot(win, labels):
         d, g = [], []
         for k in range(L.shape[0]):
             r = D.runs_1d(L[k]); d += [(e - s + 1) * 1000 / fs for s, e in r]; g += [(s2 - e1 - 1) * 1000 / fs for (_, e1), (s2, _) in zip(r[:-1], r[1:])]
-        if d: axs[0].hist(d, bins=np.arange(0, 80, 2), histtype="step", color=COL[j % len(COL)], label=nm, density=True)
-        if g: axs[1].hist(g, bins=np.arange(0, 200, 4), histtype="step", color=COL[j % len(COL)], label=nm, density=True)
+        if d: axs[0].hist(d, bins=np.arange(0, 80, 2), histtype="step", color=COL[j % len(COL)], label=nm, weights=np.ones(len(d)) / len(d))
+        if g: axs[1].hist(g, bins=np.arange(0, 200, 4), histtype="step", color=COL[j % len(COL)], label=nm, weights=np.ones(len(g)) / len(g))
     axs[0].set_xlabel("saccade label duration (ms)"); axs[1].set_xlabel("gap between two saccade labels (ms)"); axs[1].axvline(20, color="r", ls="--", lw=0.8)
     axs[0].legend(fontsize=7); fig.tight_layout(); return fig
 
