@@ -56,9 +56,9 @@ std::vector<std::vector<double>> read_csv(const std::string& path, int max_rows)
 // one continuous stream: the trials one after the other, separated by 100 samples of NaN (looks like a blink, has no label)
 struct Stream { std::vector<double> x, y; std::vector<int> lab; };   // lab: 1 saccade, 0 fixation, -1 no label (gap)
 
-Stream load_stream(const std::string& root, const std::string& d, const std::string& f, int trials) {
+Stream load_stream(const std::string& root, const std::string& d, const std::string& f, int trials, const std::string& set) {
     const std::string p = root + "/data/" + d + "/" + f;
-    auto X = read_csv(p + "_X_setB.csv", trials), Y = read_csv(p + "_Y_setB.csv", trials), L = read_csv(p + "_Labels_setB.csv", trials);
+    auto X = read_csv(p + "_X_set" + set + ".csv", trials), Y = read_csv(p + "_Y_set" + set + ".csv", trials), L = read_csv(p + "_Labels_set" + set + ".csv", trials);
     Stream s;
     for (size_t k = 0; k < X.size(); ++k) {
         for (size_t t = 0; t < X[k].size(); ++t) { s.x.push_back(X[k][t]); s.y.push_back(Y[k][t]); s.lab.push_back(L[k][t] > 0 ? 1 : 0); }
@@ -171,11 +171,14 @@ int main(int argc, char** argv) {
     std::string root = ".", repo = "..", outp = "fault_injection.csv", tracep = "";
     int trials = 120;
     std::string only = "", trace_kind = "frozen";        // --only <kind>: run one perturbation; --trace-kind: which one is traced (dataset 1, first level)
+    std::string set = "B";                               // --set A: training set, used ONLY to calibrate guard thresholds (cpp/scripts/calibrate_ood.py)
+    double ood = -1;                                     // --ood <deg/s>: guard out-of-distribution noise limit (default: GuardConfig)
     for (int i = 1; i + 1 < argc; i += 2) {
         const std::string a = argv[i], v = argv[i + 1];
         if (a == "--trials") trials = std::atoi(v.c_str()); else if (a == "--out") outp = v; else if (a == "--trace") tracep = v;
         else if (a == "--root") root = v; else if (a == "--repo") repo = v;
         else if (a == "--only") only = v; else if (a == "--trace-kind") trace_kind = v;
+        else if (a == "--set") set = v; else if (a == "--ood") ood = std::atof(v.c_str());
         else { std::fprintf(stderr, "unknown option %s\n", a.c_str()); return 2; }
     }
     struct Scn { std::string kind; std::vector<double> levels; };
@@ -195,7 +198,8 @@ int main(int argc, char** argv) {
     };
     const std::vector<std::pair<std::string, std::string>> sets = {{"dataset1", "dataset1_1000hz"}, {"dataset2", "dataset2_1000hz"}};
     std::vector<Stream> streams;
-    for (const auto& s : sets) streams.push_back(load_stream(repo, s.first, s.second, trials));
+    for (const auto& s : sets) streams.push_back(load_stream(repo, s.first, s.second, trials, set));
+    safety::GuardConfig gcfg; if (ood > 0) gcfg.ood_sigma_hi_deg_s = ood;
 
     std::FILE* out = std::fopen(outp.c_str(), "w");
     if (!out) { std::fprintf(stderr, "cannot write %s\n", outp.c_str()); return 1; }
@@ -221,7 +225,7 @@ int main(int argc, char** argv) {
                 // ---- engine + guard
                 gaze::Models mf = make_models(root, true); if (stuck) mf.fast = std::make_unique<StuckNet>();
                 gaze::GazeEngine ef(gaze::Config{}, std::move(mf));
-                SafetyGuard guard;
+                SafetyGuard guard(gcfg);
                 std::vector<int> sac_nn(p.samples.size()), sac_eng(p.samples.size());
                 std::vector<Ev> ev_guard;
                 long n_deg = 0, n_safe = 0;

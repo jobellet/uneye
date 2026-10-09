@@ -78,7 +78,8 @@ struct GuardConfig {
     // (c) confidence and out of distribution
     double low_conf_band = 0.2;          // p in [0.5 - band, 0.5 + band] counts as "unsure"
     double low_conf_rate = 0.2;          // moving average (~1 s) of unsure samples above this -> DEGRADED
-    double ood_sigma_hi_deg_s = 23.1;    // 2 x p99.5 of the training noise (11.55 deg/s, cpp/scripts/training_range.py) -> DEGRADED
+    double ood_sigma_hi_deg_s = 16.0;    // input noise above this -> DEGRADED. Chosen by cpp/scripts/calibrate_ood.py on set A ONLY (fewest
+                                         // dangerous outputs within 2 recall points of the first value 23.1 = 2 x training p99.5 11.55)
     double nomove_deg_s = 10.0;          // "the eye does not move": 3-sample speed below this (saccades peak at > 20 deg/s even at 0.2 deg)
     double nomove_rate = 0.05;           // moving average (~0.5 s) of "saccade label without movement" above this -> DEGRADED
     // (d) timing
