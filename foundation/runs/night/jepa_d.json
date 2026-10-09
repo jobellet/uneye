@@ -1,0 +1,89 @@
+{
+ "id": "jepa_d",
+ "family": "self-supervised representation + linear probe + HMM",
+ "labels_used": "labels of the other 4 datasets (linear probe only); the encoder itself saw no label",
+ "paper": "Assran et al. 2023 (I-JEPA), Bardes et al. 2024 (V-JEPA)",
+ "hyper": {
+  "lr": 0.0003,
+  "block": 6,
+  "patch": 4,
+  "ema": 0.99,
+  "steps": 5000,
+  "batch": 64,
+  "eval_every": 500,
+  "patience": 3,
+  "objective": "jepa",
+  "max_minutes": 30.0,
+  "depth": 6,
+  "wd": 0.04
+ },
+ "test": {
+  "d1": {
+   "threshold": {
+    "f1": 0.6234177215189873,
+    "kappa": 0.7432650390969645
+   },
+   "hmm": {
+    "f1": 0.8217270194986072,
+    "kappa": 0.7012983125149436
+   }
+  },
+  "d2": {
+   "threshold": {
+    "f1": 0.5457608085345311,
+    "kappa": 0.3771312580316657
+   },
+   "hmm": {
+    "f1": 0.6795580110497238,
+    "kappa": 0.2721695965399429
+   }
+  },
+  "d3": {
+   "threshold": {
+    "f1": 0.6649746192893401,
+    "kappa": 0.6112085668290088
+   },
+   "hmm": {
+    "f1": 0.581344902386117,
+    "kappa": 0.14567781717018213
+   }
+  },
+  "d4": {
+   "threshold": {
+    "f1": 0.44406196213425125,
+    "kappa": 0.6212973416116798
+   },
+   "hmm": {
+    "f1": 0.49708737864077673,
+    "kappa": 0.3368525412532333
+   }
+  },
+  "andersson": {
+   "threshold": {
+    "f1": 0.46728971962616817,
+    "kappa": 0.3886844394314586
+   },
+   "hmm": {
+    "f1": 0.7993579454253612,
+    "kappa": 0.4198226387402818
+   }
+  }
+ },
+ "mean": {
+  "threshold": {
+   "f1": 0.5491009662206556,
+   "kappa": 0.5483173290001554
+  },
+  "hmm": {
+   "f1": 0.6758150514001171,
+   "kappa": 0.37516418124371675
+  }
+ },
+ "minutes": 33.0,
+ "finished": "2026-10-10 01:55",
+ "best_step": 3000,
+ "best_val_event_f1": 0.6691068193276102,
+ "untrained_val_event_f1": 0.4964711997199858,
+ "input_channels_val_event_f1": 0.6604387858899367,
+ "steps_run": 3000
+}
