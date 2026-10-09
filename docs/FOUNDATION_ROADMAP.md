@@ -36,8 +36,7 @@ Bar to beat (owner's rule): **event F1 at least equal to U'n'Eye**, otherwise th
 Zero-shot foundation on dataset 2 (pursuit, never seen): 0.767 / 0.864 (better than every label-free method). The full
 leave-one-dataset-out run was stopped after d1 and d2 (owner: not worth it until the F1 bar is met).
 **Likely reason the foundation model stays below U'n'Eye: it is causal with only 20 ms lookahead, U'n'Eye sees the whole trial.**
-First test to do: same model with a long lookahead / a non-causal (bidirectional) variant for the offline labeling GUI, and keep
-the causal one for the real-time stream.
+First test to do: the same training with a NON-causal encoder (see "Architecture decision" below).
 
 Key insights so far:
 - Inputs must be velocities only (as U'n'Eye; the start position of a saccade is a confound). Checked: a constant offset changes
@@ -49,6 +48,28 @@ Key insights so far:
 - One human saccade alone never orients the embedding; with label-free seeds it helps on 3 of 4 datasets.
 - Classes that only one dataset has (PSO, pursuit, blink) cannot be learnt zero-shot when that dataset is held out (Andersson
   held out: 5-class kappa 0.14): new classes must come from the user's clicks (prototype head).
+
+## Architecture decision (owner, 2026-10-09): an ensemble of predictors, the foundation encoder need NOT be causal
+- The self-supervised / foundation encoder can be a **non-causal U-Net-shaped network** (past AND future context around each
+  sample): it is trained once offline, and precise detection of saccade onset / offset needs the future. Causality only matters
+  for the real-time path.
+- The end product is a **"Swiss army knife" of complementary predictors** that share the data stream, each doing what it is best at:
+  1. a **causal** network (the existing `online/causal_net.py` TCN, C++ `StepEngine`): immediate label, no lookahead;
+  2. a **non-causal U-Net / foundation encoder**: precise onset / offset once the future is available (the offline GUI, or the
+     delayed stage of the real-time engine);
+  3. a **physics-based** predictor (velocity threshold, main sequence, the landing tables of `cpp/src/gaze_engine.cpp`): robust,
+     explainable, and the fallback the safety guard uses;
+  4. **forecasting** of the eye position in the next bins (already explored: Laplace heads at +5/+10/+20 ms and landing-point
+     prediction of ongoing saccades, `online/forecast.py`, used in `cpp/src/gaze_engine.cpp`).
+  The same representation should serve forecasting AND precise detection (past + future window around a saccade).
+- This is already partly built: `GazeEngine` fuses a causal TCN (age 0), a 10 ms-lookahead TCN, the original U'n'Eye window
+  network (finalises bins at 80 ms), a physics layer with veto / override, and a forecaster, behind the safety guard
+  (`cpp/GAZE_ENGINE.md`). What is missing is replacing / complementing the U'n'Eye stage by the **dataset-independent foundation
+  encoder with a prototype head**, and the user-click calibration loop.
+- Consequence for the experiments: (a) rerun `foundation/train_lodo.py` + `foundation/calibrate.py` with a non-causal encoder
+  (set `LOOKAHEAD` to the full receptive field, or use a U-Net like `uneye/functions.py::UNet`); the bar is event F1 >= U'n'Eye
+  (0.899 on dataset 1); (b) the physiological-prior hyperplane idea below uses the same non-causal encoder; (c) compare each
+  predictor alone and fused, offline (precision of onset / offset in ms) and in the stream (latency).
 
 ## NEW IDEA to test next (owner, 2026-10-09): self-supervised embedding + a hyperplane chosen by physiological priors
 No labels and no detector seeds on the new dataset; only general knowledge of eye movements.
