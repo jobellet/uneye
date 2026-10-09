@@ -1,0 +1,87 @@
+{
+ "id": "ts2vec_a",
+ "family": "self-supervised representation + linear probe + HMM",
+ "labels_used": "labels of the other 4 datasets (linear probe only); the encoder itself saw no label",
+ "paper": "Yue et al. 2022 (TS2Vec)",
+ "hyper": {
+  "name": "ts2vec_a",
+  "lr": 0.001,
+  "steps": 6000,
+  "batch": 32,
+  "depth": 7,
+  "dim": 128,
+  "hid": 64,
+  "eval_every": 500,
+  "patience": 3,
+  "max_minutes": 35.0
+ },
+ "test": {
+  "d1": {
+   "threshold": {
+    "f1": 0.5100384451089278,
+    "kappa": 0.6921185635980276
+   },
+   "hmm": {
+    "f1": 0.8506075768406004,
+    "kappa": 0.8079240070353586
+   }
+  },
+  "d2": {
+   "threshold": {
+    "f1": 0.10459183673469388,
+    "kappa": 0.2163678665686083
+   },
+   "hmm": {
+    "f1": 0.6206185567010309,
+    "kappa": 0.593302866403886
+   }
+  },
+  "d3": {
+   "threshold": {
+    "f1": 0.606516290726817,
+    "kappa": 0.6025779108140262
+   },
+   "hmm": {
+    "f1": 0.4409937888198758,
+    "kappa": 0.17775007184828862
+   }
+  },
+  "d4": {
+   "threshold": {
+    "f1": 0.23210315695864825,
+    "kappa": 0.41510996215843676
+   },
+   "hmm": {
+    "f1": 0.4353628023352794,
+    "kappa": 0.44492036297108006
+   }
+  },
+  "andersson": {
+   "threshold": {
+    "f1": 0.44038294168842473,
+    "kappa": 0.4318142191584079
+   },
+   "hmm": {
+    "f1": 0.7197132616487454,
+    "kappa": 0.44559829751705005
+   }
+  }
+ },
+ "mean": {
+  "threshold": {
+   "f1": 0.37872653424350233,
+   "kappa": 0.47159770445950133
+  },
+  "hmm": {
+   "f1": 0.6134591972691064,
+   "kappa": 0.4938991211551326
+  }
+ },
+ "minutes": 11.7,
+ "finished": "2026-10-09 23:31",
+ "best_step": 1000,
+ "best_val_event_f1": 0.6992068936541112,
+ "untrained_val_event_f1": 0.6212640633188695,
+ "input_channels_val_event_f1": 0.6604387858899367,
+ "steps_run": 2500
+}

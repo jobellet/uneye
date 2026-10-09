@@ -1,0 +1,84 @@
+{
+ "id": "ts2vec_a_novelty",
+ "family": "label-free: embedding novelty curve + HMM (no probe)",
+ "labels_used": "none (the encoder saw no label; no probe either)",
+ "paper": "Foote 2000; Kreuk et al. 2020; Yue et al. 2022",
+ "hyper": {
+  "name": "ts2vec_a",
+  "lr": 0.001,
+  "steps": 6000,
+  "batch": 32,
+  "depth": 7,
+  "dim": 128,
+  "hid": 64,
+  "eval_every": 500,
+  "patience": 3,
+  "max_minutes": 35.0,
+  "window": 8,
+  "note": "only the HMM column is meaningful"
+ },
+ "test": {
+  "d1": {
+   "threshold": {
+    "f1": 0.653846153846154,
+    "kappa": 0.0017420228802468296
+   },
+   "hmm": {
+    "f1": 0.337798485730926,
+    "kappa": 0.3113714459805884
+   }
+  },
+  "d2": {
+   "threshold": {
+    "f1": 0.6237006237006237,
+    "kappa": 0.0
+   },
+   "hmm": {
+    "f1": 0.4475158759805752,
+    "kappa": 0.34807115307433545
+   }
+  },
+  "d3": {
+   "threshold": {
+    "f1": 0.5380710659898478,
+    "kappa": 0.0
+   },
+   "hmm": {
+    "f1": 0.29310344827586204,
+    "kappa": 0.1410908634780922
+   }
+  },
+  "d4": {
+   "threshold": {
+    "f1": 0.6053097345132743,
+    "kappa": 1.7737115971860895e-05
+   },
+   "hmm": {
+    "f1": 0.1974837971788029,
+    "kappa": 0.14940432059830144
+   }
+  },
+  "andersson": {
+   "threshold": {
+    "f1": 0.24437299035369775,
+    "kappa": 0.002909769818140062
+   },
+   "hmm": {
+    "f1": 0.38033038801383023,
+    "kappa": 0.0727711833947875
+   }
+  }
+ },
+ "mean": {
+  "threshold": {
+   "f1": 0.5330601136807195,
+   "kappa": 0.0009339059628717505
+  },
+  "hmm": {
+   "f1": 0.3312463990359993,
+   "kappa": 0.20454179330522101
+  }
+ },
+ "minutes": 12.4,
+ "finished": "2026-10-09 23:31"
+}
