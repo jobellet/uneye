@@ -5,6 +5,10 @@
 # U'n'Eye: Deep neural network for the detection of saccades and other eye movements
 Bellet et al. 2018, **Human-level saccade and microsaccade detection with deep neural networks**
 ********
+> **Transparency (2026):** the real-time C++ engine (`cpp/`), the safety guard, the fault-injection and timing tools, the
+> label-free study (`free_saccade/`) and the documents in `docs/` were written with AI assistance (Claude Code). Every number in
+> those documents comes from a script in this repository that was run; see `docs/ROADMAP.md` and `docs/safety/hazards.md`.
+
 ## Latest Updates:
 - [web service](http://uneye.berenslab.org) available
 - kernel size of convolution and max pooling operations now definable by the user (thus longer or shorter time windows will be seen by U'n'Eye)
