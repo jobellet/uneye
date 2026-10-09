@@ -29,7 +29,9 @@ are illustrations only.
 7. Slide figures (German labels, PNG + SVG, one script), `docs/EXPLAIN.md`, `docs/QA.md`.
 8. Minimal CI: cmake + ctest with ASan + UBSan, no ONNX.
 
-## Division of work between sessions
+> **Update 2026-10-09:** the work now continues in a session on the owner's own computer; the state, lessons and a detailed plan per step are in `docs/ROADMAP.md` (read it first). Step 1 is done.
+
+## Division of work between sessions (superseded by ROADMAP.md)
 - Cloud session: `cpp/` (engine, guard, tests, CI), `docs/`.
 - Mac session (Apple M1, can train networks): Python training scripts (`online/`), retraining of the causal networks, `.py` versions of the notebook
   training code. Please do not edit `cpp/src` or `cpp/tests` without telling the other session; commit small and rebase often.
