@@ -60,3 +60,11 @@ add_executable(test_safety_guard tests/test_safety_guard.cpp)
 target_link_libraries(test_safety_guard uneye_rt)
 target_compile_options(test_safety_guard PRIVATE -Wall -Wextra -Werror)
 add_test(NAME safety_guard COMMAND test_safety_guard ${CMAKE_SOURCE_DIR})
+
+add_executable(fault_injection tools/fault_injection.cpp)     # Step 5: perturbations, network alone vs engine vs engine + guard
+target_link_libraries(fault_injection uneye_rt)
+target_compile_options(fault_injection PRIVATE -Wall -Wextra)
+
+add_executable(bench_latency tools/bench_latency.cpp)          # Step 3: per-sample latency of push() + guard (not a WCET)
+target_link_libraries(bench_latency uneye_rt)
+target_compile_options(bench_latency PRIVATE -Wall -Wextra)

@@ -257,8 +257,11 @@ void SafetyGuard::step(const gaze::Sample& raw, const gaze::Output& eo, double c
             // invalid data or the SAFE state interrupt the event: it is dropped (never completed by a guess)
             const Reason forced = label == Label::Invalid ? Reason::EventAborted : Reason::None;
             end_event(ev_last_, forced, out);
-            // only physiology violations count towards DEGRADED: aborts (blinks) and 1-2 sample blips (EventTooShort) are normal
-            dropped_now = !out.event.accepted && out.event.reason != Reason::EventAborted && out.event.reason != Reason::EventTooShort;
+            // only impossible kinematics count towards DEGRADED (too fast, too large, too long, too slow). Aborts (blinks), 1-2 sample
+            // blips (EventTooShort) and a second piece of a split saccade (EventRefractory: e.g. the post-saccadic oscillation labeled
+            // apart, 4 times in 10 s of clean dataset 2) are dropped too, but they are normal and say nothing about a failure.
+            const Reason r = out.event.reason;
+            dropped_now = !out.event.accepted && r != Reason::EventAborted && r != Reason::EventTooShort && r != Reason::EventRefractory;
         }
         ev_gap_ = 0;
     }

@@ -1,0 +1,96 @@
+none         0       dataset1 | false/min nn   13.2 engine   13.6 guard   10.9 | dangerous nn    0 engine    0 guard    0 | recall nn 0.95 engine 0.95 guard 0.91 | guard DEG 0.01 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 15 OutOfDistribution 264 EventTooShort 180 EventRefractory 43 EventAborted 10 Hysteresis 898
+none         0       dataset2 | false/min nn   14.5 engine   14.5 guard   11.8 | dangerous nn   14 engine   14 guard    0 | recall nn 0.94 engine 0.94 guard 0.86 | guard DEG 0.02 SAFE 0.00
+             guard reasons: NonFinite 12000 NoMovement 1090 EventTooShort 32 EventTooSlow 7 EventRefractory 55 EventAborted 12 Hysteresis 1409
+noise        0.02    dataset1 | false/min nn    3.2 engine    3.6 guard    1.4 | dangerous nn    2 engine    2 guard    1 | recall nn 0.88 engine 0.88 guard 0.85 | guard DEG 0.01 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 15 OutOfDistribution 264 EventTooShort 30 EventRefractory 37 EventAborted 8 Hysteresis 898
+noise        0.02    dataset2 | false/min nn   28.2 engine   27.7 guard   17.3 | dangerous nn    2 engine    2 guard    1 | recall nn 0.57 engine 0.57 guard 0.49 | guard DEG 0.10 SAFE 0.00
+             guard reasons: NonFinite 12000 NetworkUntrusted 8997 EventTooShort 165 EventRefractory 184 EventAborted 9 Hysteresis 3435
+noise        0.05    dataset1 | false/min nn   15.9 engine   17.3 guard   12.3 | dangerous nn   26 engine   25 guard   20 | recall nn 0.40 engine 0.40 guard 0.34 | guard DEG 0.10 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 16 NetworkUntrusted 4377 OutOfDistribution 1120 EventTooShort 85 EventRefractory 106 EventAborted 10 Hysteresis 7514
+noise        0.05    dataset2 | false/min nn   20.9 engine   19.5 guard   15.5 | dangerous nn   10 engine    9 guard    8 | recall nn 0.15 engine 0.14 guard 0.10 | guard DEG 0.14 SAFE 0.00
+             guard reasons: NonFinite 12000 NetworkUntrusted 11795 OutOfDistribution 544 EventTooShort 100 EventRefractory 87 EventAborted 6 Hysteresis 5708
+noise        0.1     dataset1 | false/min nn    3.6 engine    2.7 guard    0.5 | dangerous nn    5 engine    1 guard    0 | recall nn 0.03 engine 0.05 guard 0.06 | guard DEG 1.00 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 19 NetworkUntrusted 109715 OutOfDistribution 131801 EventTooShort 13 EventRefractory 14 EventAborted 5
+noise        0.1     dataset2 | false/min nn    1.4 engine    1.4 guard    0.0 | dangerous nn    1 engine    1 guard    0 | recall nn 0.01 engine 0.01 guard 0.00 | guard DEG 1.00 SAFE 0.00
+             guard reasons: NonFinite 12000 OutOfDistribution 131801 EventTooShort 3 EventRefractory 4
+noise        0.2     dataset1 | false/min nn    0.0 engine    0.0 guard    0.9 | dangerous nn    0 engine    0 guard    0 | recall nn 0.00 engine 0.00 guard 0.00 | guard DEG 1.00 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 242 NetworkUntrusted 84037 OutOfDistribution 131801 EventTooShort 1 EventAborted 4
+noise        0.2     dataset2 | false/min nn    0.0 engine    0.0 guard    0.0 | dangerous nn    0 engine    0 guard    0 | recall nn 0.00 engine 0.00 guard 0.00 | guard DEG 1.00 SAFE 0.00
+             guard reasons: NonFinite 12000 Spike 239 OutOfDistribution 131801
+burst        0.1     dataset1 | false/min nn   65.5 engine   65.0 guard   34.5 | dangerous nn   69 engine   67 guard   29 | recall nn 0.94 engine 0.93 guard 0.87 | guard DEG 0.10 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 15 NetworkUntrusted 8500 OutOfDistribution 400 EventTooShort 204 EventRefractory 384 EventAborted 16 Hysteresis 3600
+burst        0.1     dataset2 | false/min nn   40.5 engine   40.5 guard   22.7 | dangerous nn   51 engine   51 guard   17 | recall nn 0.92 engine 0.92 guard 0.84 | guard DEG 0.03 SAFE 0.00
+             guard reasons: NonFinite 12000 OutOfDistribution 160 NoMovement 1016 EventTooShort 89 EventTooSlow 7 EventRefractory 210 EventAborted 11 Hysteresis 2659
+burst        0.5     dataset1 | false/min nn   12.7 engine   45.5 guard   40.5 | dangerous nn    1 engine   17 guard   15 | recall nn 0.90 engine 0.82 guard 0.82 | guard DEG 0.97 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 23 NetworkUntrusted 126115 OutOfDistribution 1492 EventTooShort 25 EventRefractory 147 EventAborted 19 Hysteresis 898
+burst        0.5     dataset2 | false/min nn   15.5 engine   38.6 guard   36.4 | dangerous nn   15 engine   23 guard   22 | recall nn 0.88 engine 0.65 guard 0.65 | guard DEG 0.97 SAFE 0.00
+             guard reasons: NonFinite 12000 NetworkUntrusted 128414 OutOfDistribution 844 EventTooShort 17 EventRefractory 20 EventAborted 10
+burst        2       dataset1 | false/min nn   11.8 engine   12.3 guard   10.0 | dangerous nn    0 engine    0 guard    0 | recall nn 0.90 engine 0.90 guard 0.83 | guard DEG 0.01 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 4388 OutOfDistribution 248 EventTooShort 174 EventRefractory 37 EventAborted 22 Hysteresis 898
+burst        2       dataset2 | false/min nn   19.1 engine   19.1 guard   16.4 | dangerous nn   15 engine   15 guard    0 | recall nn 0.91 engine 0.91 guard 0.81 | guard DEG 0.02 SAFE 0.00
+             guard reasons: NonFinite 12000 Spike 3959 NoMovement 1049 EventTooShort 35 EventTooSlow 7 EventRefractory 57 EventAborted 58 Hysteresis 1322
+dropout      0.002   dataset1 | false/min nn    9.5 engine   10.0 guard    7.7 | dangerous nn    0 engine    0 guard    0 | recall nn 0.73 engine 0.73 guard 0.65 | guard DEG 0.01 SAFE 0.00
+             guard reasons: NonFinite 39921 Spike 15 OutOfDistribution 528 EventTooShort 133 EventRefractory 28 EventAborted 26 Hysteresis 499
+dropout      0.002   dataset2 | false/min nn   21.8 engine   21.8 guard   20.0 | dangerous nn   10 engine   12 guard    0 | recall nn 0.73 engine 0.73 guard 0.65 | guard DEG 0.01 SAFE 0.00
+             guard reasons: NonFinite 36750 NoMovement 293 EventTooShort 36 EventTooSlow 6 EventRefractory 41 EventAborted 22 Hysteresis 317
+dropout      0.01    dataset1 | false/min nn    4.5 engine    4.5 guard    3.6 | dangerous nn    1 engine    1 guard    0 | recall nn 0.35 engine 0.35 guard 0.24 | guard DEG 0.00 SAFE 0.00
+             guard reasons: NonFinite 84008 Spike 4 EventTooShort 63 EventTooSlow 1 EventRefractory 13 EventAborted 33
+dropout      0.01    dataset2 | false/min nn   35.9 engine   35.9 guard   29.5 | dangerous nn    8 engine    9 guard    0 | recall nn 0.37 engine 0.36 guard 0.28 | guard DEG 0.00 SAFE 0.00
+             guard reasons: NonFinite 82950 EventTooShort 19 EventTooSlow 4 EventRefractory 15 EventAborted 46
+spikes       0.001   dataset1 | false/min nn   12.7 engine   13.2 guard   10.5 | dangerous nn    0 engine    0 guard    0 | recall nn 0.95 engine 0.95 guard 0.87 | guard DEG 0.01 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 134 OutOfDistribution 256 EventTooShort 179 EventRefractory 51 EventAborted 21 Hysteresis 897
+spikes       0.001   dataset2 | false/min nn   15.0 engine   15.0 guard   11.8 | dangerous nn   14 engine   14 guard    0 | recall nn 0.94 engine 0.94 guard 0.84 | guard DEG 0.02 SAFE 0.00
+             guard reasons: NonFinite 12000 Spike 109 NoMovement 1090 EventTooShort 41 EventTooSlow 7 EventRefractory 66 EventAborted 24 Hysteresis 1397
+spikes       0.01    dataset1 | false/min nn   12.7 engine   13.2 guard   10.0 | dangerous nn    0 engine    0 guard    0 | recall nn 0.95 engine 0.95 guard 0.62 | guard DEG 0.01 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 1205 OutOfDistribution 251 EventTooShort 183 EventRefractory 105 EventAborted 102 Hysteresis 893
+spikes       0.01    dataset2 | false/min nn   18.2 engine   17.7 guard   10.9 | dangerous nn   15 engine   14 guard    0 | recall nn 0.94 engine 0.94 guard 0.64 | guard DEG 0.02 SAFE 0.00
+             guard reasons: NonFinite 12000 Spike 1221 NoMovement 1046 EventTooShort 103 EventTooSlow 8 EventRefractory 157 EventAborted 137 Hysteresis 1366
+saturation   5       dataset1 | false/min nn   15.0 engine   15.0 guard   11.4 | dangerous nn    0 engine    0 guard    0 | recall nn 0.95 engine 0.95 guard 0.90 | guard DEG 0.02 SAFE 0.01
+             guard reasons: NonFinite 12000 Flat 146 Spike 64 NetworkUntrusted 1001 OutOfDistribution 32 EventTooShort 185 EventRefractory 48 EventAborted 7 Hysteresis 2371
+saturation   5       dataset2 | false/min nn   15.5 engine   15.0 guard   11.8 | dangerous nn   15 engine   15 guard    0 | recall nn 0.94 engine 0.94 guard 0.85 | guard DEG 0.03 SAFE 0.01
+             guard reasons: NonFinite 12000 Flat 223 NoMovement 1090 EventTooShort 33 EventTooSlow 8 EventRefractory 55 EventAborted 12 Hysteresis 3207
+saturation   2       dataset1 | false/min nn   13.6 engine   13.6 guard   10.9 | dangerous nn    0 engine    0 guard    0 | recall nn 0.90 engine 0.90 guard 0.79 | guard DEG 0.05 SAFE 0.08
+             guard reasons: NonFinite 12000 Flat 4000 Spike 25 LongInvalid 1532 EventTooShort 176 EventRefractory 45 EventAborted 7 Hysteresis 12090
+saturation   2       dataset2 | false/min nn   88.2 engine   85.5 guard   12.3 | dangerous nn    9 engine    9 guard    0 | recall nn 0.70 engine 0.70 guard 0.27 | guard DEG 0.21 SAFE 0.55
+             guard reasons: NonFinite 12000 Flat 23209 LongInvalid 280 NoMovement 1075 EventTooShort 20 EventTooSlow 18 EventRefractory 29 EventAborted 3 RepeatedViolations 1523 Hysteresis 66421
+frozen       0.002   dataset1 | false/min nn   41.8 engine   45.5 guard    2.3 | dangerous nn   52 engine   60 guard    0 | recall nn 0.67 engine 0.68 guard 0.26 | guard DEG 0.20 SAFE 0.65
+             guard reasons: NonFinite 15103 Flat 22834 Spike 6 OutOfDistribution 120 EventTooShort 36 EventRefractory 34 EventAborted 2 Hysteresis 75596
+frozen       0.002   dataset2 | false/min nn   61.4 engine   63.2 guard    3.2 | dangerous nn   25 engine   33 guard    0 | recall nn 0.76 engine 0.76 guard 0.28 | guard DEG 0.21 SAFE 0.61
+             guard reasons: NonFinite 14116 Flat 21535 NoMovement 230 EventTooShort 10 EventTooSlow 11 EventRefractory 13 Hysteresis 75510
+drift        5       dataset1 | false/min nn    2.7 engine    2.7 guard    1.4 | dangerous nn    0 engine    0 guard    0 | recall nn 0.12 engine 0.12 guard 0.12 | guard DEG 0.00 SAFE 0.85
+             guard reasons: NonFinite 12248 OutOfRange 101800 Spike 6 LongInvalid 111801 EngineFailed 111800 OutOfDistribution 128 EventTooShort 15 EventRefractory 5 EventAborted 3 Hysteresis 399
+drift        5       dataset2 | false/min nn    1.4 engine    1.4 guard    0.9 | dangerous nn    2 engine    2 guard    1 | recall nn 0.12 engine 0.12 guard 0.11 | guard DEG 0.00 SAFE 0.84
+             guard reasons: NonFinite 12000 OutOfRange 101757 LongInvalid 111414 EngineFailed 111413 EventTooShort 2 EventTooSlow 2 EventRefractory 8 EventAborted 3
+drift        50      dataset1 | false/min nn    0.9 engine    0.9 guard    0.9 | dangerous nn    0 engine    0 guard    0 | recall nn 0.00 engine 0.00 guard 0.00 | guard DEG 0.00 SAFE 0.98
+             guard reasons: NonFinite 12248 OutOfRange 117954 LongInvalid 129603 EngineFailed 129602 EventRefractory 1
+drift        50      dataset2 | false/min nn    0.5 engine    0.5 guard    0.5 | dangerous nn    1 engine    1 guard    1 | recall nn 0.01 engine 0.01 guard 0.01 | guard DEG 0.00 SAFE 0.98
+             guard reasons: NonFinite 12000 OutOfRange 118183 LongInvalid 129584 EngineFailed 129583
+scale        0.1     dataset1 | false/min nn    2.7 engine    2.7 guard    1.4 | dangerous nn    0 engine    0 guard    0 | recall nn 0.33 engine 0.33 guard 0.30 | guard DEG 0.00 SAFE 0.00
+             guard reasons: NonFinite 12248 EventTooShort 17 EventTooSlow 5 EventRefractory 23 EventAborted 3
+scale        0.1     dataset2 | false/min nn    0.0 engine    0.0 guard    0.0 | dangerous nn    0 engine    0 guard    0 | recall nn 0.03 engine 0.03 guard 0.03 | guard DEG 0.00 SAFE 0.00
+             guard reasons: NonFinite 12000 EventRefractory 1
+scale        10      dataset1 | false/min nn  126.8 engine   12.3 guard    2.7 | dangerous nn  164 engine    9 guard    1 | recall nn 0.55 engine 0.69 guard 0.60 | guard DEG 0.93 SAFE 0.07
+             guard reasons: NonFinite 12248 OutOfRange 105 Saturated 74 Spike 1975 NetworkUntrusted 126121 OutOfDistribution 121721 EventTooShort 77 EventRefractory 184 EventAborted 89 Hysteresis 40
+scale        10      dataset2 | false/min nn  456.8 engine  260.9 guard   86.4 | dangerous nn  491 engine  562 guard  117 | recall nn 0.82 engine 0.93 guard 0.30 | guard DEG 1.00 SAFE 0.00
+             guard reasons: NonFinite 12000 OutOfRange 245 Spike 515 NetworkUntrusted 124619 LowConfidence 1163 OutOfDistribution 41253 EventTooLong 325 EventTooShort 146 EventRefractory 738 EventAborted 48 RepeatedViolations 125485
+rate_wrong   1       dataset1 | false/min nn   13.6 engine   13.6 guard   10.0 | dangerous nn    3 engine    3 guard    2 | recall nn 0.93 engine 0.93 guard 0.89 | guard DEG 0.00 SAFE 0.00
+             guard reasons: NonFinite 6125 Spike 63 EventTooShort 82 EventTooSlow 1 EventRefractory 20 EventAborted 12
+rate_wrong   1       dataset2 | false/min nn  237.3 engine  234.5 guard   98.2 | dangerous nn   39 engine   36 guard   30 | recall nn 0.86 engine 0.86 guard 0.67 | guard DEG 0.76 SAFE 0.00
+             guard reasons: NonFinite 6000 NetworkUntrusted 1001 LowConfidence 29369 OutOfDistribution 488 EventTooLong 7 EventTooShort 47 EventTooSlow 1 EventRefractory 288 EventAborted 54 Hysteresis 17826
+rate_correct 1       dataset1 | false/min nn    0.0 engine    0.0 guard    0.0 | dangerous nn    0 engine    0 guard    0 | recall nn 0.00 engine 0.00 guard 0.00 | guard DEG 0.00 SAFE 1.00
+             guard reasons: NonFinite 6125 Gap 65999 RateMismatch 65936 NetworkUntrusted 64837
+rate_correct 1       dataset2 | false/min nn    0.0 engine    0.0 guard    0.0 | dangerous nn    0 engine    0 guard    0 | recall nn 0.00 engine 0.00 guard 0.00 | guard DEG 0.00 SAFE 1.00
+             guard reasons: NonFinite 6000 Gap 65999 RateMismatch 65936 NetworkUntrusted 64837
+deadline     0.0005  dataset1 | false/min nn   13.2 engine   13.6 guard    5.5 | dangerous nn    0 engine    0 guard    0 | recall nn 0.95 engine 0.95 guard 0.85 | guard DEG 0.62 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 15 OutOfDistribution 264 DeadlineMiss 60051 EventTooShort 81 EventRefractory 121 EventAborted 11 Hysteresis 18911
+deadline     0.0005  dataset2 | false/min nn   14.5 engine   14.5 guard    7.7 | dangerous nn   14 engine   14 guard    0 | recall nn 0.94 engine 0.94 guard 0.75 | guard DEG 0.53 SAFE 0.00
+             guard reasons: NonFinite 12000 NoMovement 1090 DeadlineMiss 49416 EventTooShort 21 EventTooSlow 2 EventRefractory 35 EventAborted 11 Hysteresis 17956
+deadline     0.01    dataset1 | false/min nn   13.2 engine   13.6 guard    0.0 | dangerous nn    0 engine    0 guard    0 | recall nn 0.95 engine 0.95 guard 0.21 | guard DEG 0.27 SAFE 0.73
+             guard reasons: NonFinite 12248 Spike 15 OutOfDistribution 264 DeadlineMiss 131932 EventTooShort 5 EventRefractory 55 EventAborted 17
+deadline     0.01    dataset2 | false/min nn   14.5 engine   14.5 guard    0.9 | dangerous nn   14 engine   14 guard    0 | recall nn 0.94 engine 0.94 guard 0.13 | guard DEG 0.24 SAFE 0.76
+             guard reasons: NonFinite 12000 NoMovement 1090 DeadlineMiss 131769 EventTooShort 8 EventRefractory 6 EventAborted 10
+net_stuck    1       dataset1 | false/min nn    1.4 engine    3.6 guard    1.4 | dangerous nn  123 engine    0 guard    0 | recall nn 0.98 engine 0.82 guard 0.82 | guard DEG 1.00 SAFE 0.00
+             guard reasons: NonFinite 12248 Spike 15 NetworkUntrusted 131974 OutOfDistribution 264 EventTooShort 19 EventRefractory 157 EventAborted 7
+net_stuck    1       dataset2 | false/min nn    0.5 engine    5.0 guard    3.6 | dangerous nn  120 engine    0 guard    0 | recall nn 0.98 engine 0.65 guard 0.64 | guard DEG 1.00 SAFE 0.00
+             guard reasons: NonFinite 12000 NetworkUntrusted 131974 EventTooShort 18 EventRefractory 15 EventAborted 5

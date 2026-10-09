@@ -93,7 +93,7 @@ struct GuardConfig {
     double min_duration_ms = 3.0;
     double refractory_ms = 15.0;         // minimum time from the previous event's offset to the next onset
     int merge_gap_samples = 2;           // a fixation gap this short inside a saccade does not end it (as gaze::Config::merge_gap_samples)
-    int violation_window = 2000;         // dropped events counted over the last 2 s
+    int violation_window = 2000;         // dropped events (impossible kinematics only) counted over the last 2 s
     int violation_degraded = 3;
     // DEGRADED fallback detector (causal Engbert-Kliegl, same idea as the engine's physics layer, own implementation)
     double lambda = 6.0;

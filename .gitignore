@@ -20,3 +20,5 @@ archive/
 demo_gaze/
 free_results/
 online/figures_run/
+docs/slides/data/latency_*.bin
+docs/slides/data/trace_*.csv
