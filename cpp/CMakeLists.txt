@@ -43,6 +43,14 @@ add_executable(test_parity tests/test_parity.cpp)
 target_link_libraries(test_parity uneye_rt)
 add_test(NAME parity COMMAND test_parity ${CMAKE_SOURCE_DIR})
 
+add_executable(test_zero_heap tests/test_zero_heap.cpp)
+target_link_libraries(test_zero_heap uneye_rt)
+target_compile_options(test_zero_heap PRIVATE -Wall -Wextra -Werror)
+if(UNEYE_SANITIZE)
+  target_compile_definitions(test_zero_heap PRIVATE UNEYE_NO_MALLOC_HOOK)   # the sanitizer owns malloc; only operator new/delete are counted
+endif()
+add_test(NAME zero_heap COMMAND test_zero_heap ${CMAKE_SOURCE_DIR})
+
 add_executable(test_gaze tests/test_gaze_engine.cpp)
 target_link_libraries(test_gaze uneye_rt Threads::Threads)
 target_compile_options(test_gaze PRIVATE -Wall -Wextra -Werror)

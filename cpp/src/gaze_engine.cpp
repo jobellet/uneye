@@ -103,7 +103,7 @@ struct GazeEngine::Impl {
             wage = std::min(std::max(models.window_age, refine_delay + 1), wlen - 1 - whop);
             if (wage < refine_delay + 1) throw std::invalid_argument("window network: window too short for the chosen age");
             win_in.fill(0.0f);
-            models.window->infer(win_in.data(), win_out.data());   // warm-up: the network sizes its work buffers here, never again
+            models.window->infer(win_in.data(), win_out.data());   // warm-up run: not needed for the zero-heap rule any more (the networks size their buffers in their own constructors); it also checks that the window network runs
         }
         reset_state();
     }

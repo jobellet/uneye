@@ -42,10 +42,12 @@ void relu_bn(std::vector<float>& x, int C, int T, const BN& bn) {
     }
 }
 
-// 'same' conv1d, zero padded. in[Cin][T] -> out[Cout][T]
+// All work buffers are sized ONCE in the NativeEngine constructor. The helpers below only read and write inside them
+// (no resize / assign / push_back), so infer() never touches the heap.
+
+// 'same' conv1d, zero padded. in[Cin][T] -> out[Cout][T]; every output value is first set to the bias, so no zero-fill is needed
 void conv1d(const std::vector<float>& in, std::vector<float>& out, int T, const Conv& c) {
     const int pd = (c.k - 1) / 2;
-    out.assign(size_t(c.cout) * T, 0.f);
     for (int o = 0; o < c.cout; ++o) {
         float* po = &out[size_t(o) * T];
         std::fill(po, po + T, c.b[o]);
@@ -64,7 +66,6 @@ void conv1d(const std::vector<float>& in, std::vector<float>& out, int T, const 
 
 void maxpool(const std::vector<float>& in, std::vector<float>& out, int C, int T, int mp) {
     const int To = T / mp;
-    out.resize(size_t(C) * To);
     for (int c = 0; c < C; ++c)
         for (int t = 0; t < To; ++t) {
             float m = in[size_t(c) * T + t * mp];
@@ -76,7 +77,6 @@ void maxpool(const std::vector<float>& in, std::vector<float>& out, int C, int T
 // ConvTranspose1d(kernel=stride=mp). w[i][o][j]. in[Cin][T] -> out[Cout][T*mp]
 void upconv(const std::vector<float>& in, std::vector<float>& out, int T, const Conv& c) {
     const int mp = c.k, To = T * mp;
-    out.assign(size_t(c.cout) * To, 0.f);
     for (int o = 0; o < c.cout; ++o) {
         float* po = &out[size_t(o) * To];
         std::fill(po, po + To, c.b[o]);
@@ -89,8 +89,8 @@ void upconv(const std::vector<float>& in, std::vector<float>& out, int T, const 
     }
 }
 
+// out must already have the size a.size() + b.size()
 void concat(const std::vector<float>& a, const std::vector<float>& b, std::vector<float>& out) {
-    out.resize(a.size() + b.size());
     std::copy(a.begin(), a.end(), out.begin());
     std::copy(b.begin(), b.end(), out.begin() + a.size());
 }
@@ -126,6 +126,15 @@ public:
         c5_ = read_conv(f, 20, 40, ks_); b5_ = read_bn(f, 20);
         c6_ = read_conv(f, 10, 20, ks_); b6_ = read_bn(f, 10);
         c7_ = read_conv(f, classes_, 10, 1);
+        // Work buffers: sized here, once. T = window, T1 = T / mp, T2 = T1 / mp (T is a multiple of mp^2, checked above).
+        const size_t T = size_t(T_), T1 = T / mp_, T2 = T1 / mp_;
+        in_.assign(2 * T, 0.f);
+        c0o_.assign(10 * T, 0.f); c1o_.assign(20 * T, 0.f);
+        p1_.assign(20 * T1, 0.f); c2o_.assign(20 * T1, 0.f);
+        p2_.assign(20 * T2, 0.f); c3o_.assign(20 * T2, 0.f);
+        up1_.assign(20 * T1, 0.f); cat1_.assign(40 * T1, 0.f); c4o_.assign(20 * T1, 0.f);
+        up2_.assign(20 * T, 0.f); cat2_.assign(40 * T, 0.f); c5o_.assign(20 * T, 0.f);
+        c6o_.assign(10 * T, 0.f); out_.assign(size_t(classes_) * T, 0.f);
     }
     int window() const override { return T_; }
     int classes() const override { return classes_; }
@@ -133,7 +142,6 @@ public:
     void infer(const float* dxy, float* prob) override {
         const int T = T_, T1 = T / mp_, T2 = T1 / mp_;
         // c0 : (ks x 2) conv on interleaved input, zero padded in time
-        in_.resize(size_t(2) * T);
         for (int t = 0; t < T; ++t) { in_[t] = dxy[2 * t]; in_[T + t] = dxy[2 * t + 1]; }
         conv1d(in_, c0o_, T, c0_); relu_bn(c0o_, 10, T, b0_);
         conv1d(c0o_, c1o_, T, c1_); relu_bn(c1o_, 20, T, b1_);
@@ -142,11 +150,11 @@ public:
         maxpool(c2o_, p2_, 20, T1, mp_);
         conv1d(p2_, c3o_, T2, c3_); relu_bn(c3o_, 20, T2, b3_);
         upconv(c3o_, up1_, T2, u1_); relu_bn(up1_, 20, T1, bu1_);
-        concat(p1_, up1_, cat_);
-        conv1d(cat_, c4o_, T1, c4_); relu_bn(c4o_, 20, T1, b4_);
+        concat(p1_, up1_, cat1_);
+        conv1d(cat1_, c4o_, T1, c4_); relu_bn(c4o_, 20, T1, b4_);
         upconv(c4o_, up2_, T1, u2_); relu_bn(up2_, 20, T, bu2_);
-        concat(c1o_, up2_, cat_);
-        conv1d(cat_, c5o_, T, c5_); relu_bn(c5o_, 20, T, b5_);
+        concat(c1o_, up2_, cat2_);
+        conv1d(cat2_, c5o_, T, c5_); relu_bn(c5o_, 20, T, b5_);
         conv1d(c5o_, c6o_, T, c6_); relu_bn(c6o_, 10, T, b6_);
         conv1d(c6o_, out_, T, c7_);
         for (int t = 0; t < T; ++t) {  // softmax over classes
@@ -162,7 +170,7 @@ private:
     int T_, classes_ = 2, ks_ = 5, mp_ = 5;
     Conv c0_, c1_, c2_, c3_, u1_, c4_, u2_, c5_, c6_, c7_;
     BN b0_, b1_, b2_, b3_, bu1_, b4_, bu2_, b5_, b6_;
-    std::vector<float> in_, c0o_, c1o_, p1_, c2o_, p2_, c3o_, up1_, cat_, c4o_, up2_, c5o_, c6o_, out_;
+    std::vector<float> in_, c0o_, c1o_, p1_, c2o_, p2_, c3o_, up1_, cat1_, c4o_, up2_, cat2_, c5o_, c6o_, out_;
 };
 
 }  // namespace
