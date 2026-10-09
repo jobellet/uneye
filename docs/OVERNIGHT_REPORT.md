@@ -1,13 +1,13 @@
 # Overnight comparison of candidate architectures and training heuristics
 
-Generated 2026-10-09 22:55 by `foundation/night_report.py` from `foundation/runs/night/*.json` (MacBook Air M1, one GPU job at a time). The numbers are those of the files; nothing is typed by hand in the tables.
+Generated 2026-10-09 23:07 by `foundation/night_report.py` from `foundation/runs/night/*.json` (MacBook Air M1, one GPU job at a time). The numbers are those of the files; nothing is typed by hand in the tables.
 
 ## Summary
 
-- Best mean event F1 over the 5 benchmarks: **jepa_a** (0.61 F1, 0.39 kappa); best mean kappa: **jepa_a** (0.61 / 0.39).
+- Best mean event F1 over the 5 benchmarks: **selftrain_r1** (0.68 F1, 0.64 kappa); best mean kappa: **selftrain_r1** (0.68 / 0.64).
 - Reference U'n'Eye (supervised): 0.85 F1 / 0.75 kappa on the same subsets (Andersson with its general weights is 0.55 / 0.33; with its own weights 0.89 / 0.81). The label-free universal HMM: 0.88 / 0.66.
 - Control: the random-initialised transformer encoder gives 0.48 / 0.44: a trained encoder only counts if it beats this.
-- Steps of the night finished: 4; failed or timed out: 0.
+- Steps of the night finished: 5; failed or timed out: 0.
 
 ## Protocol (the same for every row)
 
@@ -56,6 +56,10 @@ Already tried before tonight (not repeated):
 | `ctrl_untrained` | control | labels of the other 4 datasets (linear probe only); the encoder itself | **0.48 / 0.44** | 0.29 / 0.42 | 0.79 / 0.77 | 0.44 / 0.21 | 0.19 / 0.17 | 0.37 / 0.55 | 0.61 / 0.50 | 1.7 |
 | `ctrl_untrained_ts2vec_novelty` | control | none (the encoder saw no label; no probe either) | **0.15 / 0.20** | n/a | 0.16 / 0.29 | 0.17 / 0.25 | 0.17 / 0.23 | 0.10 / 0.14 | 0.15 / 0.12 | 1.4 |
 | `jepa_a` | self-supervised | labels of the other 4 datasets (linear probe only); the encoder itself | **0.61 / 0.39** | 0.42 / 0.49 | 0.76 / 0.73 | 0.57 / 0.24 | 0.46 / 0.14 | 0.53 / 0.40 | 0.76 / 0.45 | 1.1 |
+| `selftrain_r1` | label-free student | none for training (labeled train splits only select the checkpoint) | **0.68 / 0.64** | 0.80 / 0.64 | 0.76 / 0.77 | 0.69 / 0.71 | 0.77 / 0.71 | 0.56 / 0.72 | 0.63 / 0.27 | 4.6 |
+| `selftrain_r1_tta` | label-free student | none for training | **0.66 / 0.63** | 0.83 / 0.64 | 0.75 / 0.76 | 0.67 / 0.70 | 0.74 / 0.70 | 0.53 / 0.69 | 0.63 / 0.27 | 4.6 |
+| `selftrain_r2` | label-free student | none for training (labeled train splits only select the checkpoint) | **0.64 / 0.61** | 0.78 / 0.70 | 0.68 / 0.76 | 0.65 / 0.67 | 0.73 / 0.68 | 0.52 / 0.69 | 0.61 / 0.25 | 4.6 |
+| `selftrain_r2_tta` | label-free student | none for training | **0.61 / 0.60** | 0.80 / 0.70 | 0.65 / 0.75 | 0.61 / 0.66 | 0.72 / 0.66 | 0.50 / 0.67 | 0.55 / 0.26 | 4.6 |
 
 The 'HMM' column is the headline (event F1 / kappa after decoding). For `ref_*` rows a single prediction is scored (no probe, no extra decoding).
 
@@ -80,6 +84,7 @@ The 'HMM' column is the headline (event F1 / kappa after decoding). For `ref_*` 
 | ctrl_untrained | done | 1.9 |
 | ctrl_untrained_ts2vec | done | 1.9 |
 | base_input_6ch | done | 0.2 |
+| selftrain | done | 11.9 |
 
 ## Limits
 

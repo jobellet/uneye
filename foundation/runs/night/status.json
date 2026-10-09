@@ -22,5 +22,11 @@
   "state": "done",
   "started": "22:55",
   "minutes": 0.2
+ },
+ {
+  "id": "selftrain",
+  "state": "done",
+  "started": "22:55",
+  "minutes": 11.9
  }
 ]
