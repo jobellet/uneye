@@ -46,5 +46,11 @@
   "state": "done",
   "started": "23:32",
   "minutes": 39.4
+ },
+ {
+  "id": "hubert_a",
+  "state": "done",
+  "started": "00:11",
+  "minutes": 37.2
  }
 ]

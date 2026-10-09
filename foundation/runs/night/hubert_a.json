@@ -1,0 +1,89 @@
+{
+ "id": "hubert_a",
+ "family": "self-supervised representation + linear probe + HMM",
+ "labels_used": "labels of the other 4 datasets (linear probe only); the encoder itself saw no label",
+ "paper": "Hsu et al. 2021 (HuBERT)",
+ "hyper": {
+  "lr": 0.0003,
+  "block": 12,
+  "patch": 4,
+  "ema": 0.996,
+  "steps": 6000,
+  "batch": 64,
+  "eval_every": 500,
+  "patience": 3,
+  "objective": "hubert",
+  "max_minutes": 35.0,
+  "depth": 6,
+  "wd": 0.04
+ },
+ "test": {
+  "d1": {
+   "threshold": {
+    "f1": 0.678429140580535,
+    "kappa": 0.7866501601654841
+   },
+   "hmm": {
+    "f1": 0.7539531941808981,
+    "kappa": 0.735691174880154
+   }
+  },
+  "d2": {
+   "threshold": {
+    "f1": 0.4315095071788902,
+    "kappa": 0.38206319737571415
+   },
+   "hmm": {
+    "f1": 0.6977049180327869,
+    "kappa": 0.39834169950126175
+   }
+  },
+  "d3": {
+   "threshold": {
+    "f1": 0.587737843551797,
+    "kappa": 0.6286211943908827
+   },
+   "hmm": {
+    "f1": 0.36363636363636365,
+    "kappa": 0.19957291812023503
+   }
+  },
+  "d4": {
+   "threshold": {
+    "f1": 0.35714285714285715,
+    "kappa": 0.5882506130458626
+   },
+   "hmm": {
+    "f1": 0.34410019775873435,
+    "kappa": 0.2863480118071713
+   }
+  },
+  "andersson": {
+   "threshold": {
+    "f1": 0.49288168875797744,
+    "kappa": 0.3811366282591706
+   },
+   "hmm": {
+    "f1": 0.7049645390070923,
+    "kappa": 0.36664547516524404
+   }
+  }
+ },
+ "mean": {
+  "threshold": {
+   "f1": 0.5095402074424114,
+   "kappa": 0.5533443586474228
+  },
+  "hmm": {
+   "f1": 0.5728718425231751,
+   "kappa": 0.3973198558948132
+  }
+ },
+ "minutes": 37.0,
+ "finished": "2026-10-10 00:48",
+ "best_step": 3000,
+ "best_val_event_f1": 0.6020138539064146,
+ "untrained_val_event_f1": 0.4964711997199858,
+ "input_channels_val_event_f1": 0.6604387858899367,
+ "steps_run": 4500
+}
