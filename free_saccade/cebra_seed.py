@@ -57,7 +57,10 @@ def seeds(pos, fs):
 
 
 def feats(pos, fs):
-    """the 5 rotation-invariant features of ssl_models + the detrended speed (relative to its own robust noise)"""
+    """the 5 rotation-invariant features of ssl_models + the detrended speed (relative to its own robust noise).
+    Computed in float64. Note: the direction-change feature of nearly still samples (~0.05 %) is sensitive to the last bits of the
+    positions, so data stored in float32 with a different offset can still change it there (measured; negligible)."""
+    pos = np.asarray(pos, np.float64)
     f = features(pos, fs)
     v, valid = detrended_velocity(pos, fs)
     sg = np.maximum(D.robust_sigma(v).mean(2, keepdims=True), 1.0)
