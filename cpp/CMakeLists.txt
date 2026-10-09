@@ -19,9 +19,9 @@ elseif(UNEYE_SANITIZE STREQUAL "thread")
   add_link_options(-fsanitize=thread)
 endif()
 
-add_library(uneye_rt STATIC src/native_engine.cpp src/causal_engine.cpp src/gaze_engine.cpp src/onnx_engine.cpp src/detector.cpp)
+add_library(uneye_rt STATIC src/native_engine.cpp src/causal_engine.cpp src/gaze_engine.cpp src/onnx_engine.cpp src/detector.cpp src/safety_guard.cpp)
 target_include_directories(uneye_rt PUBLIC include)
-set_source_files_properties(src/gaze_engine.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")   # the safety-relevant file must compile without any warning
+set_source_files_properties(src/gaze_engine.cpp src/safety_guard.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")   # the safety-relevant file must compile without any warning
 if(ONNXRUNTIME_ROOT)
   target_compile_definitions(uneye_rt PUBLIC UNEYE_WITH_ONNX)
   target_include_directories(uneye_rt PUBLIC ${ONNXRUNTIME_ROOT}/include)
@@ -55,3 +55,8 @@ add_executable(test_gaze tests/test_gaze_engine.cpp)
 target_link_libraries(test_gaze uneye_rt Threads::Threads)
 target_compile_options(test_gaze PRIVATE -Wall -Wextra -Werror)
 add_test(NAME gaze_engine COMMAND test_gaze ${CMAKE_SOURCE_DIR})
+
+add_executable(test_safety_guard tests/test_safety_guard.cpp)
+target_link_libraries(test_safety_guard uneye_rt)
+target_compile_options(test_safety_guard PRIVATE -Wall -Wextra -Werror)
+add_test(NAME safety_guard COMMAND test_safety_guard ${CMAKE_SOURCE_DIR})

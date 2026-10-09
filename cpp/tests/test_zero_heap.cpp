@@ -1,4 +1,4 @@
-// Proof test: after the engine is built, processing samples performs ZERO dynamic allocations.
+// Proof test: after the engine (and the safety guard behind it) is built, processing samples performs ZERO dynamic allocations.
 //
 // How it works: this executable replaces the global allocation functions. Inside the measured region every call to operator new / new[] /
 // malloc / calloc / realloc / aligned allocation (and every free / delete) increments a counter. The region starts when the engine is
@@ -7,6 +7,7 @@
 //
 // Limits: only the allocation functions of this process are seen. Stack use is not measured. Under a sanitizer the malloc hook is switched off
 // (the sanitizer owns malloc) and only operator new / delete are counted; the test prints which hooks are active.
+// The malloc hook needs glibc (__libc_malloc ...); on macOS / other C libraries only operator new / delete are counted, as under a sanitizer.
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "uneye/gaze_engine.hpp"
+#include "uneye/safety_guard.hpp"
 
 // This file IS an allocator replacement (new -> malloc, delete -> free); GCC cannot see that and warns about "mismatched" pairs under sanitizers.
 #pragma GCC diagnostic ignored "-Wmismatched-new-delete"
@@ -28,7 +30,7 @@ static std::atomic<bool> g_armed{false};
 static std::atomic<long> g_new{0}, g_malloc{0}, g_free{0};
 static inline void count(std::atomic<long>& c) { if (g_armed.load(std::memory_order_relaxed)) c.fetch_add(1, std::memory_order_relaxed); }
 
-#ifndef UNEYE_NO_MALLOC_HOOK
+#if !defined(UNEYE_NO_MALLOC_HOOK) && defined(__GLIBC__)
 extern "C" {
 void* __libc_malloc(size_t); void* __libc_calloc(size_t, size_t); void* __libc_realloc(void*, size_t); void __libc_free(void*); void* __libc_memalign(size_t, size_t);
 void* malloc(size_t n) { count(g_malloc); return __libc_malloc(n); }
@@ -91,7 +93,7 @@ static int failed = 0;
 
 int main(int argc, char** argv) {
     const std::string root = argc > 1 ? argv[1] : ".";
-    std::printf("hooks: operator new/delete + %s\n", kMallocHook ? "malloc/calloc/realloc/free/aligned (glibc __libc_*)" : "(malloc hook OFF: sanitizer build)");
+    std::printf("hooks: operator new/delete + %s\n", kMallocHook ? "malloc/calloc/realloc/free/aligned (glibc __libc_*)" : "(malloc hook OFF: sanitizer build or no glibc)");
 
     // ---- control: the hooks must see allocations (otherwise a result of 0 means nothing)
     {
@@ -126,6 +128,7 @@ int main(int argc, char** argv) {
     m.window = make_native_engine(root + "/models/combined.bin", 200);
     GazeEngine eng(Config{}, std::move(m));
     Output out; Snapshot snapshot;
+    safety::SafetyGuard guard; safety::GuardOutput gout;       // the guard runs behind the engine, inside the measured region too
     const auto data = make_signal(100000, 12345u);
 
     // ---- measured region: no warm-up. The first window-network run is inside.
@@ -133,11 +136,14 @@ int main(int argc, char** argv) {
     long window_runs = 0;
     for (size_t i = 0; i < data.size(); ++i) {
         eng.push(data[i], out);
+        guard.step(data[i], out, 50.0, gout);
         if (i % 7 == 0) eng.snapshot(snapshot);
     }
     const Counts after = snap(); g_armed = false;
     window_runs = static_cast<long>(eng.stats().window_runs);
 
+    std::printf("safety guard: %ld samples, NORMAL %ld, DEGRADED %ld, SAFE %ld\n", static_cast<long>(guard.stats().samples),
+                static_cast<long>(guard.stats().normal), static_cast<long>(guard.stats().degraded), static_cast<long>(guard.stats().safe));
     std::printf("%zu pushes (+%zu snapshots), window-network runs: %ld, resets: %ld, invalid samples: %ld\n", data.size(), data.size() / 7 + 1, window_runs,
                 static_cast<long>(eng.stats().resets), static_cast<long>(eng.stats().invalid));
     std::printf("allocations in the measured region: operator new = %ld, malloc family = %ld   (frees: delete/free = %ld)\n",
