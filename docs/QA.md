@@ -15,8 +15,8 @@ DE: Nach dem Start reserviert die Engine keinen Speicher mehr – gemessen: 0 Al
 EN: After start-up the engine never allocates memory – measured: 0 allocations in 100,000 samples – so no out-of-memory failure and no allocator pauses at run time.
 
 **4. float32 oder float64? / float32 or float64?**
-DE: Gewichte und Netz rechnen in float32 wie in PyTorch; Positionen und Zeit in double. Die Parität mit Python liegt bei 1e-4 auf Wahrscheinlichkeiten; ein schichtweiser float64-Vergleich (Schritt 2) ist noch offen.
-EN: Weights and network run in float32, as in PyTorch; positions and time in double. Parity with Python is 1e-4 on probabilities; a layer-by-layer float64 comparison (Step 2) is still open.
+DE: Gewichte und Netz rechnen in float32 wie in PyTorch; Positionen und Zeit in double. Gegen eine float64-Referenz weicht C++ höchstens 6·10⁻⁶ ab, so viel wie PyTorch float32 selbst; ein Vergleich Schicht für Schicht fehlt noch.
+EN: Weights and network run in float32, as in PyTorch; positions and time in double. Against a float64 reference the C++ output is within 6e-6, the same as PyTorch float32 itself; a layer-by-layer comparison is still missing.
 
 **5. Ist das echtzeitfähig? / Is it real-time?**
 DE: Median 78 µs pro Probe bei 1 ms Budget, aber 7 von einer Million Proben über 1 ms auf dem Laptop; eine Garantie braucht ein Echtzeit-Betriebssystem und eine Messung auf dem Zielsystem.
@@ -39,5 +39,5 @@ DE: Empfindlichkeit: auf sauberen Daten sinkt der Anteil erkannter Sakkaden von 
 EN: Sensitivity: on clean data the share of detected saccades drops from 0.94 to 0.89, and after a fault it stays cautious for up to 1 s.
 
 **10. Was wurde NICHT gemacht? / What was NOT done?**
-DE: Keine Zertifizierung, kein WCET, keine Bit-Gleichheit über Maschinen, kein schichtweiser Python/C++-Vergleich, keine CI-Pipeline (Stand: siehe ROADMAP), keine klinische Bewertung.
-EN: No certification, no WCET, no bit-equality across machines, no layer-by-layer Python/C++ comparison, no CI pipeline yet (see ROADMAP), no clinical evaluation.
+DE: Keine Zertifizierung, kein WCET, keine Bit-Gleichheit über Maschinen, kein Python/C++-Vergleich Schicht für Schicht, CI nur Build + Tests, keine klinische Bewertung.
+EN: No certification, no WCET, no bit-equality across machines, no layer-by-layer Python/C++ comparison, CI is build + tests only, no clinical evaluation.

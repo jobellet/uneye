@@ -5,6 +5,7 @@ Run from the repository root:  python docs/slides/make_figures.py
 Inputs (made by scripts that were run, see docs/ROADMAP.md):
   docs/slides/data/fault_injection.csv   cpp/build/fault_injection --trials 120 --out ... --trace ...   (Figures 3 and 4)
   docs/slides/data/trace_frozen.csv      cpp/build/fault_injection --only frozen --trace-kind frozen --trace ...  (dataset 1)
+  docs/slides/data/equivalence_causal.npz   python cpp/scripts/equivalence.py  (Figure 1)
   docs/slides/data/latency_{window,nowindow}.bin   cpp/build/bench_latency --samples 1000000 [--no-window] --out ...  (Figure 2)
 Figure 5 (architecture) is drawn from fixed text.
 """
@@ -49,6 +50,27 @@ def pooled(df):
         g.append(dict(perturbation=k, level=lv, system=s, false_per_min=np.average(d["false_per_min"], weights=w), dangerous=int(d["dangerous"].sum()),
                       recall=np.average(d["recall"], weights=w), degraded=np.average(d["degraded"], weights=w), safe=np.average(d["safe"], weights=w)))
     return pd.DataFrame(g)
+
+
+def fig1_equivalence():
+    """|p(saccade) C++ - PyTorch| per sample, causal TCN, 205 sequences x 1000 samples (cpp/scripts/equivalence.py)"""
+    d = np.load(os.path.join(DATA, "equivalence_causal.npz"))
+    fig, ax = plt.subplots(figsize=(16, 9))
+    bins = np.logspace(-10, -4, 80)
+    sets = (("Cpp_vs_Py64", "C++ (float32) gegen Python float64", OI["blue"]), ("Py32_vs_Py64", "Python float32 gegen Python float64", OI["orange"]),
+            ("Cpp_vs_Py32", "C++ gegen Python float32", OI["grey"]))
+    for k, lab, c in sets:
+        e = d[k]; e = np.maximum(e, 1e-10)
+        ax.hist(e, bins=bins, histtype="step", lw=2.5, color=c, label=f"{lab}: Max {d[k].max():.1e}".replace(".", ",").replace("e-0", "e-"))
+    ax.axvline(5e-5, color=OI["red"], lw=2.5); ax.text(5.6e-5, ax.get_ylim()[1] * 0.4 if ax.get_yscale() == "linear" else 1e4, "Toleranz im Test\n5·10⁻⁵", color=OI["red"], fontsize=15)
+    ax.set_xscale("log"); ax.set_yscale("log"); ax.set_xlabel("Absoluter Fehler der Sakkaden-Wahrscheinlichkeit"); ax.set_ylabel("Anzahl Proben")
+    ax.legend(loc="center right", bbox_to_anchor=(0.97, 0.62), frameon=False, fontsize=14)
+    ax.text(1.05e-10, 3e4, "≤ 10⁻¹⁰\n(inkl. exakt gleich)", fontsize=11, color=OI["grey"], va="bottom")
+    ax.set_title("C++ rechnet so genau wie PyTorch selbst: Fehler ≤ 6·10⁻⁶, 0 von 205 000 Labels verschieden", loc="left", fontsize=19)
+    fig.text(0.02, -0.06, "Kausales TCN, 200 echte Sequenzen (Set B, Datensätze 1+2) + 5 Stresssequenzen, je 1000 Proben. C++ läuft Probe für Probe (Streaming), PyTorch über die ganze Sequenz.\n"
+             "Gleicher Build (clang 22.1.8 -O3, M1): bitgleich reproduzierbar; -O0 oder -ffp-contract=off ändern bis zu 3,3·10⁻⁶. Kein Vergleich Schicht für Schicht.",
+             fontsize=12, color=OI["grey"])
+    save(fig, "fig1_paritaet")
 
 
 def fig2_latency():
@@ -148,7 +170,7 @@ def fig5_architecture():
     for a, b in ((3.2, 3.6), (6.0, 6.4), (9.4, 9.8), (13.1, 13.5)):
         arrow(a, y + h / 2, b, y + h / 2)
     ax.text(8.0, 8.4, "Vom Python-Modell zu vorhersagbarem, getestetem und abgesichertem C++", ha="center", fontsize=21, fontweight="bold")
-    tests = [(4.8, "Parität Py ↔ C++", "test_parity\n(Toleranz 1e-4)"), (7.9, "Kein Heap", "test_zero_heap\n0 Alloz. / 100 000"),
+    tests = [(4.8, "Parität Py ↔ C++", "test_equivalence\nmax. Fehler 6·10⁻⁶"), (7.9, "Kein Heap", "test_zero_heap\n0 Alloz. / 100 000"),
              (11.45, "Wächter-Regeln", "test_safety_guard\n15 Abschnitte"), (14.6, "Fehlerinjektion", "fault_injection\n13 Störungsarten")]
     for x, t1, t2 in tests:
         ax.add_patch(FancyBboxPatch((x - 1.35, 1.2), 2.7, 1.9, boxstyle="round,pad=0.02,rounding_size=0.15", fc="white", ec=OI["blue"], lw=1.6, ls="--"))
@@ -160,6 +182,7 @@ def fig5_architecture():
 
 
 if __name__ == "__main__":
+    fig1_equivalence()
     fig2_latency()
     fig3_fault_injection()
     fig4_example_trace()

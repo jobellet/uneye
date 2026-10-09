@@ -27,5 +27,8 @@ Skripten, die gelaufen sind (MacBook Air M1, clang 22.1.8, -O3, feste Seeds). KI
 3. Zurück geht es nur stufenweise, SAFE → DEGRADED → NORMAL, jeweils nach 0,5 s ohne Auffälligkeit.
 - **Grenze:** Sicherheit kostet hier Empfindlichkeit – die echte Sakkade bei 780 ms wird in dieser Zeit ebenfalls nicht gemeldet.
 
-## Abb. 1 – Python vs. C++ (noch nicht erstellt)
-Schritt 2 der Roadmap ist offen. Bis dahin: `test_parity` vergleicht ein Fenster pro Modell mit PyTorch, Toleranz 1e-4 auf Wahrscheinlichkeiten.
+## Abb. 1 – Python vs. C++
+1. Dasselbe kausale Netz läuft in PyTorch (float32 und float64) und in meiner C++-Engine, auf 205 Sequenzen mit je 1000 Proben, echte Daten und Stresseingaben.
+2. Die C++-Ausgabe weicht höchstens 6·10⁻⁶ von der float64-Referenz ab – so viel wie PyTorch in float32 selbst (3,5·10⁻⁶); kein einziges Label ist verschieden.
+3. Ein automatischer Test prüft das bei jedem Build mit einer Toleranz von 5·10⁻⁵, abgeleitet aus der Messung, und schlägt bei einem falschen Modell sofort fehl.
+- **Grenze:** Bitgleichheit gilt nur für denselben Compiler mit denselben Optionen; ein Vergleich Schicht für Schicht fehlt noch.
