@@ -16,5 +16,11 @@
   "state": "done",
   "started": "22:53",
   "minutes": 1.9
+ },
+ {
+  "id": "base_input_6ch",
+  "state": "done",
+  "started": "22:55",
+  "minutes": 0.2
  }
 ]
