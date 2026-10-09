@@ -1,13 +1,13 @@
 # Overnight comparison of candidate architectures and training heuristics
 
-Generated 2026-10-10 01:01 by `foundation/night_report.py` from `foundation/runs/night/*.json` (MacBook Air M1, one GPU job at a time). The numbers are those of the files; nothing is typed by hand in the tables.
+Generated 2026-10-10 01:22 by `foundation/night_report.py` from `foundation/runs/night/*.json` (MacBook Air M1, one GPU job at a time). The numbers are those of the files; nothing is typed by hand in the tables.
 
 ## Summary
 
 - Best mean event F1 over the 5 benchmarks: **sup_bitcn_ema_tta** (0.88 F1, 0.80 kappa, readout: threshold); best mean kappa: **sup_bitcn_ema_tta** (0.88 / 0.80, readout: threshold).
 - Reference U'n'Eye (supervised): 0.85 F1 / 0.75 kappa on the same subsets (Andersson with its general weights is 0.55 / 0.33; with its own weights 0.89 / 0.81). The label-free universal HMM: 0.88 / 0.66.
 - Control: the random-initialised transformer encoder gives 0.48 / 0.44 (hmm): a trained encoder only counts if it beats this.
-- Steps of the night finished: 10; failed or timed out: 0.
+- Steps of the night finished: 11; failed or timed out: 0.
 
 ## Protocol (the same for every row)
 
@@ -60,6 +60,7 @@ Already tried before tonight (not repeated):
 | `ts2vec_a` | self-supervised | labels of the other 4 datasets (linear probe only); the enco | **0.61 / 0.49** | hmm | 0.61 / 0.49 | 0.38 / 0.47 | 0.85 / 0.81 | 0.62 / 0.59 | 0.44 / 0.18 | 0.44 / 0.44 | 0.72 / 0.45 | 11.7 |
 | `jepa_a` | self-supervised | labels of the other 4 datasets (linear probe only); the enco | **0.61 / 0.39** | hmm | 0.61 / 0.39 | 0.42 / 0.49 | 0.76 / 0.73 | 0.57 / 0.24 | 0.46 / 0.14 | 0.53 / 0.40 | 0.76 / 0.45 | 1.1 |
 | `hubert_a` | self-supervised | labels of the other 4 datasets (linear probe only); the enco | **0.57 / 0.40** | hmm | 0.57 / 0.40 | 0.51 / 0.55 | 0.75 / 0.74 | 0.70 / 0.40 | 0.36 / 0.20 | 0.34 / 0.29 | 0.70 / 0.37 | 37.0 |
+| `jepa_b` | self-supervised | labels of the other 4 datasets (linear probe only); the enco | **0.46 / 0.43** | hmm | 0.46 / 0.43 | 0.30 / 0.42 | 0.76 / 0.76 | 0.45 / 0.20 | 0.20 / 0.17 | 0.31 / 0.50 | 0.60 / 0.50 | 20.7 |
 | `ts2vec_a_novelty` | self-supervised | none (the encoder saw no label; no probe either) | **0.33 / 0.20** | hmm | 0.33 / 0.20 | n/a | 0.34 / 0.31 | 0.45 / 0.35 | 0.29 / 0.14 | 0.20 / 0.15 | 0.38 / 0.07 | 12.4 |
 | `ts2vec_b_novelty` | self-supervised | none (the encoder saw no label; no probe either) | **0.16 / 0.22** | hmm | 0.16 / 0.22 | n/a | 0.16 / 0.31 | 0.18 / 0.27 | 0.19 / 0.24 | 0.10 / 0.15 | 0.16 / 0.13 | 11.8 |
 | `selftrain_r1_tta` | label-free student | none for training | **0.83 / 0.64** | threshold | 0.66 / 0.63 | 0.83 / 0.64 | 0.89 / 0.74 | 0.90 / 0.78 | 0.78 / 0.53 | 0.92 / 0.83 | 0.68 / 0.33 | 4.6 |
@@ -99,6 +100,7 @@ The headline column is the better mean event F1 of the two readouts (shown separ
 | mae_a | done | 39.4 |
 | hubert_a | done | 37.2 |
 | ts2vec_b | done | 12.7 |
+| jepa_b | done | 20.9 |
 
 ## Limits
 
