@@ -71,6 +71,43 @@ Key insights so far:
   (0.899 on dataset 1); (b) the physiological-prior hyperplane idea below uses the same non-causal encoder; (c) compare each
   predictor alone and fused, offline (precision of onset / offset in ms) and in the stream (latency).
 
+## Results of the first comparison of predictors alone, event F1 only (owner's rule), test split at 1 kHz
+Scorer `foundation/compare.py` (same for everyone: a predicted run of >= 3 samples overlapping a human saccade = hit; every predictor runs at the
+native rate of the dataset). Supervised columns were trained on set A of datasets 1, 2, 3 (so in-domain for d1-d3, unseen for d4, andersson).
+| dataset | Engbert-Kliegl | EK on detrended velocity | HMM (0 label) | causal TCN | causal TCN +10 ms | U'n'Eye (offline) |
+|---|---|---|---|---|---|---|
+| d1 | 0.705 | 0.697 | **0.887** | 0.877 | 0.860 | **0.899** |
+| d2 (pursuit) | 0.608 | 0.901 | 0.831 | 0.918 | 0.903 | **0.941** |
+| d3 | 0.806 | 0.793 | 0.900 | 0.903 | **0.941** | 0.929 |
+| d4 | 0.763 | 0.760 | 0.689 | 0.878 | 0.899 | **0.924** |
+| andersson | 0.614 | 0.568 | 0.821 | 0.339 | 0.340 | 0.546 (0.885 with `weights_Andersson`, 5 classes) |
+- The label-free HMM almost equals U'n'Eye on d1 and d3; it fails on d4. The supervised causal TCN with 10 ms lookahead equals U'n'Eye on d3.
+- Dataset 4, set B: the label file has 3300 rows but only 3000 trials of positions; the FIRST 3000 label rows are the right ones
+  (Engbert-Kliegl event F1 0.76 vs 0.05 = chance with the last 3000). `foundation/data.py` handles it.
+
+### Self-supervised non-causal encoder + one hyperplane chosen by physiological priors (the owner's idea): first implementation does NOT work
+Code: `foundation/ssl_encoder.py` (CEBRA-Time loss, own ~15-line InfoNCE, dilated symmetric conv net, 121 ms receptive field, trained on
+datasets 1-4, Andersson and 4 sources of archive/ with NO label, 8 min on the M1), `foundation/prior_hyperplane.py` (prior score and search),
+`foundation/diagnose_embedding.py`. Prior score fixed beforehand (docstring of prior_hyperplane.py).
+| dataset | event F1 of the prior-chosen hyperplane (test) | linear readout fitted on the labels (test) | random hyperplanes (median) | Spearman(prior score, human F1) |
+|---|---|---|---|---|
+| d1 | 0.54 | 0.24 | 0.10 | -0.03 |
+| d2 | 0.40 | 0.29 | 0.11 | **+0.60** |
+| d3 | 0.45 | 0.53 | 0.05 | +0.18 |
+| d4 | 0.01 | 0.19 | 0.05 | -0.15 |
+| andersson | 0.37 | 0.38 | 0.07 | -0.12 |
+Diagnosis (`diagnose_embedding.py`, single threshold chosen WITH the set-B labels, so optimistic bounds), sample AUC / event F1:
+embedding 0.90/0.61 (d1), 0.89/0.46 (d2), 0.98/0.85 (d3), 0.94/0.58 (d4), 0.92/0.53 (andersson); plain input features 0.88/0.81, 0.89/0.90,
+0.82/0.73, 0.92/0.82, 0.94/0.68. => the embedding separates saccades at the SAMPLE level as well as the speed feature (better on d3, the
+microsaccades) but gives fragmented EVENTS; a threshold on the normalised (detrended) speed alone beats it at the event level on 4 of 5 datasets.
+Retrained with a hard negative from the same recording (>= 15 samples away; `--hard`, closer to CEBRA's sampling): no improvement
+(event F1 0.56, 0.50, 0.81, 0.54, 0.54): this was NOT the main cause.
+Ideas not yet tried: (1) decode with duration priors (semi-Markov / HMM with a minimum-duration chain, as `free_saccade/detectors.py::HMM`
+already does on speed and reaches 0.89 / 0.90 on d1 / d3) on a LEARNED score instead of searching a hyperplane; (2) larger time offset for the
+positives (+-10-20 samples) so that the embedding is smooth over a saccade; (3) use the priors only to choose a threshold on the normalised
+speed (1-D, cheap), then test whether the prior score ranks thresholds like the human F1; (4) the real `cebra` package as a reference.
+The owner's decision: keep only what is useful (own loss + small conv encoder + prototype head), no dependency on the `cebra` toolbox.
+
 ## NEW IDEA to test next (owner, 2026-10-09): self-supervised embedding + a hyperplane chosen by physiological priors
 No labels and no detector seeds on the new dataset; only general knowledge of eye movements.
 1. **Encoder**: one shared CEBRA-Time-style encoder (positives = time neighbours, InfoNCE on the unit sphere, velocity +

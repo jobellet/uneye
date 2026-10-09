@@ -50,7 +50,9 @@ def load_repo(name, which="B", n=None):
     ld = lambda k: np.loadtxt(os.path.join(ROOT, d, f"{f}_{k}_set{which}.csv"), delimiter=",")
     X, Y, L = ld("X"), ld("Y"), ld("Labels")
     if n: X, Y, L = X[:n], Y[:n], L[:n]
-    pos = np.stack([X, Y], 2).astype(np.float32)
+    n_pos = min(len(X), len(Y), len(L))                     # dataset 4 set B: 3000 trials of positions but 3300 rows of labels;
+    X, Y, L = X[:n_pos], Y[:n_pos], L[:n_pos]               # the FIRST 3000 label rows are the right ones (Engbert-Kliegl event F1
+    pos = np.stack([X, Y], 2).astype(np.float32)            # 0.76 with them, 0.05 = chance with the last 3000)
     lab = (L > 0).astype(np.int8)
     return Set(name, upsample(pos, fs), upsample(lab, fs, nearest=True), coarse=True)
 
