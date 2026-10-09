@@ -1,4 +1,4 @@
-"""One scorer for every predictor: event F1 on the test split of each labeled dataset (saccade vs rest), at 1 kHz.
+"""One scorer for every predictor: event F1 AND Cohen's kappa (sample by sample) on the test split of each labeled dataset (saccade vs rest), at 1 kHz.
 
 Event F1 (online/metrics.py): a predicted run of >= 3 samples that overlaps a human saccade is a hit; precision / recall / F1 over
 events. It does NOT depend on the exact onset / offset the expert chose (the owner's reason to use it instead of Cohen's kappa).
@@ -37,7 +37,9 @@ def event_f1(pred, S):
     mask = S.lab >= 0
     P = (pred & mask).astype(np.float32); L = ((S.lab == 1) & mask).astype(np.float32)
     m = M.evaluate_probs(P, L, FD.FS, thr=0.5, min_event=3, with_ap=False)
-    return dict(ev_f1=m["ev_f1"], ev_recall=m["ev_recall"], ev_precision=m["ev_precision"])
+    from sklearn.metrics import cohen_kappa_score
+    kappa = cohen_kappa_score(L[mask] > 0, P[mask] > 0)                       # Cohen's kappa, sample by sample, saccade vs rest
+    return dict(ev_f1=m["ev_f1"], kappa=kappa, ev_recall=m["ev_recall"], ev_precision=m["ev_precision"])
 
 
 # ----------------------------------------------------------------------------- the predictors (all return (n, T) bool at 1 kHz)
@@ -107,7 +109,7 @@ def run_baselines(names=FD.ALL):
         for k, f in preds.items():
             try:
                 r = event_f1(f(), B); rows.append(dict(dataset=nm, predictor=k, **r))
-                print(f"[{nm:9s}] {k:55s} event F1 {r['ev_f1']:.3f}  (recall {r['ev_recall']:.3f}, precision {r['ev_precision']:.3f})", flush=True)
+                print(f"[{nm:9s}] {k:55s} event F1 {r['ev_f1']:.3f}  kappa {r['kappa']:.3f}  (recall {r['ev_recall']:.3f}, precision {r['ev_precision']:.3f})", flush=True)
             except Exception as e:
                 print(f"[{nm:9s}] {k:55s} FAILED: {type(e).__name__}: {e}", flush=True)
     return rows

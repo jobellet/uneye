@@ -71,6 +71,32 @@ Key insights so far:
   (0.899 on dataset 1); (b) the physiological-prior hyperplane idea below uses the same non-causal encoder; (c) compare each
   predictor alone and fused, offline (precision of onset / offset in ms) and in the stream (latency).
 
+## BEST SO FAR (strict protocol requested by the owner 2026-10-09): detector fitted ONLY on archive/, tested on U'n'Eye's benchmarks, F1 AND kappa
+Goal restated by the owner: equal or beat U'n'Eye in event F1 AND Cohen's kappa; ideally a model trained only on the extra datasets and tested on the
+same benchmarks. `foundation/universal_hmm.py` (reads only archive/ for fitting; benchmarks = test only, no fit, no label, not even their unlabeled
+train split): the minimum-duration HMM of `free_saccade/detectors.py` (2 Gaussian states, saccade = chain of 6 states) on the unit-free score
+log10(1 + detrended speed / robust noise of the window), one HMM per sampling rate (1 kHz and 500 Hz, each benchmark at its native rate),
+Viterbi-trained on 2000 archive windows (EMTeC, GazeBase, GazeCom, Lund2013). The "boundary shift" widens / narrows every detected event by `pre`
+samples at the onset and `post` at the offset (the expert's convention): 2 integers chosen on N human-labeled TRIALS of the target's train split by
+maximising kappa on them (mean of 3 draws of the trials; test split B). Same scorer for all (foundation/compare.py), 1 kHz.
+| dataset | universal HMM, 0 label (F1 / kappa) | + boundary shift from 3 trials | + from 10 trials | + from 30 trials | U'n'Eye supervised (F1 / kappa) |
+|---|---|---|---|---|---|
+| d1 | 0.912 / 0.717 | 0.931 / 0.815 | 0.931 / 0.815 | 0.929 / 0.817 | 0.899 / 0.856 |
+| d2 (pursuit) | 0.908 / 0.752 | 0.909 / 0.780 | 0.910 / 0.832 | 0.911 / 0.831 | 0.941 / 0.874 |
+| d3 | 0.854 / 0.671 | 0.854 / 0.703 | 0.854 / 0.720 | 0.854 / 0.731 | 0.929 / 0.815 |
+| d4 | 0.932 / 0.813 | 0.941 / 0.833 | 0.939 / 0.843 | 0.939 / 0.844 | 0.924 / 0.850 |
+| andersson (saccade vs rest) | 0.795 / 0.335 | 0.807 / 0.342 | 0.805 / 0.351 | 0.805 / 0.351 | 0.885 / 0.813 (`weights_Andersson`, 5 classes) |
+- F1: above U'n'Eye on d1 and d4, 0.03 below on d2, 0.07 below on d3; kappa: 0.02-0.14 below, except d4 (0.843 vs 0.850, equal within noise).
+- Most of the kappa gain comes from the boundary convention (2 integers, 3-10 labeled trials suffice; ONE trial is unreliable: it made d3 collapse in a
+  first run). The ceiling of a pure boundary shift (chosen on the test split) is 0.82 / 0.83 / 0.74 / 0.86 (d1-d4): the rest of the kappa gap to U'n'Eye is
+  not a constant boundary offset.
+- U'n'Eye was trained in-domain (d1-d3); the universal HMM never saw them. No confidence intervals yet (d3 test = 53 trials).
+- Andersson: kappa 0.34 whatever the shift: not understood yet (blinks, pursuit segments, PSO labeled as a separate class: to look at first).
+- The HMM decoding is offline (Viterbi on a whole trial); for the C++ stream use a fixed-lag decoder.
+Verdict so far: the label-free universal HMM + 2-integer boundary calibration is the strongest approach tested and needs no neural network. The learned
+encoders did not add anything yet. Ideas: per-event boundary rule (fraction of the peak speed) learned from a few clicks instead of a constant shift; an
+emission model better than one Gaussian per state; per-state duration laws (semi-Markov); the 5-class case (blink, pursuit, PSO) for Andersson.
+
 ## Results of the first comparison of predictors alone, event F1 only (owner's rule), test split at 1 kHz
 Scorer `foundation/compare.py` (same for everyone: a predicted run of >= 3 samples overlapping a human saccade = hit; every predictor runs at the
 native rate of the dataset). Supervised columns were trained on set A of datasets 1, 2, 3 (so in-domain for d1-d3, unseen for d4, andersson).

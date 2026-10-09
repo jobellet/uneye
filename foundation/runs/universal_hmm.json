@@ -1,0 +1,447 @@
+[
+ {
+  "dataset": "d1",
+  "method": "universal HMM (archive/ only), no label",
+  "ev_f1": 0.912142152023692,
+  "kappa": 0.7167859738529423,
+  "ev_recall": 0.9619989588755856,
+  "ev_precision": 0.8671984983575786
+ },
+ {
+  "dataset": "d1",
+  "method": "same HMM fitted on the unlabeled train split of the target",
+  "ev_f1": 0.8903654485049834,
+  "kappa": 0.7348127231480224,
+  "ev_recall": 0.9765747006767309,
+  "ev_precision": 0.8181421718273005
+ },
+ {
+  "dataset": "d1",
+  "method": "universal HMM + boundary shift from 3 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.9308150571513788,
+  "kappa": 0.8148627287631022,
+  "kappa_min": 0.8077106991712756,
+  "shifts": [
+   [
+    4,
+    10
+   ],
+   [
+    6,
+    10
+   ],
+   [
+    8,
+    12
+   ]
+  ]
+ },
+ {
+  "dataset": "d1",
+  "method": "universal HMM + boundary shift from 10 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.9307367539109516,
+  "kappa": 0.8145195656522185,
+  "kappa_min": 0.8088455241607353,
+  "shifts": [
+   [
+    6,
+    8
+   ],
+   [
+    6,
+    10
+   ],
+   [
+    8,
+    10
+   ]
+  ]
+ },
+ {
+  "dataset": "d1",
+  "method": "universal HMM + boundary shift from 30 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.9293461918690022,
+  "kappa": 0.8169462503508932,
+  "kappa_min": 0.8161255782567595,
+  "shifts": [
+   [
+    4,
+    8
+   ],
+   [
+    6,
+    10
+   ],
+   [
+    6,
+    8
+   ]
+  ]
+ },
+ {
+  "dataset": "d1",
+  "method": "universal HMM + best boundary shift (chosen on the test split: ceiling)",
+  "ev_f1": 0.9307479224376731,
+  "kappa": 0.8184818477197771,
+  "ev_recall": 0.9619989588755856,
+  "ev_precision": 0.9014634146341464,
+  "pre": 6,
+  "post": 10
+ },
+ {
+  "dataset": "d2",
+  "method": "universal HMM (archive/ only), no label",
+  "ev_f1": 0.9076620825147348,
+  "kappa": 0.7516726218412726,
+  "ev_recall": 0.9199115044247788,
+  "ev_precision": 0.8957345971563981
+ },
+ {
+  "dataset": "d2",
+  "method": "same HMM fitted on the unlabeled train split of the target",
+  "ev_f1": 0.8079291762894535,
+  "kappa": 0.7394437176164027,
+  "ev_recall": 0.9287610619469027,
+  "ev_precision": 0.7149182561307902
+ },
+ {
+  "dataset": "d2",
+  "method": "universal HMM + boundary shift from 3 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.909301404494045,
+  "kappa": 0.779696177687396,
+  "kappa_min": 0.7497357822979963,
+  "shifts": [
+   [
+    2,
+    2
+   ],
+   [
+    2,
+    -2
+   ],
+   [
+    8,
+    12
+   ]
+  ]
+ },
+ {
+  "dataset": "d2",
+  "method": "universal HMM + boundary shift from 10 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.9103755445761433,
+  "kappa": 0.832358891300829,
+  "kappa_min": 0.8290934807435993,
+  "shifts": [
+   [
+    6,
+    6
+   ],
+   [
+    6,
+    4
+   ],
+   [
+    6,
+    6
+   ]
+  ]
+ },
+ {
+  "dataset": "d2",
+  "method": "universal HMM + boundary shift from 30 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.9110111896247463,
+  "kappa": 0.8306294352539677,
+  "kappa_min": 0.8239051126030155,
+  "shifts": [
+   [
+    6,
+    6
+   ],
+   [
+    6,
+    6
+   ],
+   [
+    8,
+    8
+   ]
+  ]
+ },
+ {
+  "dataset": "d2",
+  "method": "universal HMM + best boundary shift (chosen on the test split: ceiling)",
+  "ev_f1": 0.9104972375690608,
+  "kappa": 0.8339915965794438,
+  "ev_recall": 0.911504424778761,
+  "ev_precision": 0.9094922737306843,
+  "pre": 6,
+  "post": 6
+ },
+ {
+  "dataset": "d3",
+  "method": "universal HMM (archive/ only), no label",
+  "ev_f1": 0.8538461538461537,
+  "kappa": 0.6713539721651189,
+  "ev_recall": 0.7708333333333334,
+  "ev_precision": 0.9568965517241379
+ },
+ {
+  "dataset": "d3",
+  "method": "same HMM fitted on the unlabeled train split of the target",
+  "ev_f1": 0.8114285714285714,
+  "kappa": 0.7389305724028712,
+  "ev_recall": 0.9861111111111112,
+  "ev_precision": 0.6893203883495146
+ },
+ {
+  "dataset": "d3",
+  "method": "universal HMM + boundary shift from 3 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.8538461538461538,
+  "kappa": 0.7026879641309574,
+  "kappa_min": 0.6765880291858166,
+  "shifts": [
+   [
+    4,
+    12
+   ],
+   [
+    2,
+    4
+   ],
+   [
+    6,
+    12
+   ]
+  ]
+ },
+ {
+  "dataset": "d3",
+  "method": "universal HMM + boundary shift from 10 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.8538461538461538,
+  "kappa": 0.7198856002037278,
+  "kappa_min": 0.7103407698725095,
+  "shifts": [
+   [
+    4,
+    10
+   ],
+   [
+    2,
+    6
+   ],
+   [
+    4,
+    10
+   ]
+  ]
+ },
+ {
+  "dataset": "d3",
+  "method": "universal HMM + boundary shift from 30 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.8538461538461538,
+  "kappa": 0.7313684886960256,
+  "kappa_min": 0.7238020540618152,
+  "shifts": [
+   [
+    2,
+    8
+   ],
+   [
+    2,
+    6
+   ],
+   [
+    4,
+    8
+   ]
+  ]
+ },
+ {
+  "dataset": "d3",
+  "method": "universal HMM + best boundary shift (chosen on the test split: ceiling)",
+  "ev_f1": 0.8538461538461537,
+  "kappa": 0.7389752608661646,
+  "ev_recall": 0.7708333333333334,
+  "ev_precision": 0.9568965517241379,
+  "pre": 2,
+  "post": 6
+ },
+ {
+  "dataset": "d4",
+  "method": "universal HMM (archive/ only), no label",
+  "ev_f1": 0.931777017508553,
+  "kappa": 0.8134554465816348,
+  "ev_recall": 0.9338442920532473,
+  "ev_precision": 0.929718875502008
+ },
+ {
+  "dataset": "d4",
+  "method": "same HMM fitted on the unlabeled train split of the target",
+  "ev_f1": 0.8357117995127045,
+  "kappa": 0.8317908943314765,
+  "ev_recall": 0.9685356998789835,
+  "ev_precision": 0.7349250076522804
+ },
+ {
+  "dataset": "d4",
+  "method": "universal HMM + boundary shift from 3 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.9411240784293137,
+  "kappa": 0.8328950181170738,
+  "kappa_min": 0.8112439113026244,
+  "shifts": [
+   [
+    2,
+    10
+   ],
+   [
+    2,
+    2
+   ],
+   [
+    4,
+    12
+   ]
+  ]
+ },
+ {
+  "dataset": "d4",
+  "method": "universal HMM + boundary shift from 10 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.9394661082592347,
+  "kappa": 0.8427699702070668,
+  "kappa_min": 0.8315892276091752,
+  "shifts": [
+   [
+    0,
+    8
+   ],
+   [
+    2,
+    2
+   ],
+   [
+    2,
+    12
+   ]
+  ]
+ },
+ {
+  "dataset": "d4",
+  "method": "universal HMM + boundary shift from 30 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.9394661082592347,
+  "kappa": 0.8439408442171533,
+  "kappa_min": 0.8315892276091752,
+  "shifts": [
+   [
+    2,
+    6
+   ],
+   [
+    0,
+    2
+   ],
+   [
+    2,
+    12
+   ]
+  ]
+ },
+ {
+  "dataset": "d4",
+  "method": "universal HMM + best boundary shift (chosen on the test split: ceiling)",
+  "ev_f1": 0.931777017508553,
+  "kappa": 0.8570080096712298,
+  "ev_recall": 0.9338442920532473,
+  "ev_precision": 0.929718875502008,
+  "pre": 0,
+  "post": 4
+ },
+ {
+  "dataset": "andersson",
+  "method": "universal HMM (archive/ only), no label",
+  "ev_f1": 0.7946799667497921,
+  "kappa": 0.33502130923963447,
+  "ev_recall": 0.8901303538175046,
+  "ev_precision": 0.7177177177177178
+ },
+ {
+  "dataset": "andersson",
+  "method": "same HMM fitted on the unlabeled train split of the target",
+  "ev_f1": 0.8259740259740259,
+  "kappa": 0.3560232676848051,
+  "ev_recall": 0.888268156424581,
+  "ev_precision": 0.7718446601941747
+ },
+ {
+  "dataset": "andersson",
+  "method": "universal HMM + boundary shift from 3 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.8074681728527882,
+  "kappa": 0.3424985842137233,
+  "kappa_min": 0.32573539767926196,
+  "shifts": [
+   [
+    0,
+    -6
+   ],
+   [
+    0,
+    -6
+   ],
+   [
+    -4,
+    -6
+   ]
+  ]
+ },
+ {
+  "dataset": "andersson",
+  "method": "universal HMM + boundary shift from 10 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.8047337278106509,
+  "kappa": 0.35088017748095385,
+  "kappa_min": 0.3508801774809539,
+  "shifts": [
+   [
+    0,
+    -6
+   ],
+   [
+    0,
+    -6
+   ],
+   [
+    0,
+    -6
+   ]
+  ]
+ },
+ {
+  "dataset": "andersson",
+  "method": "universal HMM + boundary shift from 30 labeled trials (mean of 3 draws)",
+  "ev_f1": 0.8047337278106509,
+  "kappa": 0.35088017748095385,
+  "kappa_min": 0.3508801774809539,
+  "shifts": [
+   [
+    0,
+    -6
+   ],
+   [
+    0,
+    -6
+   ],
+   [
+    0,
+    -6
+   ]
+  ]
+ },
+ {
+  "dataset": "andersson",
+  "method": "universal HMM + best boundary shift (chosen on the test split: ceiling)",
+  "ev_f1": 0.8047337278106509,
+  "kappa": 0.3508801774809539,
+  "ev_recall": 0.8864059590316573,
+  "ev_precision": 0.7368421052631579,
+  "pre": 0,
+  "post": -6
+ }
+]

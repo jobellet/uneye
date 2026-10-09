@@ -25,7 +25,7 @@ FS = 1000.0
 
 class Scores:
     """what HMM.fit / HMM.predict need from a 'window' object: the score, the valid mask and fs"""
-    def __init__(self, score, valid): self.score, self.valid, self.fs = score.astype(np.float32), valid, FS
+    def __init__(self, score, valid, fs=FS): self.score, self.valid, self.fs = score.astype(np.float32), valid, fs
 
 
 class ScoreHMM(D.HMM):

@@ -3,6 +3,7 @@
   "dataset": "d1",
   "predictor": "Engbert-Kliegl lambda=6 (physics)",
   "ev_f1": 0.7047992164544562,
+  "kappa": 0.6397981996184836,
   "ev_recall": 0.9364914107235814,
   "ev_precision": 0.5650125628140703
  },
@@ -10,6 +11,7 @@
   "dataset": "d1",
   "predictor": "EK on detrended velocity (physics)",
   "ev_f1": 0.697477373387252,
+  "kappa": 0.6483828900572317,
   "ev_recall": 0.9427381572097866,
   "ev_precision": 0.5534841075794621
  },
@@ -17,6 +19,7 @@
   "dataset": "d1",
   "predictor": "HMM (unsupervised, 0 label)",
   "ev_f1": 0.8872001899786275,
+  "kappa": 0.72341240539456,
   "ev_recall": 0.9724102030192608,
   "ev_precision": 0.8157205240174672
  },
@@ -24,6 +27,7 @@
   "dataset": "d1",
   "predictor": "causal TCN, no lookahead (supervised d1+d2+d3)",
   "ev_f1": 0.8771355019892347,
+  "kappa": 0.7772502141330212,
   "ev_recall": 0.9755335762623634,
   "ev_precision": 0.7967687074829932
  },
@@ -31,6 +35,7 @@
   "dataset": "d1",
   "predictor": "causal TCN, 10 ms lookahead (supervised d1+d2+d3)",
   "ev_f1": 0.8596001859600186,
+  "kappa": 0.8586350101685403,
   "ev_recall": 0.9625195210827694,
   "ev_precision": 0.7765644687106258
  },
@@ -38,6 +43,7 @@
   "dataset": "d1",
   "predictor": "U'n'Eye, offline (supervised d1+d2+d3)",
   "ev_f1": 0.8993514292577469,
+  "kappa": 0.8556477441236131,
   "ev_recall": 0.9744924518479958,
   "ev_precision": 0.8349687778768956
  },
@@ -45,6 +51,7 @@
   "dataset": "d2",
   "predictor": "Engbert-Kliegl lambda=6 (physics)",
   "ev_f1": 0.6084535560617566,
+  "kappa": -0.024960332833267262,
   "ev_recall": 0.531858407079646,
   "ev_precision": 0.7108219988172679
  },
@@ -52,6 +59,7 @@
   "dataset": "d2",
   "predictor": "EK on detrended velocity (physics)",
   "ev_f1": 0.9013199245757386,
+  "kappa": 0.7415811299557571,
   "ev_recall": 0.9517699115044248,
   "ev_precision": 0.8559490648627139
  },
@@ -59,6 +67,7 @@
   "dataset": "d2",
   "predictor": "HMM (unsupervised, 0 label)",
   "ev_f1": 0.8305390766056229,
+  "kappa": 0.5691055889551022,
   "ev_recall": 0.7123893805309734,
   "ev_precision": 0.9956709956709957
  },
@@ -66,6 +75,7 @@
   "dataset": "d2",
   "predictor": "causal TCN, no lookahead (supervised d1+d2+d3)",
   "ev_f1": 0.9175848391361834,
+  "kappa": 0.7723229744438124,
   "ev_recall": 0.9212389380530973,
   "ev_precision": 0.9139596136962248
  },
@@ -73,6 +83,7 @@
   "dataset": "d2",
   "predictor": "causal TCN, 10 ms lookahead (supervised d1+d2+d3)",
   "ev_f1": 0.90290202923849,
+  "kappa": 0.8608706900068581,
   "ev_recall": 0.9154867256637168,
   "ev_precision": 0.8906586310804994
  },
@@ -80,6 +91,7 @@
   "dataset": "d2",
   "predictor": "U'n'Eye, offline (supervised d1+d2+d3)",
   "ev_f1": 0.9411764705882353,
+  "kappa": 0.8744653345448153,
   "ev_recall": 0.9380530973451328,
   "ev_precision": 0.9443207126948775
  },
@@ -87,6 +99,7 @@
   "dataset": "d3",
   "predictor": "Engbert-Kliegl lambda=6 (physics)",
   "ev_f1": 0.8057553956834532,
+  "kappa": 0.5597385052090382,
   "ev_recall": 0.7777777777777778,
   "ev_precision": 0.835820895522388
  },
@@ -94,6 +107,7 @@
   "dataset": "d3",
   "predictor": "EK on detrended velocity (physics)",
   "ev_f1": 0.7928571428571429,
+  "kappa": 0.5625239087687395,
   "ev_recall": 0.7708333333333334,
   "ev_precision": 0.8161764705882353
  },
@@ -101,6 +115,7 @@
   "dataset": "d3",
   "predictor": "HMM (unsupervised, 0 label)",
   "ev_f1": 0.90032154340836,
+  "kappa": 0.7752096012381726,
   "ev_recall": 0.9722222222222222,
   "ev_precision": 0.8383233532934131
  },
@@ -108,6 +123,7 @@
   "dataset": "d3",
   "predictor": "causal TCN, no lookahead (supervised d1+d2+d3)",
   "ev_f1": 0.9034482758620691,
+  "kappa": 0.6407540561799265,
   "ev_recall": 0.9097222222222222,
   "ev_precision": 0.8972602739726028
  },
@@ -115,6 +131,7 @@
   "dataset": "d3",
   "predictor": "causal TCN, 10 ms lookahead (supervised d1+d2+d3)",
   "ev_f1": 0.9407665505226481,
+  "kappa": 0.8054124713154929,
   "ev_recall": 0.9375,
   "ev_precision": 0.9440559440559441
  },
@@ -122,6 +139,7 @@
   "dataset": "d3",
   "predictor": "U'n'Eye, offline (supervised d1+d2+d3)",
   "ev_f1": 0.9290780141843973,
+  "kappa": 0.8150018104740719,
   "ev_recall": 0.9097222222222222,
   "ev_precision": 0.9492753623188406
  },
@@ -129,6 +147,7 @@
   "dataset": "d4",
   "predictor": "Engbert-Kliegl lambda=6 (physics)",
   "ev_f1": 0.7625235082920158,
+  "kappa": 0.7086882991878114,
   "ev_recall": 0.899556272690601,
   "ev_precision": 0.6617210682492581
  },
@@ -136,6 +155,7 @@
   "dataset": "d4",
   "predictor": "EK on detrended velocity (physics)",
   "ev_f1": 0.7601023017902813,
+  "kappa": 0.7119019386991754,
   "ev_recall": 0.899152884227511,
   "ev_precision": 0.6582988777318369
  },
@@ -143,6 +163,7 @@
   "dataset": "d4",
   "predictor": "HMM (unsupervised, 0 label)",
   "ev_f1": 0.6888699117563336,
+  "kappa": 0.7709636596848329,
   "ev_recall": 0.9762000806776926,
   "ev_precision": 0.5322190455245217
  },
@@ -150,6 +171,7 @@
   "dataset": "d4",
   "predictor": "causal TCN, no lookahead (supervised d1+d2+d3)",
   "ev_f1": 0.8779316712834717,
+  "kappa": 0.8204258297876016,
   "ev_recall": 0.9588543767648245,
   "ev_precision": 0.8096049046321526
  },
@@ -157,6 +179,7 @@
   "dataset": "d4",
   "predictor": "causal TCN, 10 ms lookahead (supervised d1+d2+d3)",
   "ev_f1": 0.8988326848249028,
+  "kappa": 0.8336093789342032,
   "ev_recall": 0.9318273497377975,
   "ev_precision": 0.8680947012401353
  },
@@ -164,6 +187,7 @@
   "dataset": "d4",
   "predictor": "U'n'Eye, offline (supervised d1+d2+d3)",
   "ev_f1": 0.9239403909425199,
+  "kappa": 0.8502405611058862,
   "ev_recall": 0.962888261395724,
   "ev_precision": 0.8880208333333334
  },
@@ -171,6 +195,7 @@
   "dataset": "andersson",
   "predictor": "Engbert-Kliegl lambda=6 (physics)",
   "ev_f1": 0.6142131979695432,
+  "kappa": 0.35526558464249336,
   "ev_recall": 0.9013035381750466,
   "ev_precision": 0.465832531280077
  },
@@ -178,6 +203,7 @@
   "dataset": "andersson",
   "predictor": "EK on detrended velocity (physics)",
   "ev_f1": 0.567614625652931,
+  "kappa": 0.34519391417931755,
   "ev_recall": 0.9106145251396648,
   "ev_precision": 0.4123102866779089
  },
@@ -185,6 +211,7 @@
   "dataset": "andersson",
   "predictor": "HMM (unsupervised, 0 label)",
   "ev_f1": 0.8208366219415942,
+  "kappa": 0.5463610994021342,
   "ev_recall": 0.9683426443202979,
   "ev_precision": 0.7123287671232876
  },
@@ -192,6 +219,7 @@
   "dataset": "andersson",
   "predictor": "causal TCN, no lookahead (supervised d1+d2+d3)",
   "ev_f1": 0.3393131727319323,
+  "kappa": 0.1799652583479071,
   "ev_recall": 0.6163873370577281,
   "ev_precision": 0.2340876944837341
  },
@@ -199,6 +227,7 @@
   "dataset": "andersson",
   "predictor": "causal TCN, 10 ms lookahead (supervised d1+d2+d3)",
   "ev_f1": 0.33983008495752126,
+  "kappa": 0.21482990624883824,
   "ev_recall": 0.633147113594041,
   "ev_precision": 0.23224043715846995
  },
@@ -206,6 +235,7 @@
   "dataset": "andersson",
   "predictor": "U'n'Eye, offline (supervised d1+d2+d3)",
   "ev_f1": 0.5463623395149786,
+  "kappa": 0.3301802447429326,
   "ev_recall": 0.7132216014897579,
   "ev_precision": 0.44277456647398844
  },
@@ -213,6 +243,7 @@
   "dataset": "andersson",
   "predictor": "U'n'Eye, offline (supervised Andersson, 5 classes)",
   "ev_f1": 0.8850174216027875,
+  "kappa": 0.8125357993845443,
   "ev_recall": 0.9459962756052142,
   "ev_precision": 0.8314238952536824
  }
