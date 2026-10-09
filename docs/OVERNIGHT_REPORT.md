@@ -1,13 +1,13 @@
 # Overnight comparison of candidate architectures and training heuristics
 
-Generated 2026-10-09 23:07 by `foundation/night_report.py` from `foundation/runs/night/*.json` (MacBook Air M1, one GPU job at a time). The numbers are those of the files; nothing is typed by hand in the tables.
+Generated 2026-10-09 23:18 by `foundation/night_report.py` from `foundation/runs/night/*.json` (MacBook Air M1, one GPU job at a time). The numbers are those of the files; nothing is typed by hand in the tables.
 
 ## Summary
 
-- Best mean event F1 over the 5 benchmarks: **selftrain_r1** (0.68 F1, 0.64 kappa); best mean kappa: **selftrain_r1** (0.68 / 0.64).
+- Best mean event F1 over the 5 benchmarks: **sup_bitcn_ema_tta** (0.88 F1, 0.80 kappa, readout: threshold); best mean kappa: **sup_bitcn_ema_tta** (0.88 / 0.80, readout: threshold).
 - Reference U'n'Eye (supervised): 0.85 F1 / 0.75 kappa on the same subsets (Andersson with its general weights is 0.55 / 0.33; with its own weights 0.89 / 0.81). The label-free universal HMM: 0.88 / 0.66.
-- Control: the random-initialised transformer encoder gives 0.48 / 0.44: a trained encoder only counts if it beats this.
-- Steps of the night finished: 5; failed or timed out: 0.
+- Control: the random-initialised transformer encoder gives 0.48 / 0.44 (hmm): a trained encoder only counts if it beats this.
+- Steps of the night finished: 6; failed or timed out: 0.
 
 ## Protocol (the same for every row)
 
@@ -46,22 +46,25 @@ Already tried before tonight (not repeated):
 
 ## Results (mean over the five datasets, and per dataset; event F1 / kappa)
 
-| id | family | labels used | mean HMM F1 / kappa | mean threshold F1 / kappa | d1 | d2 | d3 | d4 | Andersson | min |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `ref_universal_hmm` | reference | none (fitted on archive/ only) | **0.88 / 0.66** | n/a | 0.91 / 0.72 | 0.91 / 0.76 | 0.85 / 0.67 | 0.94 / 0.80 | 0.79 / 0.33 | 0.5 |
-| `ref_uneye` | reference | all labels of d1+d2+d3 train splits (in-domain for d1-d3, unseen for d | **0.85 / 0.75** | n/a | 0.90 / 0.85 | 0.94 / 0.88 | 0.93 / 0.82 | 0.92 / 0.85 | 0.55 / 0.33 | 0.2 |
-| `base_input_6ch` | reference | labels of the other 4 datasets (linear probe) | **0.76 / 0.51** | 0.18 / 0.26 | 0.90 / 0.74 | 0.82 / 0.05 | 0.56 / 0.58 | 0.86 / 0.84 | 0.64 / 0.32 | 0.2 |
-| `base_input_channels` | reference | labels of the other 4 datasets (linear probe) | **0.75 / 0.51** | 0.17 / 0.25 | 0.90 / 0.74 | 0.81 / 0.05 | 0.57 / 0.58 | 0.86 / 0.84 | 0.64 / 0.32 | 0.2 |
-| `ctrl_untrained_ts2vec` | control | labels of the other 4 datasets (linear probe only); the encoder itself | **0.62 / 0.49** | 0.31 / 0.39 | 0.79 / 0.77 | 0.57 / 0.15 | 0.41 / 0.28 | 0.59 / 0.72 | 0.74 / 0.54 | 0.7 |
-| `ctrl_untrained` | control | labels of the other 4 datasets (linear probe only); the encoder itself | **0.48 / 0.44** | 0.29 / 0.42 | 0.79 / 0.77 | 0.44 / 0.21 | 0.19 / 0.17 | 0.37 / 0.55 | 0.61 / 0.50 | 1.7 |
-| `ctrl_untrained_ts2vec_novelty` | control | none (the encoder saw no label; no probe either) | **0.15 / 0.20** | n/a | 0.16 / 0.29 | 0.17 / 0.25 | 0.17 / 0.23 | 0.10 / 0.14 | 0.15 / 0.12 | 1.4 |
-| `jepa_a` | self-supervised | labels of the other 4 datasets (linear probe only); the encoder itself | **0.61 / 0.39** | 0.42 / 0.49 | 0.76 / 0.73 | 0.57 / 0.24 | 0.46 / 0.14 | 0.53 / 0.40 | 0.76 / 0.45 | 1.1 |
-| `selftrain_r1` | label-free student | none for training (labeled train splits only select the checkpoint) | **0.68 / 0.64** | 0.80 / 0.64 | 0.76 / 0.77 | 0.69 / 0.71 | 0.77 / 0.71 | 0.56 / 0.72 | 0.63 / 0.27 | 4.6 |
-| `selftrain_r1_tta` | label-free student | none for training | **0.66 / 0.63** | 0.83 / 0.64 | 0.75 / 0.76 | 0.67 / 0.70 | 0.74 / 0.70 | 0.53 / 0.69 | 0.63 / 0.27 | 4.6 |
-| `selftrain_r2` | label-free student | none for training (labeled train splits only select the checkpoint) | **0.64 / 0.61** | 0.78 / 0.70 | 0.68 / 0.76 | 0.65 / 0.67 | 0.73 / 0.68 | 0.52 / 0.69 | 0.61 / 0.25 | 4.6 |
-| `selftrain_r2_tta` | label-free student | none for training | **0.61 / 0.60** | 0.80 / 0.70 | 0.65 / 0.75 | 0.61 / 0.66 | 0.72 / 0.66 | 0.50 / 0.67 | 0.55 / 0.26 | 4.6 |
+| id | family | labels used | **best readout** F1 / kappa | readout | mean HMM F1 / kappa | mean threshold F1 / kappa | d1 | d2 | d3 | d4 | Andersson | min |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `ref_universal_hmm` | reference | none (fitted on archive/ only) | **0.88 / 0.66** | hmm | n/a | n/a | 0.91 / 0.72 | 0.91 / 0.76 | 0.85 / 0.67 | 0.94 / 0.80 | 0.79 / 0.33 | 0.5 |
+| `ref_uneye` | reference | all labels of d1+d2+d3 train splits (in-domain for d1-d3, un | **0.85 / 0.75** | hmm | n/a | n/a | 0.90 / 0.85 | 0.94 / 0.88 | 0.93 / 0.82 | 0.92 / 0.85 | 0.55 / 0.33 | 0.2 |
+| `base_input_6ch` | reference | labels of the other 4 datasets (linear probe) | **0.76 / 0.51** | hmm | 0.76 / 0.51 | 0.18 / 0.26 | 0.90 / 0.74 | 0.82 / 0.05 | 0.56 / 0.58 | 0.86 / 0.84 | 0.64 / 0.32 | 0.2 |
+| `base_input_channels` | reference | labels of the other 4 datasets (linear probe) | **0.75 / 0.51** | hmm | 0.75 / 0.51 | 0.17 / 0.25 | 0.90 / 0.74 | 0.81 / 0.05 | 0.57 / 0.58 | 0.86 / 0.84 | 0.64 / 0.32 | 0.2 |
+| `ctrl_untrained_ts2vec` | control | labels of the other 4 datasets (linear probe only); the enco | **0.62 / 0.49** | hmm | 0.62 / 0.49 | 0.31 / 0.39 | 0.79 / 0.77 | 0.57 / 0.15 | 0.41 / 0.28 | 0.59 / 0.72 | 0.74 / 0.54 | 0.7 |
+| `ctrl_untrained` | control | labels of the other 4 datasets (linear probe only); the enco | **0.48 / 0.44** | hmm | 0.48 / 0.44 | 0.29 / 0.42 | 0.79 / 0.77 | 0.44 / 0.21 | 0.19 / 0.17 | 0.37 / 0.55 | 0.61 / 0.50 | 1.7 |
+| `ctrl_untrained_ts2vec_novelty` | control | none (the encoder saw no label; no probe either) | **0.15 / 0.20** | hmm | 0.15 / 0.20 | n/a | 0.16 / 0.29 | 0.17 / 0.25 | 0.17 / 0.23 | 0.10 / 0.14 | 0.15 / 0.12 | 1.4 |
+| `jepa_a` | self-supervised | labels of the other 4 datasets (linear probe only); the enco | **0.61 / 0.39** | hmm | 0.61 / 0.39 | 0.42 / 0.49 | 0.76 / 0.73 | 0.57 / 0.24 | 0.46 / 0.14 | 0.53 / 0.40 | 0.76 / 0.45 | 1.1 |
+| `selftrain_r1_tta` | label-free student | none for training | **0.83 / 0.64** | threshold | 0.66 / 0.63 | 0.83 / 0.64 | 0.89 / 0.74 | 0.90 / 0.78 | 0.78 / 0.53 | 0.92 / 0.83 | 0.68 / 0.33 | 4.6 |
+| `selftrain_r1` | label-free student | none for training (labeled train splits only select the chec | **0.80 / 0.64** | threshold | 0.68 / 0.64 | 0.80 / 0.64 | 0.89 / 0.74 | 0.90 / 0.78 | 0.77 / 0.53 | 0.92 / 0.83 | 0.54 / 0.34 | 4.6 |
+| `selftrain_r2_tta` | label-free student | none for training | **0.80 / 0.70** | threshold | 0.61 / 0.60 | 0.80 / 0.70 | 0.88 / 0.76 | 0.87 / 0.79 | 0.78 / 0.59 | 0.87 / 0.85 | 0.60 / 0.51 | 4.6 |
+| `selftrain_r2` | label-free student | none for training (labeled train splits only select the chec | **0.78 / 0.70** | threshold | 0.64 / 0.61 | 0.78 / 0.70 | 0.87 / 0.76 | 0.87 / 0.79 | 0.79 / 0.59 | 0.86 / 0.85 | 0.51 / 0.49 | 4.6 |
+| `sup_bitcn_ema_tta` | supervised | labels of d1+d2+d3 train splits (d4 and Andersson never seen | **0.88 / 0.80** | threshold | 0.57 / 0.37 | 0.88 / 0.80 | 0.92 / 0.87 | 0.96 / 0.92 | 0.88 / 0.82 | 0.91 / 0.84 | 0.70 / 0.54 | 9.0 |
+| `sup_bitcn_tta` | supervised | labels of d1+d2+d3 train splits (d4 and Andersson never seen | **0.86 / 0.78** | threshold | 0.61 / 0.40 | 0.86 / 0.78 | 0.90 / 0.88 | 0.95 / 0.91 | 0.90 / 0.80 | 0.83 / 0.79 | 0.70 / 0.53 | 9.0 |
+| `sup_bitcn` | supervised | labels of d1+d2+d3 train splits (d4 and Andersson never seen | **0.84 / 0.78** | threshold | 0.60 / 0.40 | 0.84 / 0.78 | 0.89 / 0.88 | 0.94 / 0.91 | 0.88 / 0.80 | 0.82 / 0.79 | 0.68 / 0.53 | 9.0 |
 
-The 'HMM' column is the headline (event F1 / kappa after decoding). For `ref_*` rows a single prediction is scored (no probe, no extra decoding).
+The headline column is the better mean event F1 of the two readouts (shown separately): 'hmm' = the score decoded by the minimum-duration HMM (Gaussian emissions, which suits a probe score of a representation but not the saturated logit of a network), 'threshold' = the score alone. The per-dataset cells use that readout. For `ref_*` rows a single prediction is scored; for `*_novelty` rows only the HMM readout is meaningful.
 
 ![mean F1 vs mean kappa](figs_night/f1_vs_kappa.png)
 
@@ -85,6 +88,7 @@ The 'HMM' column is the headline (event F1 / kappa after decoding). For `ref_*` 
 | ctrl_untrained_ts2vec | done | 1.9 |
 | base_input_6ch | done | 0.2 |
 | selftrain | done | 11.9 |
+| sup_bitcn | done | 11.0 |
 
 ## Limits
 
