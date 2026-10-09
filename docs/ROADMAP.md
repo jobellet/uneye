@@ -4,6 +4,16 @@ Written on 2026-10-09 by the cloud Claude Code session so that another session (
 without the cloud session. `docs/SAFETY_DEMO_PLAN.md` holds the aim and the rules; this file holds the state, the insights, and a concrete plan per step.
 The owner speaks French; documents and code comments are English; figures for the slides get **German** labels (see Step 7).
 
+## Progress since this hand-over (local M1 session, 2026-10-09) — read before section 4
+All steps 2-8 have a first complete version on `master`; numbers in each commit message and in `docs/safety/hazards.md`.
+- Step 2: output-level equivalence of the causal TCN (`cpp/scripts/equivalence.py`, ctest `equivalence`). Layer-by-layer: NOT done.
+- Step 3: `cpp/tools/bench_latency.cpp` (M1: median 78 us, 7 of 1e6 pushes > 1 ms). Step 4: `cpp/safety_guard.*`, ctest `safety_guard`.
+- Step 5: `cpp/tools/fault_injection.cpp` (24 cases, guard: 16 with 0 dangerous outputs; 5 clear failures listed in hazards.md).
+- Step 6: `docs/safety/hazards.md`, `soup.md`. Step 7: `docs/slides/make_figures.py` (Fig. 1-5, German), `docs/EXPLAIN.md`, `docs/QA.md`.
+- Step 8: `.github/workflows/ci.yml` (Release + ASan/UBSan), first run green on ubuntu-24.04 (commit 55e9d8e).
+- The Mac has no Xcode tools: C++ is built with zig c++ (clang 22) from `.venv`, git is the one inside GitHub Desktop.
+- Open: layer-by-layer parity, the 5 unsolved perturbations (no threshold retuned on test data), GAZE_ENGINE.md refresh, TSan run.
+
 ## 0. The two goals (unchanged)
 1. A working online saccade/microsaccade detector: causal network + C++ streaming engine.
 2. Evidence that research Python becomes C++ that is predictable, tested and safe even when the model is wrong or sees data it was never trained on.
