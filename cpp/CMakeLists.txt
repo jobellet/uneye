@@ -68,3 +68,12 @@ target_compile_options(fault_injection PRIVATE -Wall -Wextra)
 add_executable(bench_latency tools/bench_latency.cpp)          # Step 3: per-sample latency of push() + guard (not a WCET)
 target_link_libraries(bench_latency uneye_rt)
 target_compile_options(bench_latency PRIVATE -Wall -Wextra)
+
+add_executable(causal_dump tools/causal_dump.cpp)              # Step 2: C++ causal TCN outputs for cpp/scripts/equivalence.py
+target_link_libraries(causal_dump uneye_rt)
+target_compile_options(causal_dump PRIVATE -Wall -Wextra)
+
+add_executable(test_equivalence tests/test_equivalence.cpp)    # Step 2: C++ vs PyTorch float64, documented tolerance
+target_link_libraries(test_equivalence uneye_rt)
+target_compile_options(test_equivalence PRIVATE -Wall -Wextra -Werror)
+add_test(NAME equivalence COMMAND test_equivalence ${CMAKE_SOURCE_DIR})
