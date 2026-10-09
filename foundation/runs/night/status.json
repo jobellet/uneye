@@ -52,5 +52,11 @@
   "state": "done",
   "started": "00:11",
   "minutes": 37.2
+ },
+ {
+  "id": "ts2vec_b",
+  "state": "done",
+  "started": "00:48",
+  "minutes": 12.7
  }
 ]
