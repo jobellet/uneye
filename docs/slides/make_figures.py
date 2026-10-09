@@ -116,9 +116,10 @@ def fig3_fault_injection():
         ax.set_xlim(0, 2000); ax.tick_params(axis="y", length=0)
     a1.set_yticks(y); a1.set_yticklabels(rows)
     h_, l_ = a2.get_legend_handles_labels(); fig.legend(h_, l_, loc="upper center", bbox_to_anchor=(0.55, 0.03), ncol=2, frameon=False)
-    fig.suptitle("Fehlerinjektion: mit Wächter 0 gefährliche Ausgaben in 8 von 13 Fällen – nicht bei mäßigem Rauschen,\nschwachen Störimpulsen, ×10-Skalierung und falscher Abtastrate", x=0.02, ha="left", fontsize=19, y=1.02)
+    zeros = sum(v == 0 for v in get("guard", "dangerous"))
+    fig.suptitle(f"Fehlerinjektion: mit Wächter 0 gefährliche Ausgaben in {zeros} von {len(keep)} Fällen – nicht bei schwachen\nStörimpulsen, ×10-Skalierung und 500-Hz-Daten mit 1-kHz-Zeitstempeln", x=0.02, ha="left", fontsize=19, y=1.02)
     fig.text(0.02, -0.07, "Testdaten: Set B, Datensätze 1+2, je 120 Versuche (1 kHz). Gefährlich = auf dem UNGESTÖRTEN Signal physiologisch unmöglich (keine Bewegung < 10°/s, > 40°, > 150 ms).\n"
-             "MacBook Air M1, clang 22.1.8 -O3, feste Seeds. Alle 23 Fälle: docs/slides/data/fault_injection.csv", fontsize=12, color=OI["grey"])
+             "MacBook Air M1, clang 22.1.8 -O3, feste Seeds. Alle 24 Fälle: docs/slides/data/fault_injection.csv. Rauschgrenze des Wächters (16°/s) nur auf Set A kalibriert.", fontsize=12, color=OI["grey"])
     save(fig, "fig3_fehlerinjektion")
 
 

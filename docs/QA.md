@@ -31,8 +31,8 @@ DE: Fremdsoftware unbekannter Herkunft, hier ONNX Runtime; deshalb gibt es eine 
 EN: Software of unknown provenance, here ONNX Runtime; that is why a small own C++ engine exists whose behaviour we can test completely.
 
 **8. Wo versagt der Wächter? / Where does the guard fail?**
-DE: Bei mäßigem Rauschen, schwachen Störimpulsen, ×10-Skalierung und 500-Hz-Daten mit 1-kHz-Zeitstempeln; die Schwellen habe ich danach bewusst nicht an die Testdaten angepasst.
-EN: Moderate noise, small interference bursts, ×10 scaling, and 500 Hz data with 1 kHz timestamps; I deliberately did not retune the thresholds on the test data.
+DE: Bei schwachen Störimpulsen, ×10-Skalierung und 500-Hz-Daten mit 1-kHz-Zeitstempeln. Die Rauschgrenze habe ich nur auf den Trainingsdaten kalibriert, nie auf den Testdaten.
+EN: Small interference bursts, ×10 scaling, and 500 Hz data with 1 kHz timestamps. The noise limit was calibrated on the training data only, never on the test data.
 
 **9. Was kostet der Wächter? / What does the guard cost?**
 DE: Empfindlichkeit: auf sauberen Daten sinkt der Anteil erkannter Sakkaden von 0,94 auf 0,89, und nach einem Ausfall bleibt er bis zu 1 s vorsichtig.
