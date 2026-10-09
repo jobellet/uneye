@@ -32,14 +32,17 @@ C("""
 import os, sys, subprocess, glob, time
 QUICK = True            # <- set to False for the real experiment
 REPO, BRANCH = "https://github.com/jobellet/uneye", "master"
+def sh(cmd, t=180):
+    print("$", " ".join(cmd), flush=True)
+    try: subprocess.run(cmd, check=False, timeout=t)
+    except subprocess.TimeoutExpired: print("   (timeout after", t, "s, continuing)", flush=True)
 if os.path.basename(os.getcwd()) == "free_saccade": os.chdir("..")   # run from the repository
 if not os.path.exists("data/dataset1"):             # Colab / Kaggle: get the code (and the labeled recordings used for the sanity check)
-    if not os.path.exists("uneye"):
-        subprocess.run(["git", "clone", "-q", "-b", BRANCH, REPO], check=True)
-    else:
-        subprocess.run(["git", "-C", "uneye", "pull", "-q", "origin", BRANCH], check=False)
+    if not os.path.exists("uneye"): sh(["git", "clone", "-q", "-b", BRANCH, REPO])      # needs Internet ON in the Kaggle notebook settings
+    else: sh(["git", "-C", "uneye", "pull", "-q", "origin", BRANCH])
+    if not os.path.exists("uneye"): raise SystemExit("git clone failed: switch Internet ON (Kaggle: Settings > Internet) and run this cell again")
     os.chdir("uneye")
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "h5py", "scikit-learn", "scipy", "pandas", "matplotlib"], check=True)
+sh([sys.executable, "-m", "pip", "install", "-q", "h5py", "scikit-learn", "scipy", "pandas", "matplotlib"])
 sys.path.insert(0, os.getcwd()); sys.path.insert(0, os.path.join(os.getcwd(), "online"))
 import numpy as np, pandas as pd, torch, matplotlib.pyplot as plt
 from free_saccade import data as FD, detectors as D, ssl_models as S, intrinsic as I, suite, viz
