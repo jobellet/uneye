@@ -23,3 +23,5 @@ online/figures_run/
 docs/slides/data/latency_*.bin
 docs/slides/data/trace_*.csv
 data/Andersson/
+foundation/runs/*.pt
+foundation/runs/*.log

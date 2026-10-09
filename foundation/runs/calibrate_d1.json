@@ -1,0 +1,98 @@
+[
+ {
+  "model": "U'n'Eye (weights_1+2+3, supervised in-domain)",
+  "N": null,
+  "kappa_sacc": 0.8556477441236131,
+  "ev_f1": 0.8993514292577469,
+  "ev_recall": 0.9744924518479958,
+  "ev_precision": 0.8349687778768956
+ },
+ {
+  "model": "foundation, zero-shot",
+  "N": 0,
+  "kappa_sacc": 0.7330410477109981,
+  "ev_f1": 0.8691522203752078,
+  "ev_recall": 0.9526288391462779,
+  "ev_precision": 0.7991266375545851
+ },
+ {
+  "model": "foundation + calibration (head)",
+  "N": 1,
+  "kappa_sacc": 0.7627353895542865,
+  "ev_f1": 0.8104023116248056,
+  "ev_recall": 0.9489849036959916,
+  "ev_precision": 0.7071373157486424
+ },
+ {
+  "model": "foundation + calibration (full)",
+  "N": 1,
+  "kappa_sacc": 0.7607924992172679,
+  "ev_f1": 0.8534019172317044,
+  "ev_recall": 0.9500260281103592,
+  "ev_precision": 0.7746179966044142
+ },
+ {
+  "model": "foundation + calibration (head)",
+  "N": 5,
+  "kappa_sacc": 0.7754025689806348,
+  "ev_f1": 0.8058914047043305,
+  "ev_recall": 0.9541905257678293,
+  "ev_precision": 0.6974885844748858
+ },
+ {
+  "model": "foundation + calibration (full)",
+  "N": 5,
+  "kappa_sacc": 0.7766107893006556,
+  "ev_f1": 0.8345126683405615,
+  "ev_recall": 0.9515877147319105,
+  "ev_precision": 0.7430894308943089
+ },
+ {
+  "model": "foundation + calibration (head)",
+  "N": 20,
+  "kappa_sacc": 0.7710425305304626,
+  "ev_f1": 0.833711949114039,
+  "ev_recall": 0.9552316501821968,
+  "ev_precision": 0.739621120515921
+ },
+ {
+  "model": "foundation + calibration (full)",
+  "N": 20,
+  "kappa_sacc": 0.7574763935384496,
+  "ev_f1": 0.8514619883040936,
+  "ev_recall": 0.9474232170744404,
+  "ev_precision": 0.7731520815632965
+ },
+ {
+  "model": "foundation + calibration (head)",
+  "N": 100,
+  "kappa_sacc": 0.8123164406488386,
+  "ev_f1": 0.8428801472279733,
+  "ev_recall": 0.9536699635606455,
+  "ev_precision": 0.7551525144270403
+ },
+ {
+  "model": "foundation + calibration (full)",
+  "N": 100,
+  "kappa_sacc": 0.8358384811407872,
+  "ev_f1": 0.8675434476279943,
+  "ev_recall": 0.9614783966684018,
+  "ev_precision": 0.7903294822421908
+ },
+ {
+  "model": "foundation + calibration (head)",
+  "N": 1000,
+  "kappa_sacc": 0.8119794608351316,
+  "ev_f1": 0.8433179723502303,
+  "ev_recall": 0.9526288391462779,
+  "ev_precision": 0.7565109549400578
+ },
+ {
+  "model": "foundation + calibration (full)",
+  "N": 1000,
+  "kappa_sacc": 0.8422822563669093,
+  "ev_f1": 0.8779555767852878,
+  "ev_recall": 0.956793336803748,
+  "ev_precision": 0.8111209179170344
+ }
+]
