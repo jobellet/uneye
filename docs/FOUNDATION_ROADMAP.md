@@ -97,6 +97,23 @@ Verdict so far: the label-free universal HMM + 2-integer boundary calibration is
 encoders did not add anything yet. Ideas: per-event boundary rule (fraction of the peak speed) learned from a few clicks instead of a constant shift; an
 emission model better than one Gaussian per state; per-state duration laws (semi-Markov); the 5-class case (blink, pursuit, PSO) for Andersson.
 
+### The three improvements of the universal HMM (`foundation/hmm_improvements.py`), tested because the owner suspects a local maximum: they confirm it
+(The owner also notes that an HMM, Sheynikhovich et al., was already compared in the 2019 article: good F1 on some datasets, that is all.)
+| change | effect on kappa (universal HMM alone: d1 0.717, d2 0.752, d3 0.671, d4 0.813) | effect on F1 |
+|---|---|---|
+| boundaries at a fraction of each event's peak speed (2 fractions chosen on 10 labeled trials) | WORSE than the constant shift: 0.740 / 0.676 / 0.608 / 0.772 (constant shift: 0.815 / 0.832 / 0.720 / 0.843) | d1 0.935, d4 0.948 (+0.02) |
+| explicit duration law for the saccade state (semi-Markov; pmf from the events found in archive/ or lognormal prior, no label) | none: +-0.005 | +-0.01 |
+Andersson diagnosis: 97 % of the human saccade samples are found, but 41 % of the samples called saccade are labeled fixation (20 % of all fixation samples),
+12 % PSO, 16 % pursuit, 4 % blink. Ignoring PSO and blinks in the scoring: kappa 0.34 -> 0.40 only. The annotators of this benchmark labeled almost no
+small saccades (5th percentile of the human amplitudes 0.56 deg; detected events with no human counterpart: median 0.36 deg): keeping only events >= 0.5 deg
+raises F1 0.795 -> 0.854, kappa 0.335 -> 0.364. So part of the F1 gap is a convention on WHICH events count (an amplitude floor), not a boundary one.
+
+### DINO for eye traces (`foundation/dino1d.py`, owner's request: "the attention map of DINO, but for eye traces")
+Self-distillation (student / EMA teacher, 2 global crops of 336 samples + 6 local crops of 84, centring + sharpening, 512 prototypes) of a small transformer
+on patches of 4 samples of the unit-free velocity features, trained ONLY on archive/; question: does the attention of the [CLS] token to the patches
+highlight the saccades by itself? Scored on the benchmarks by the AUC of the attention map against the human labels (no label in training); results below
+when finished.
+
 ## Results of the first comparison of predictors alone, event F1 only (owner's rule), test split at 1 kHz
 Scorer `foundation/compare.py` (same for everyone: a predicted run of >= 3 samples overlapping a human saccade = hit; every predictor runs at the
 native rate of the dataset). Supervised columns were trained on set A of datasets 1, 2, 3 (so in-domain for d1-d3, unseen for d4, andersson).
