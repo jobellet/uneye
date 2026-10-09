@@ -1,0 +1,22 @@
+# Minimal CI (Step 8 of docs/ROADMAP.md): build the C++ engine and run all ctest tests, once in Release and once under
+# AddressSanitizer + UndefinedBehaviorSanitizer. No ONNX Runtime (the native engine is the one under test).
+name: cpp
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: ["", "address"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release -DUNEYE_SANITIZE=${{ matrix.sanitize }}
+      - name: Build
+        run: cmake --build build -j4
+      - name: Test
+        run: cd build && ctest --output-on-failure --timeout 900
