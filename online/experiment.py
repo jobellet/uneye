@@ -26,8 +26,15 @@ from metrics import evaluate_probs, tune_threshold, pool
 from weak_labels import engbert_kliegl
 
 SETS = ("1", "2", "3")
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-torch.backends.cudnn.benchmark = True      # fixed shapes: let cuDNN pick the fastest kernels
+def pick_device():
+    """cuda if present, else Apple-silicon GPU (mps), else cpu"""
+    if torch.cuda.is_available(): return "cuda"
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available(): return "mps"
+    return "cpu"
+
+
+DEVICE = pick_device()
+torch.backends.cudnn.benchmark = True      # fixed shapes: let cuDNN pick the fastest kernels (no effect without cuda)
 NAN_METRICS = ("kappa@tuned", "mcc@tuned", "f1@tuned")
 
 
@@ -277,6 +284,7 @@ def default_devices(workers_per_gpu=2):
     if torch.cuda.is_available():
         devs = [f"cuda:{i}" for i in range(torch.cuda.device_count())] * workers_per_gpu
         return devs[:max(cores, torch.cuda.device_count())]       # never more worker processes than CPU cores
+    if DEVICE == "mps": return ["mps"]                              # one process drives the Apple GPU
     return ["cpu"] * max(1, cores // 2)
 
 

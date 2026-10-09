@@ -13,3 +13,10 @@ free_results/
 demo_gaze/
 free_saccade/__pycache__/
 __pycache__/
+.venv/
+figures_run/
+free_saccade/__pycache__/
+archive/
+demo_gaze/
+free_results/
+online/figures_run/

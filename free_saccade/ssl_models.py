@@ -95,7 +95,7 @@ class SSL:
     def __init__(self, method="dino", dim=64, depth=6, protos=32, device=None, seed=0):
         torch.manual_seed(seed); self.rng = np.random.RandomState(seed)
         self.method, self.dim, self.K = method, dim, protos
-        self.dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.dev = device or ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         self.enc = DenseEncoder(5, dim, depth).to(self.dev)
         self.teacher = copy.deepcopy(self.enc).to(self.dev).requires_grad_(False)
         if method == "dino":
@@ -212,7 +212,7 @@ class Student(nn.Module):
 def self_train(win, label, weight, fs, init_encoder=None, freeze=False, steps=500, batch=64, T=128, lr=2e-3, seed=0, device=None, rounds=1, verbose=True):
     """label/weight: pseudo-labels (n,T) bool and (n,T) weights (0 = ignored). round > 1: the student's confident predictions become the next labels
     (noisy student) -- confident = probability < 0.1 or > 0.9, everything else keeps weight 0."""
-    dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    dev = device or ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     rng = np.random.RandomState(seed); torch.manual_seed(seed)
     n = len(win)
     lab, w = label.astype(np.float32), weight.astype(np.float32)
