@@ -108,6 +108,23 @@ positives (+-10-20 samples) so that the embedding is smooth over a saccade; (3) 
 speed (1-D, cheap), then test whether the prior score ranks thresholds like the human F1; (4) the real `cebra` package as a reference.
 The owner's decision: keep only what is useful (own loss + small conv encoder + prototype head), no dependency on the `cebra` toolbox.
 
+### The minimum-duration HMM (`free_saccade/detectors.py::HMM`) applied to different 1-D scores (`foundation/hmm_score.py`, `hmm_on_foundation.py`)
+HMM = 2 hidden states (fixation / saccade), Gaussian emission on the score, saccade state = a chain of 6 states (a saccade lasts >= 6 samples),
+fitted WITHOUT labels on the target's unlabeled train split (Viterbi training), then decoding the test split. Event F1 on the test split:
+| dataset | log speed + HMM | log detrended speed + HMM | linear score on 6 input features, fitted on the labels of the OTHER 4 datasets, + HMM | same on the embedding + HMM | embedding, label-free direction + HMM |
+|---|---|---|---|---|---|
+| d1 | 0.881 | 0.874 | **0.893** | 0.316 | 0.190 |
+| d2 | 0.822 | 0.516 | **0.824** | 0.153 | 0.300 |
+| d3 | 0.697 | 0.681 | 0.566 | 0.315 | 0.226 |
+| d4 | 0.658 | 0.643 | **0.842** | 0.186 | 0.106 |
+| andersson | 0.753 | 0.762 | 0.629 | 0.322 | 0.207 |
+- The HMM is what removes the fragmentation: the same feature score thresholded at 0.5 gives 0.09-0.25, decoded by the HMM 0.84-0.89 (d1, d2, d4).
+  A linear score on 6 input features learned on OTHER datasets + HMM reaches U'n'Eye's level on d1 (0.893 vs 0.899) with a tiny model; d4 0.842 vs 0.924.
+- The self-supervised embedding adds NOTHING in this form (0.1-0.3), supervised or not, with or without the HMM.
+- HMM on the logit of the supervised foundation network (never saw the target): d1 0.869 -> 0.535 (worse), d2 0.864 -> 0.905 (better). A Gaussian
+  emission fitted on a saturated logit is a poor model. Next: a hybrid NN-HMM, i.e. use the network's posterior as the emission likelihood
+  (scaled likelihood p(class | x) / p(class)) instead of fitting Gaussians, keep the minimum-duration chain (and give each state a duration law).
+
 ## NEW IDEA to test next (owner, 2026-10-09): self-supervised embedding + a hyperplane chosen by physiological priors
 No labels and no detector seeds on the new dataset; only general knowledge of eye movements.
 1. **Encoder**: one shared CEBRA-Time-style encoder (positives = time neighbours, InfoNCE on the unit sphere, velocity +

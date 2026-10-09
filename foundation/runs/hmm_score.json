@@ -1,0 +1,57 @@
+[
+ {
+  "dataset": "d1",
+  "emb-sup LOO + HMM": 0.31619870410367173,
+  "emb-sup LOO, threshold 0.5 (no HMM)": 0.22939248802621628,
+  "feat-sup LOO + HMM": 0.8934445768772348,
+  "feat-sup LOO, threshold 0.5 (no HMM)": 0.17637547928119368,
+  "emb-unsup + HMM": 0.19036075859118778,
+  "emb-unsup, threshold 0.5 (no HMM)": 0.21068876821949128,
+  "speed + HMM": 0.8813399386647794,
+  "detrended + HMM": 0.8738591153756143
+ },
+ {
+  "dataset": "d2",
+  "emb-sup LOO + HMM": 0.15303330502877632,
+  "emb-sup LOO, threshold 0.5 (no HMM)": 0.16132786802287333,
+  "feat-sup LOO + HMM": 0.8241545893719806,
+  "feat-sup LOO, threshold 0.5 (no HMM)": 0.20894279319140077,
+  "emb-unsup + HMM": 0.300431654676259,
+  "emb-unsup, threshold 0.5 (no HMM)": 0.33189448441247005,
+  "speed + HMM": 0.8215400624349636,
+  "detrended + HMM": 0.5155780103452424
+ },
+ {
+  "dataset": "d3",
+  "emb-sup LOO + HMM": 0.315,
+  "emb-sup LOO, threshold 0.5 (no HMM)": 0.21209610604805304,
+  "feat-sup LOO + HMM": 0.5657370517928287,
+  "feat-sup LOO, threshold 0.5 (no HMM)": 0.2453151618398637,
+  "emb-unsup + HMM": 0.22620380739081747,
+  "emb-unsup, threshold 0.5 (no HMM)": 0.27916251246261214,
+  "speed + HMM": 0.696969696969697,
+  "detrended + HMM": 0.6814814814814815
+ },
+ {
+  "dataset": "d4",
+  "emb-sup LOO + HMM": 0.18553789040432572,
+  "emb-sup LOO, threshold 0.5 (no HMM)": 0.12948184781386984,
+  "feat-sup LOO + HMM": 0.8416432584269662,
+  "feat-sup LOO, threshold 0.5 (no HMM)": 0.09153813156275063,
+  "emb-unsup + HMM": 0.10591511826079728,
+  "emb-unsup, threshold 0.5 (no HMM)": 0.17849824355971897,
+  "speed + HMM": 0.6575305291723201,
+  "detrended + HMM": 0.6431414168214381
+ },
+ {
+  "dataset": "andersson",
+  "emb-sup LOO + HMM": 0.3219789132197891,
+  "emb-sup LOO, threshold 0.5 (no HMM)": 0.22559760956175298,
+  "feat-sup LOO + HMM": 0.6291850915982312,
+  "feat-sup LOO, threshold 0.5 (no HMM)": 0.17208474850396244,
+  "emb-unsup + HMM": 0.20667209113100082,
+  "emb-unsup, threshold 0.5 (no HMM)": 0.1758241758241758,
+  "speed + HMM": 0.7530422333571939,
+  "detrended + HMM": 0.762043795620438
+ }
+]
