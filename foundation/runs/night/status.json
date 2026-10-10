@@ -82,5 +82,11 @@
   "state": "done",
   "started": "02:05",
   "minutes": 13.3
+ },
+ {
+  "id": "label_eff",
+  "state": "done",
+  "started": "02:19",
+  "minutes": 14.7
  }
 ]

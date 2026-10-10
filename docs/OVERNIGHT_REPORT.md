@@ -1,13 +1,13 @@
 # Overnight comparison of candidate architectures and training heuristics
 
-Generated 2026-10-10 02:19 by `foundation/night_report.py` from `foundation/runs/night/*.json` (MacBook Air M1, one GPU job at a time). The numbers are those of the files; nothing is typed by hand in the tables.
+Generated 2026-10-10 02:33 by `foundation/night_report.py` from `foundation/runs/night/*.json` (MacBook Air M1, one GPU job at a time). The numbers are those of the files; nothing is typed by hand in the tables.
 
 ## Summary
 
 - Best mean event F1 over the 5 benchmarks: **sup_bitcn_ema_tta** (0.88 F1, 0.80 kappa, readout: threshold); best mean kappa: **sup_bitcn_ema_tta** (0.88 / 0.80, readout: threshold).
 - Reference U'n'Eye (supervised): 0.85 F1 / 0.75 kappa on the same subsets (Andersson with its general weights is 0.55 / 0.33; with its own weights 0.89 / 0.81). The label-free universal HMM: 0.88 / 0.66.
 - Control: the random-initialised transformer encoder gives 0.48 / 0.44 (hmm): a trained encoder only counts if it beats this.
-- Steps of the night finished: 14; failed or timed out: 0.
+- Steps of the night finished: 15; failed or timed out: 0.
 
 ## Protocol (the same for every row)
 
@@ -86,6 +86,16 @@ The headline column is the better mean event F1 of the two readouts (shown separ
 |---|---|---|---|---|
 | `input_channels_8` | 0.63 / 0.39 | 0.63 / 0.55 | 0.71 / 0.59 | 0.72 / 0.59 |
 | `jepa_a` | 0.42 / 0.36 | 0.55 / 0.28 | 0.68 / 0.42 | 0.71 / 0.51 |
+| `ctrl_untrained` | 0.39 / 0.31 | 0.41 / 0.30 | 0.58 / 0.53 | 0.64 / 0.62 |
+| `ctrl_untrained_ts2vec` | 0.58 / 0.44 | 0.67 / 0.50 | 0.57 / 0.52 | 0.63 / 0.59 |
+| `hubert_a` | 0.55 / 0.47 | 0.55 / 0.40 | 0.59 / 0.43 | 0.67 / 0.52 |
+| `jepa_b` | 0.38 / 0.28 | 0.41 / 0.30 | 0.62 / 0.57 | 0.64 / 0.63 |
+| `jepa_d` | 0.47 / 0.34 | 0.59 / 0.33 | 0.65 / 0.37 | 0.73 / 0.46 |
+| `jepa_e` | 0.44 / 0.31 | 0.42 / 0.28 | 0.55 / 0.50 | 0.66 / 0.62 |
+| `mae_a` | 0.45 / 0.38 | 0.57 / 0.37 | 0.61 / 0.41 | 0.72 / 0.47 |
+| `mae_b` | 0.39 / 0.31 | 0.41 / 0.30 | 0.58 / 0.53 | 0.64 / 0.62 |
+| `ts2vec_a` | 0.53 / 0.41 | 0.60 / 0.50 | 0.65 / 0.54 | 0.68 / 0.58 |
+| `ts2vec_b` | 0.57 / 0.45 | 0.65 / 0.45 | 0.57 / 0.53 | 0.63 / 0.58 |
 
 ![label efficiency](figs_night/label_efficiency.png)
 
@@ -107,6 +117,7 @@ The headline column is the better mean event F1 of the two readouts (shown separ
 | jepa_d | done | 33.3 |
 | jepa_e | done | 9.6 |
 | mae_b | done | 13.3 |
+| label_eff | done | 14.7 |
 
 ## Limits
 
