@@ -144,7 +144,7 @@ embedding 0.90/0.61 (d1), 0.89/0.46 (d2), 0.98/0.85 (d3), 0.94/0.58 (d4), 0.92/0
 0.82/0.73, 0.92/0.82, 0.94/0.68. => the embedding separates saccades at the SAMPLE level as well as the speed feature (better on d3, the
 microsaccades) but gives fragmented EVENTS; a threshold on the normalised (detrended) speed alone beats it at the event level on 4 of 5 datasets.
 Retrained with a hard negative from the same recording (>= 15 samples away; `--hard`, closer to CEBRA's sampling): no improvement
-(event F1 0.56, 0.50, 0.81, 0.54, 0.54): this was NOT the main cause.
+(event F1 0.56, 0.50, 0.81, 0.54, 0.54): this was NOT the main cause. Re-run after an audit found that the first `--hard` version added every hard negative to one shared pool instead of one per reference: event F1 0.57, 0.48, 0.84, 0.63, 0.61 (d1 / d2 / d3 / d4 / Andersson), a little better on d4 and Andersson, still far below the plain input features (0.81, 0.90, 0.73, 0.82, 0.68) except on d3: same conclusion.
 Ideas not yet tried: (1) decode with duration priors (semi-Markov / HMM with a minimum-duration chain, as `free_saccade/detectors.py::HMM`
 already does on speed and reaches 0.89 / 0.90 on d1 / d3) on a LEARNED score instead of searching a hyperplane; (2) larger time offset for the
 positives (+-10-20 samples) so that the embedding is smooth over a saccade; (3) use the priors only to choose a threshold on the normalised

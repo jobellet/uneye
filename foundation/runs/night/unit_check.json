@@ -1,0 +1,121 @@
+{
+ "d1": {
+  "degrees (reference)": [
+   0.9031758326878389,
+   0.7876288894475482
+  ],
+  "isotropic gain x37 + offset": [
+   0.9031758326878389,
+   0.7876288894475482
+  ],
+  "per-trial per-axis z-score (anisotropic)": [
+   0.8882035466461063,
+   0.768095830181363
+  ],
+  "dataset z-score, clipped at +-6 (clipped = invalid)": [
+   0.8936825885978428,
+   0.7731712080473316
+  ]
+ },
+ "d4": {
+  "degrees (reference)": [
+   0.8881239242685026,
+   0.8493117790329147
+  ],
+  "isotropic gain x37 + offset": [
+   0.8881239242685026,
+   0.8493117790329147
+  ],
+  "per-trial per-axis z-score (anisotropic)": [
+   0.8514190317195325,
+   0.8267129033280373
+  ],
+  "dataset z-score, clipped at +-6 (clipped = invalid)": [
+   0.889655172413793,
+   0.8489949626969658
+  ]
+ },
+ "andersson": {
+  "degrees (reference)": [
+   0.7290803645401822,
+   0.5667445145873288
+  ],
+  "isotropic gain x37 + offset": [
+   0.7281795511221946,
+   0.5666035895734385
+  ],
+  "per-trial per-axis z-score (anisotropic)": [
+   0.7124183006535948,
+   0.5723749696500858
+  ],
+  "dataset z-score, clipped at +-6 (clipped = invalid)": [
+   0.7345575959933222,
+   0.5721979167990914
+  ]
+ },
+ "pool_input_stats": {
+  "EMTeC": {
+   "median_abs_input": 0.7969455718994141,
+   "p99_abs_input": 3.592984437942505,
+   "frac_above_3": 0.027553333333333332,
+   "noise_anisotropy_x_over_y": 0.3935845717977754,
+   "n": 600
+  },
+  "GazeBase": {
+   "median_abs_input": 0.7946580052375793,
+   "p99_abs_input": 4.107235431671143,
+   "frac_above_3": 0.029876666666666666,
+   "noise_anisotropy_x_over_y": 0.581405762743376,
+   "n": 600
+  },
+  "GazeCom": {
+   "median_abs_input": 0.8208257555961609,
+   "p99_abs_input": 4.181772232055664,
+   "frac_above_3": 0.045366666666666666,
+   "noise_anisotropy_x_over_y": 0.2738119962855309,
+   "n": 600
+  },
+  "Lund2013": {
+   "median_abs_input": 0.8013232946395874,
+   "p99_abs_input": 4.063354969024658,
+   "frac_above_3": 0.039251666666666664,
+   "noise_anisotropy_x_over_y": 0.49516420022586116,
+   "n": 600
+  },
+  "andersson": {
+   "median_abs_input": 0.9083779454231262,
+   "p99_abs_input": 3.695910930633545,
+   "frac_above_3": 0.022781666666666665,
+   "noise_anisotropy_x_over_y": 0.9022238102453591,
+   "n": 600
+  },
+  "d1": {
+   "median_abs_input": 0.8845534324645996,
+   "p99_abs_input": 3.525546073913574,
+   "frac_above_3": 0.018141666666666667,
+   "noise_anisotropy_x_over_y": 0.8333324706183942,
+   "n": 600
+  },
+  "d2": {
+   "median_abs_input": 1.5377271175384521,
+   "p99_abs_input": 3.733794927597046,
+   "frac_above_3": 0.06034833333333333,
+   "noise_anisotropy_x_over_y": 1.9707129923602138,
+   "n": 600
+  },
+  "d3": {
+   "median_abs_input": 0.883326530456543,
+   "p99_abs_input": 2.282998561859131,
+   "frac_above_3": 0.000775,
+   "noise_anisotropy_x_over_y": 0.9784920204735318,
+   "n": 600
+  },
+  "d4": {
+   "median_abs_input": 0.8819354772567749,
+   "p99_abs_input": 2.663729429244995,
+   "frac_above_3": 0.00633,
+   "noise_anisotropy_x_over_y": 0.8325606623174557,
+   "n": 600
+  }
+ }
+}
