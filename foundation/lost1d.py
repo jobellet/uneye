@@ -42,7 +42,7 @@ MEM_N, MEM_PER, SEED = 16384, 600, 0
 
 @torch.no_grad()
 def keys_tokens(model, pos, bs=64):
-    """(n, T, 2) positions at 1 kHz -> per-sample keys (n, T, D_MODEL // HEADS), per-sample tokens (n, T, D_MODEL)
+    """(n, T, 2) positions at 1 kHz -> per-sample keys (n, T, D_MODEL) (heads concatenated), per-sample tokens (n, T, D_MODEL)
     of the LAST block, averaged over sliding windows (geometry of dino1d.attention_maps).  keys: the key vectors
     actually used by the last block's attention, i.e. what LOST / TokenCut consume in 2-D."""
     model.eval()
@@ -51,7 +51,7 @@ def keys_tokens(model, pos, bs=64):
     padded = np.concatenate([np.full((n, pad, 2), np.nan, np.float32), pos.astype(np.float32),
                              np.full((n, pad + BASE, 2), np.nan, np.float32)], 1)
     DK = DN.D_MODEL // DN.HEADS
-    ak = np.zeros((n, T + 2 * BASE, DK), np.float32)
+    ak = np.zeros((n, T + 2 * BASE, DN.D_MODEL), np.float32)         # keys of ALL heads concatenated, as LOST / TokenCut do (an audit found a mean over the heads: different projection subspaces must not be added)
     at = np.zeros((n, T + 2 * BASE, DN.D_MODEL), np.float32)
     cnt = np.zeros((n, T + 2 * BASE, 1), np.float32)
     accm = {k: np.zeros((n, T + 2 * BASE), np.float32) for k in ("lost", "tokencut", "kmeans")}
@@ -61,7 +61,7 @@ def keys_tokens(model, pos, bs=64):
         if win.shape[1] < pad + G_LEN:
             continue                                                                    # truncated trailing window: no full crop
         for i in range(0, n, bs):
-            f = torch.as_tensor(DN.feats(win[i:i + bs], 1000.0)[:, pad:pad + G_LEN], device=DEV)
+            f = torch.as_tensor(DN.feats(win[i:i + bs, pad:pad + G_LEN], 1000.0), device=DEV)     # features of the NaN-free crop only (the NaN padding polluted the noise scale)
             vit = model.vit
             t = vit.patch(f.transpose(1, 2)).transpose(1, 2)
             k_tok = t.shape[1]
@@ -75,9 +75,9 @@ def keys_tokens(model, pos, bs=64):
                     h, _ = b(h)
                 else:
                     h, _ = b(h)
-            last_keys = F.normalize(K.mean(2), dim=-1)                                  # (B, tokens, DK) head-mean, L2-normalised
+            last_keys = F.normalize(K.reshape(len(K), k_tok, DN.HEADS * DK), dim=-1)          # (B, tokens, D_MODEL) heads concatenated, L2-normalised
             last_toks = vit.norm(h)[:, 1:]
-            m_k = np.repeat(last_keys.cpu().numpy(), P, axis=1)                         # (B, samples, DK)
+            m_k = np.repeat(last_keys.cpu().numpy(), P, axis=1)                         # (B, samples, D_MODEL)
             m_t = np.repeat(last_toks.cpu().numpy(), P, axis=1)                         # (B, samples, D_MODEL)
             ak[i:i + bs, s + pad:s + pad + G_LEN] += m_k
             at[i:i + bs, s + pad:s + pad + G_LEN] += m_t
@@ -89,7 +89,7 @@ def keys_tokens(model, pos, bs=64):
             cntm[i:i + bs, s + pad:s + pad + G_LEN] += 1
     sl = slice(pad, pad + T)
     ok = cnt[:, pad:pad + T, 0] > 0
-    K_out = np.full((n, T, DK), np.nan, np.float32); K_out[ok] = (ak[:, sl] / np.maximum(cnt[:, sl], 1))[ok]
+    K_out = np.full((n, T, DN.D_MODEL), np.nan, np.float32); K_out[ok] = (ak[:, sl] / np.maximum(cnt[:, sl], 1))[ok]
     T_out = np.full((n, T, DN.D_MODEL), np.nan, np.float32); T_out[ok] = (at[:, sl] / np.maximum(cnt[:, sl], 1))[ok]
     maps = {}
     okm = cntm[:, sl] > 0
@@ -111,10 +111,12 @@ def window_graph_maps(keys):
     lost_map = A[torch.arange(B, device=keys.device), seed]
     d = deg.clamp_min(1e-6)
     An = A / torch.sqrt(d[:, :, None] * d[:, None, :])
-    L = torch.diag_embed(d) - An                                                      # D - A_normalised
+    L = torch.eye(W, device=keys.device).expand(B, W, W) - An                          # normalised Laplacian I - D^-1/2 A D^-1/2 (an audit found D - A_n here, which sorts tokens by degree)
     eye = torch.eye(W, device=keys.device).expand(B, W, W)
     _, vecs = torch.linalg.eigh(L + eye * 1e-4)
     fied = vecs[:, :, 1]                                                                # second-smallest eigenvector
+    big = fied.abs().argmax(dim=1)                                                      # TokenCut's own sign rule: the token with the largest |value| is in the positive part (the eigensolver's sign is arbitrary and, without this, overlapping windows cancel each other)
+    fied = torch.where(fied.gather(1, big[:, None]) < 0, -fied, fied)
     fied = fied - fied.mean(1, keepdim=True)
     fied = fied / fied.std(1, keepdim=True).clamp_min(1e-6)
     return lost_map, fied
@@ -126,7 +128,8 @@ def window_kmeans_map(tokens, iters=10, seed=0):
     X = F.normalize(tokens, dim=-1)
     B, W, D = X.shape
     g = torch.Generator(device="cpu").manual_seed(seed)
-    idx = torch.randint(0, W, (B, 2), generator=g).to(X.device)
+    i0 = torch.randint(0, W, (B,), generator=g); i1 = (i0 + torch.randint(1, W, (B,), generator=g)) % W        # two DIFFERENT initial tokens (an audit found draws with replacement could give two identical centroids)
+    idx = torch.stack([i0, i1], 1).to(X.device)
     c = X[torch.arange(B, device=X.device)[:, None], idx]                               # (B, 2, D)
     for _ in range(iters):
         dist = torch.cdist(X, c)                                                        # (B, W, 2)
@@ -171,10 +174,10 @@ def memory_maps(tokens, memory, bs=512):
         if ok.sum() == 0:
             continue
         Xo = F.normalize(X[ok], dim=-1)
-        best = torch.full((len(Xo),), torch.inf, device=dev)
+        best = torch.full((len(Xo),), -torch.inf, device=dev)
         for m0 in range(0, len(M), 4096):
             sim = Xo @ M[m0:m0 + 4096].T                                                 # cosine similarity, chunked over the memory
-            best = torch.minimum(best, sim.max(1).values)
+            best = torch.maximum(best, sim.max(1).values)                              # nearest neighbour = LARGEST cosine similarity over all chunks (an audit found minimum here)
         nn = torch.full((len(X),), np.nan, device=dev)
         nn[ok] = 2.0 - 2.0 * best
         out[s:s + bs] = nn.reshape(-1, T).cpu().numpy()

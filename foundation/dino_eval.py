@@ -28,7 +28,7 @@ def sliding(model, pos, what, bs=64):
     for s in range(0, T + pad, L_LEN):
         win = padded[:, s:s + BASE]
         for i in range(0, n, bs):
-            f = torch.as_tensor(DN.feats(win[i:i + bs], 1000.0)[:, pad:pad + G_LEN], device=DEV)
+            f = torch.as_tensor(DN.feats(win[i:i + bs, pad:pad + G_LEN], 1000.0), device=DEV)     # features of the NaN-free crop only (an audit found the NaN padding polluted the noise scale; dino1d.attention_maps was fixed first, this copy was missed)
             vit = model.vit
             t = vit.patch(f.transpose(1, 2)).transpose(1, 2); k = t.shape[1]
             h = torch.cat([vit.cls.expand(len(t), -1, -1), t + vit.pos[:k]], 1); a = None
