@@ -16,7 +16,7 @@ and an eye-movement "foundation" study. Owner speaks French; code, docs and comm
 | the original 2019 article's analyses (notebooks) | `analysis scripts/AGENT.md` |
 
 ## Current state (2026-10-10)
-- Best detector: 2-channel (vx, vy) bidirectional TCN, `foundation/sup_bitcn.py --inputs 2`: mean event F1 0.90 / kappa 0.81 on the 5 benchmarks (U'n'Eye 0.85 / 0.75). C++ port with parity test: `cpp/src/bitcn.cpp`.
+- Best detector: 2-channel (vx, vy) bidirectional TCN, `foundation/sup_bitcn.py --inputs 2`: mean event F1 0.90 / kappa 0.81 on the 5 benchmarks vs U'n'Eye 0.92 / 0.84 when U'n'Eye uses its own Andersson weights (0.85 / 0.75 with its general weights); BiTCN >= U'n'Eye on d1-d4, below on Andersson. Everything tried vs the benchmark, as tables: `docs/BENCHMARK_SUMMARY.md`. C++ port with parity test: `cpp/src/bitcn.cpp`.
 - Label-free best: universal HMM (F1 0.88 / kappa 0.66) and its noisy-student TCN (0.83 / 0.67). Self-supervised encoders (JEPA, MAE, HuBERT, TS2Vec, DINO) did NOT beat plain velocity inputs: `docs/OVERNIGHT_REPORT.md`.
 - Hand-over documents: `docs/ROADMAP.md` (safety demo, steps 2-8, done), `docs/FOUNDATION_ROADMAP.md` (foundation study, findings), `docs/OVERNIGHT_REPORT.md` (auto-generated comparison).
 
