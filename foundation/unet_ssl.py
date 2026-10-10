@@ -25,7 +25,7 @@ def build_pool(n_arc=3000, n_bench=3000, seed=0):
     for g in ("EMTeC", "GazeBase", "Lund2013", "GazeCom"):
         w = src.sample(n_arc, W, rng, fs=1000.0, groups=(g,), max_missing=0.01).pos; P += list(w); G += [g] * len(w); print(g, len(w), flush=True)
     for k in FD.ALL:
-        S = FD.load(k, "train"); n, T = S.pos.shape[:2]; got = 0; tries = 0                      # labels never read
+        S = FD.load(k, "test" if k == "d1" else "train"); n, T = S.pos.shape[:2]; got = 0; tries = 0   # labels never read; dataset 1: set B only (set A is the few-label TEST set of finetune(): an audit found its unlabeled positions were in the pool)
         while got < n_bench and tries < 50 * n_bench:
             tries += 1; i, s0 = rng.randint(n), rng.randint(0, T - W + 1); w = S.pos[i, s0:s0 + W]
             if (~np.isfinite(w).all(1)).mean() > 0.01: continue
@@ -97,7 +97,7 @@ def finetune_one(sel_pos, sel_lab, init, seed, steps=600, lr=3e-4, bs=32):
     if init:
         sd = {k: v for k, v in torch.load(os.path.join(RUNS, "unet_pre.pt"), weights_only=False).items() if not k.startswith("head")}; net.load_state_dict(sd, strict=False)
     n = len(sel_pos); nv = max(n // 5, 2); perm = rng.permutation(n); vi, ti = perm[:nv], perm[nv:]
-    opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-2); best, bad, state = 1e9, 0, None
+    opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-2); best, bad, state = 1e9, 0, {k: v.clone() for k, v in net.state_dict().items()}
     vp, vl = sel_pos[vi], sel_lab[vi] == 1; vX = torch.as_tensor(make_input(vp), device=DEV); vY = torch.as_tensor(vl.astype(np.float32), device=DEV); vV = torch.as_tensor(np.isfinite(vp).all(2), device=DEV).float()
     for it in range(steps):
         for g in opt.param_groups: g["lr"] = lr * min(1.0, (it + 1) / 30) * (0.5 * (1 + math.cos(math.pi * it / steps)) * 0.9 + 0.1)

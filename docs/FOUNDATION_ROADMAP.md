@@ -101,7 +101,7 @@ emission model better than one Gaussian per state; per-state duration laws (semi
 (The owner also notes that an HMM, Sheynikhovich et al., was already compared in the 2019 article: good F1 on some datasets, that is all.)
 | change | effect on kappa (universal HMM alone: d1 0.717, d2 0.752, d3 0.671, d4 0.813) | effect on F1 |
 |---|---|---|
-| boundaries at a fraction of each event's peak speed (2 fractions chosen on 10 labeled trials) | WORSE than the constant shift: 0.740 / 0.676 / 0.608 / 0.772 (constant shift: 0.815 / 0.832 / 0.720 / 0.843) | d1 0.935, d4 0.948 (+0.02) |
+| boundaries at a fraction of each event's peak speed (2 fractions chosen on 10 labeled trials) | WORSE than the constant shift on d1-d4 (re-run after an audit fixed the boundary search: 0.758 / 0.687 / 0.647 / 0.802 against 0.815 / 0.832 / 0.720 / 0.843; the first version gave 0.740 / 0.676 / 0.608 / 0.772); on Andersson the first version's kappa 0.332 was an artifact of that bug, 0.589 after the fix | d1 0.930, d4 0.943 |
 | explicit duration law for the saccade state (semi-Markov; pmf from the events found in archive/ or lognormal prior, no label) | none: +-0.005 | +-0.01 |
 Andersson diagnosis: 97 % of the human saccade samples are found, but 41 % of the samples called saccade are labeled fixation (20 % of all fixation samples),
 12 % PSO, 16 % pursuit, 4 % blink. Ignoring PSO and blinks in the scoring: kappa 0.34 -> 0.40 only. The annotators of this benchmark labeled almost no
@@ -110,7 +110,7 @@ raises F1 0.795 -> 0.854, kappa 0.335 -> 0.364. So part of the F1 gap is a conve
 
 ### DINO for eye traces (`foundation/dino1d.py`, owner's request: "the attention map of DINO, but for eye traces")
 Self-distillation (student / EMA teacher, 2 global crops of 336 samples + 6 local crops of 84, centring + sharpening, 512 prototypes) of a small transformer
-on patches of 4 samples of the unit-free velocity features, trained ONLY on archive/; question: does the attention of the [CLS] token to the patches
+on patches of 4 samples of the unit-free velocity features, trained on archive/ (the first run) and later also on the UNLABELED train splits of the five benchmarks (`training_pool`, no label read); question: does the attention of the [CLS] token to the patches
 highlight the saccades by itself? Scored on the benchmarks by the AUC of the attention map against the human labels (no label in training); results below
 when finished.
 
@@ -205,7 +205,7 @@ python free_saccade/benchmark_cebra.py                 # label-free baselines in
 
 ## Overnight 2026-10-09/10 (details: docs/OVERNIGHT_REPORT.md)
 17 steps, 0 failures. Mean event F1 / kappa over the 5 benchmarks (same test subsets):
-- Supervised BiTCN (d1+d2+d3 labels, EMA+TTA, `sup_bitcn_b_tta`): 0.89 / 0.81, above U'n'Eye 0.85 / 0.75; weak point Andersson (0.75 / 0.59).
+- Supervised BiTCN (d1+d2+d3 labels, plain weights + 8-pass test-time augmentation, `sup_bitcn_b_tta`; NOT the EMA): 0.89 / 0.81, above U'n'Eye 0.85 / 0.75; weak point Andersson (0.75 / 0.59).
 - Label-free noisy student of the universal HMM (`selftrain_b_r1_tta`): 0.83 / 0.67 (kappa above U'n'Eye mean, F1 slightly below); universal HMM alone 0.88 / 0.66.
 - Self-supervised representations (JEPA a/b/d/e, MAE a/b, HuBERT, TS2Vec a/b) + probe + HMM: 0.46-0.68 F1, none beats plain input channels (0.75 / 0.51); several equal or below the untrained control (mae_b equals the control: best checkpoint was step 0). Only ts2vec_a is notable with 20 labeled trials on d1/d2 (0.84 / 0.71). Novelty-curve detection from TS2Vec is poor (F1 <= 0.33).
 - Conclusion: for the C++ tool, ship the bidirectional TCN (supervised or HMM-distilled), not a SSL foundation encoder; SSL representation learning adds nothing measurable here.

@@ -2,24 +2,24 @@
  {
   "dataset": "d1",
   "method": "universal HMM, no label",
-  "ev_f1": 0.9128179797480859,
-  "kappa": 0.717068912065906,
+  "ev_f1": 0.912142152023692,
+  "kappa": 0.7167859738529423,
   "ev_recall": 0.9619989588755856,
-  "ev_precision": 0.868421052631579
+  "ev_precision": 0.8671984983575786
  },
  {
   "dataset": "d1",
   "method": "+ boundary at a fraction of the peak speed, from 10 labeled trials (mean of 3)",
-  "ev_f1": 0.929625290917139,
-  "kappa": 0.7576801625942391,
+  "ev_f1": 0.9348988034178446,
+  "kappa": 0.7395826287032378,
   "fractions": [
    [
-    0.03,
-    0.03
+    0.1,
+    0.06
    ],
    [
-    0.1,
-    0.03
+    0.3,
+    0.1
    ],
    [
     0.06,
@@ -30,10 +30,10 @@
  {
   "dataset": "d1",
   "method": "semi-Markov, saccade duration law 'archive', no label",
-  "ev_f1": 0.9140316205533596,
-  "kappa": 0.7167193378894414,
+  "ev_f1": 0.9138058779945666,
+  "kappa": 0.7168722780623601,
   "ev_recall": 0.9630400832899532,
-  "ev_precision": 0.8697696285848613
+  "ev_precision": 0.8693609022556391
  },
  {
   "dataset": "d1",
@@ -46,27 +46,27 @@
  {
   "dataset": "d2",
   "method": "universal HMM, no label",
-  "ev_f1": 0.907383136740935,
-  "kappa": 0.7518614665494262,
-  "ev_recall": 0.9190265486725664,
-  "ev_precision": 0.8960310612597067
+  "ev_f1": 0.9076620825147348,
+  "kappa": 0.7516726218412726,
+  "ev_recall": 0.9199115044247788,
+  "ev_precision": 0.8957345971563981
  },
  {
   "dataset": "d2",
   "method": "+ boundary at a fraction of the peak speed, from 10 labeled trials (mean of 3)",
-  "ev_f1": 0.9123612756679217,
-  "kappa": 0.6865877844570581,
+  "ev_f1": 0.9091310139095014,
+  "kappa": 0.6757779074955018,
   "fractions": [
    [
-    0.1,
+    0.2,
+    0.2
+   ],
+   [
+    0.3,
     0.15
    ],
    [
-    0.1,
-    0.15
-   ],
-   [
-    0.1,
+    0.15,
     0.2
    ]
   ]
@@ -75,7 +75,7 @@
   "dataset": "d2",
   "method": "semi-Markov, saccade duration law 'archive', no label",
   "ev_f1": 0.912104689203926,
-  "kappa": 0.7525553730753604,
+  "kappa": 0.752499466876048,
   "ev_recall": 0.9252212389380531,
   "ev_precision": 0.8993548387096775
  },
@@ -83,7 +83,7 @@
   "dataset": "d2",
   "method": "semi-Markov, saccade duration law 'prior', no label",
   "ev_f1": 0.9164467897977132,
-  "kappa": 0.753415433601077,
+  "kappa": 0.7533801833927941,
   "ev_recall": 0.9221238938053097,
   "ev_precision": 0.9108391608391608
  },
@@ -91,27 +91,27 @@
   "dataset": "d3",
   "method": "universal HMM, no label",
   "ev_f1": 0.8538461538461537,
-  "kappa": 0.6704192756520166,
+  "kappa": 0.6713539721651189,
   "ev_recall": 0.7708333333333334,
   "ev_precision": 0.9568965517241379
  },
  {
   "dataset": "d3",
   "method": "+ boundary at a fraction of the peak speed, from 10 labeled trials (mean of 3)",
-  "ev_f1": 0.8435897435897436,
-  "kappa": 0.6469744448155244,
+  "ev_f1": 0.8538461538461538,
+  "kappa": 0.6078412716727344,
   "fractions": [
    [
-    0.1,
-    0.03
+    0.3,
+    0.3
    ],
    [
-    0.15,
-    0.1
+    0.3,
+    0.3
    ],
    [
-    0.2,
-    0.03
+    0.3,
+    0.3
    ]
   ]
  },
@@ -119,7 +119,7 @@
   "dataset": "d3",
   "method": "semi-Markov, saccade duration law 'archive', no label",
   "ev_f1": 0.8449612403100775,
-  "kappa": 0.676963496863222,
+  "kappa": 0.6756544530182251,
   "ev_recall": 0.7569444444444444,
   "ev_precision": 0.956140350877193
  },
@@ -127,35 +127,35 @@
   "dataset": "d3",
   "method": "semi-Markov, saccade duration law 'prior', no label",
   "ev_f1": 0.8449612403100775,
-  "kappa": 0.6738524626930813,
+  "kappa": 0.6738105178000333,
   "ev_recall": 0.7569444444444444,
   "ev_precision": 0.956140350877193
  },
  {
   "dataset": "d4",
   "method": "universal HMM, no label",
-  "ev_f1": 0.9320975216602861,
-  "kappa": 0.8138511611130362,
-  "ev_recall": 0.9330375151270673,
-  "ev_precision": 0.9311594202898551
+  "ev_f1": 0.931777017508553,
+  "kappa": 0.8134554465816348,
+  "ev_recall": 0.9338442920532473,
+  "ev_precision": 0.929718875502008
  },
  {
   "dataset": "d4",
   "method": "+ boundary at a fraction of the peak speed, from 10 labeled trials (mean of 3)",
-  "ev_f1": 0.9426179293444966,
-  "kappa": 0.8017730162667375,
+  "ev_f1": 0.948470539930199,
+  "kappa": 0.7719077209510165,
   "fractions": [
    [
-    0.15,
-    0.03
+    0.3,
+    0.2
    ],
    [
-    0.15,
-    0.03
+    0.3,
+    0.06
    ],
    [
-    0.2,
-    0.03
+    0.3,
+    0.2
    ]
   ]
  },
@@ -163,7 +163,7 @@
   "dataset": "d4",
   "method": "semi-Markov, saccade duration law 'archive', no label",
   "ev_f1": 0.934274193548387,
-  "kappa": 0.8132603117034392,
+  "kappa": 0.8132537565733486,
   "ev_recall": 0.9346510689794272,
   "ev_precision": 0.9338976219266425
  },
@@ -178,28 +178,28 @@
  {
   "dataset": "andersson",
   "method": "universal HMM, no label",
-  "ev_f1": 0.7973311092577147,
-  "kappa": 0.3382063724936085,
+  "ev_f1": 0.7946799667497921,
+  "kappa": 0.33502130923963447,
   "ev_recall": 0.8901303538175046,
-  "ev_precision": 0.7220543806646526
+  "ev_precision": 0.7177177177177178
  },
  {
   "dataset": "andersson",
   "method": "+ boundary at a fraction of the peak speed, from 10 labeled trials (mean of 3)",
-  "ev_f1": 0.7922522992727993,
-  "kappa": 0.5890617133201728,
+  "ev_f1": 0.8236316246741963,
+  "kappa": 0.33150543794912735,
   "fractions": [
    [
-    0.15,
-    0.2
+    0.3,
+    0.3
    ],
    [
-    0.15,
-    0.2
+    0.3,
+    0.3
    ],
    [
-    0.2,
-    0.2
+    0.3,
+    0.3
    ]
   ]
  },
@@ -207,7 +207,7 @@
   "dataset": "andersson",
   "method": "semi-Markov, saccade duration law 'archive', no label",
   "ev_f1": 0.7471428571428571,
-  "kappa": 0.3411458359950065,
+  "kappa": 0.33773918424949656,
   "ev_recall": 0.9739292364990689,
   "ev_precision": 0.6060254924681344
  },
@@ -215,40 +215,40 @@
   "dataset": "andersson",
   "method": "semi-Markov, saccade duration law 'prior', no label",
   "ev_f1": 0.7471428571428571,
-  "kappa": 0.340977390582353,
+  "kappa": 0.3376101496162399,
   "ev_recall": 0.9739292364990689,
   "ev_precision": 0.6060254924681344
  },
  {
   "dataset": "andersson",
   "method": "diagnosis: PSO ignored",
-  "ev_f1": 0.7966616084977238,
-  "kappa": 0.3879808909871665,
+  "ev_f1": 0.7936507936507936,
+  "kappa": 0.38544741178845077,
   "ev_recall": 0.9776536312849162,
-  "ev_precision": 0.6722151088348272
+  "ev_precision": 0.6679389312977099
  },
  {
   "dataset": "andersson",
   "method": "diagnosis: blinks ignored",
-  "ev_f1": 0.817792985457656,
-  "kappa": 0.35098379013259595,
+  "ev_f1": 0.8156996587030717,
+  "kappa": 0.3476945321062822,
   "ev_recall": 0.8901303538175046,
-  "ev_precision": 0.7563291139240507
+  "ev_precision": 0.752755905511811
  },
  {
   "dataset": "andersson",
   "method": "diagnosis: PSO and blinks ignored",
-  "ev_f1": 0.8158508158508159,
-  "kappa": 0.40472516225094013,
+  "ev_f1": 0.8133230054221533,
+  "kappa": 0.4021474839084237,
   "ev_recall": 0.9776536312849162,
-  "ev_precision": 0.7
+  "ev_precision": 0.6962864721485411
  },
  {
   "dataset": "andersson",
   "method": "diagnosis: padding, PSO and blinks ignored",
-  "ev_f1": 0.8158508158508159,
-  "kappa": 0.40472516225094013,
+  "ev_f1": 0.8133230054221533,
+  "kappa": 0.4021474839084237,
   "ev_recall": 0.9776536312849162,
-  "ev_precision": 0.7
+  "ev_precision": 0.6962864721485411
  }
 ]

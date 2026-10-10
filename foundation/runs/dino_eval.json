@@ -1,0 +1,92 @@
+[
+ {
+  "dataset": "d1",
+  "speed_channel_AUC": 0.8815031216834825,
+  "trained": {
+   "attn_mean": 0.13779587232827045,
+   "attn_best_head": 0.35715039988587083,
+   "attn_worst_head": 0.1295867235513194,
+   "pc1_tokens": 0.5357986214532641,
+   "pc1_sign": "+"
+  },
+  "untrained": {
+   "attn_mean": 0.6076037902323806,
+   "attn_best_head": 0.6811461129731002,
+   "attn_worst_head": 0.43505313818273067,
+   "pc1_tokens": 0.5030621608777921,
+   "pc1_sign": "+"
+  }
+ },
+ {
+  "dataset": "d2",
+  "speed_channel_AUC": 0.89352507139889,
+  "trained": {
+   "attn_mean": 0.24488812014037686,
+   "attn_best_head": 0.45020212756969646,
+   "attn_worst_head": 0.25578896012632235,
+   "pc1_tokens": 0.5562678279177304,
+   "pc1_sign": "-"
+  },
+  "untrained": {
+   "attn_mean": 0.6684920335997503,
+   "attn_best_head": 0.6535351753365428,
+   "attn_worst_head": 0.4589828934912984,
+   "pc1_tokens": 0.5623748919053174,
+   "pc1_sign": "+"
+  }
+ },
+ {
+  "dataset": "d3",
+  "speed_channel_AUC": 0.8185508708414327,
+  "trained": {
+   "attn_mean": 0.19195552085308942,
+   "attn_best_head": 0.40838606531056476,
+   "attn_worst_head": 0.18259963116813338,
+   "pc1_tokens": 0.5203552697221648,
+   "pc1_sign": "+"
+  },
+  "untrained": {
+   "attn_mean": 0.5320835980134716,
+   "attn_best_head": 0.6620844642594619,
+   "attn_worst_head": 0.40966321481674933,
+   "pc1_tokens": 0.5033314704729366,
+   "pc1_sign": "+"
+  }
+ },
+ {
+  "dataset": "d4",
+  "speed_channel_AUC": 0.9288898573942163,
+  "trained": {
+   "attn_mean": 0.10970551713654074,
+   "attn_best_head": 0.3577977355258416,
+   "attn_worst_head": 0.0972899757216473,
+   "pc1_tokens": 0.5495369689575746,
+   "pc1_sign": "-"
+  },
+  "untrained": {
+   "attn_mean": 0.6088600458881026,
+   "attn_best_head": 0.6734065334476087,
+   "attn_worst_head": 0.4165146457035242,
+   "pc1_tokens": 0.5261750201865556,
+   "pc1_sign": "+"
+  }
+ },
+ {
+  "dataset": "andersson",
+  "speed_channel_AUC": 0.927676576839467,
+  "trained": {
+   "attn_mean": 0.052136859463751295,
+   "attn_best_head": 0.26698854075476564,
+   "attn_worst_head": 0.04748267133559994,
+   "pc1_tokens": 0.594397180543397,
+   "pc1_sign": "-"
+  },
+  "untrained": {
+   "attn_mean": 0.6361920976494726,
+   "attn_best_head": 0.7547551556197986,
+   "attn_worst_head": 0.40125440845475047,
+   "pc1_tokens": 0.5086312741618428,
+   "pc1_sign": "+"
+  }
+ }
+]

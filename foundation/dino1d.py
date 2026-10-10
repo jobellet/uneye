@@ -173,7 +173,7 @@ def attention_maps(model, pos, bs=64):
     for s in starts:
         win = padded[:, s:s + BASE]
         for i in range(0, n, bs):
-            f = torch.as_tensor(feats(win[i:i + bs], 1000.0)[:, pad:pad + G_LEN], device=DEV)
+            f = torch.as_tensor(feats(win[i:i + bs, pad:pad + G_LEN], 1000.0), device=DEV)      # features of the NaN-free crop only (an audit found the NaN padding polluted the noise scale and the first samples)
             _, a = model.vit(f, want_attn=True); a = a[:, :, 0, 1:]; a = (a / a.sum(-1, keepdim=True) * a.shape[-1]).cpu().numpy()      # (B, H, tokens)
             m = np.repeat(a, P, axis=2).transpose(0, 2, 1)                                                                            # (B, 336, H)
             acc[i:i + bs, s + pad:s + pad + G_LEN] += m; cnt[i:i + bs, s + pad:s + pad + G_LEN] += 1

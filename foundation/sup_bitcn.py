@@ -34,7 +34,7 @@ def main():
         for k, S in val.items():
             s = BT.score_fn_factory(m)(S.pos); out.append(CP.event_f1((s > 0) & np.isfinite(S.pos).all(2), S))
         return float(np.mean([o["ev_f1"] for o in out])), float(np.mean([o["kappa"] for o in out]))
-    path = os.path.join(ROOT, "foundation", "runs", f"{a.name}.pt"); best, bad, hist, log, t0 = -1.0, 0, [], [], time.time()
+    path = os.path.join(ROOT, "foundation", "runs", f"{a.name}.pt"); best, bad, hist, log, t0 = -1.0, 0, [], [], time.time(); best_n, best_e = -1.0, -1.0; sd_n = sd_e = None   # the weights and the EMA are checkpointed INDEPENDENTLY (an audit found the EMA was reloaded from the step where the plain weights peaked)
     for it in range(a.steps):
         for g in opt.param_groups: g["lr"] = a.lr * min(1.0, (it + 1) / 200) * (0.5 * (1 + math.cos(math.pi * it / a.steps)) * 0.98 + 0.02)
         P, L = [], []
@@ -51,8 +51,10 @@ def main():
             for be, bn in zip(ema.buffers(), net.buffers()): be.copy_(bn)
         if (it + 1) % 500 == 0:
             f1, kp = val_f1(net); f1e, kpe = val_f1(ema); log.append(dict(step=it + 1, loss=float(np.mean(hist[-500:])), val_f1=f1, val_kappa=kp, val_f1_ema=f1e, val_kappa_ema=kpe))
-            cur = max(f1, f1e); improved = cur > best + 1e-3
-            if improved: best, bad = cur, 0; torch.save({"net": net.state_dict(), "ema": ema.state_dict()}, path)
+            if f1 > best_n + 1e-3: best_n = f1; sd_n = {k: v.clone() for k, v in net.state_dict().items()}
+            if f1e > best_e + 1e-3: best_e = f1e; sd_e = {k: v.clone() for k, v in ema.state_dict().items()}
+            cur = max(best_n, best_e); improved = cur > best + 1e-3
+            if improved: best, bad = cur, 0; torch.save({"net": sd_n, "ema": sd_e if sd_e is not None else ema.state_dict()}, path)
             else: bad += 1
             print(f"[{a.name}] step {it + 1}/{a.steps} loss {log[-1]['loss']:.4f} | validation (d1-d3 held-out trials): F1 {f1:.3f} kappa {kp:.3f} | EMA F1 {f1e:.3f} kappa {kpe:.3f} (best {best:.3f}{' *saved*' if improved else ''}, patience {bad}/3) | {time.time() - t0:.0f} s", flush=True)
             if bad >= 3: print(f"[{a.name}] early stop", flush=True); break

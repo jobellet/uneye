@@ -54,7 +54,7 @@ def main():
     print(f"\nchosen limit: {chosen:g} deg/s (current {CURRENT:g}); recall budget {BUDGET:.2f} below {ref:.3f}")
     outB = os.path.join(DATA, f"fault_injection_ood{chosen:g}.csv")
     run(chosen, "B", outB)
-    old = pooled(pd.read_csv(os.path.join(DATA, "fault_injection.csv"))); new = pooled(pd.read_csv(outB))
+    old = pooled(pd.read_csv(os.path.join(DATA, f"fault_injection_ood{CURRENT:g}.csv")))      # the run with the CURRENT limit (fault_injection.csv holds the calibrated one after this script was applied); new = pooled(pd.read_csv(outB))
     o, n = old[old.system == "guard"].reset_index(drop=True), new[new.system == "guard"].reset_index(drop=True)
     cmp = pd.DataFrame(dict(perturbation=o.perturbation, level=o.level, dangerous_current=o.dangerous, dangerous_chosen=n.dangerous,
                             recall_current=o.recall.round(3), recall_chosen=n.recall.round(3)))

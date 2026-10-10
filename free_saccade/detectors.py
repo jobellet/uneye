@@ -165,7 +165,7 @@ class HMM:
             self.mu = [float(f[m0].mean()), float(f[m1].mean())]; self.sd = [float(f[m0].std() + 1e-3), float(f[m1].std() + 1e-3)]
             n_runs = sum(len(runs_1d(l)) for l in lab)
             self.p_on = float(np.clip(n_runs / max(m0.sum(), 1), 1e-4, 0.2))
-            self.p_stay = float(np.clip(1 - n_runs / max(m1.sum() - self.d * n_runs, n_runs), 0.3, 0.99))
+            self.p_stay = float(np.clip(1 - n_runs / max(m1.sum() - (self.d - 1) * n_runs, n_runs), 0.3, 0.99))     # transitions out of the last state = samples in it = run length - (d - 1), one of which leaves
         return self
 
     def predict(self, win):

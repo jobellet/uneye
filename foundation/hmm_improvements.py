@@ -26,10 +26,10 @@ def refine(pred, speed, f_on, f_off, ext=20):
             lo, hi = max(s - ext, 0), min(e + ext, pred.shape[1] - 1)
             seg = speed[k, lo:hi + 1]; pk = lo + int(np.argmax(speed[k, s:e + 1])) + (s - lo)
             vp = speed[k, s:e + 1].max()
-            on = np.nonzero(seg[:pk - lo + 1] >= f_on * vp)[0]; off = np.nonzero(seg[pk - lo:] >= f_off * vp)[0]
-            if len(on) == 0 or len(off) == 0: continue
-            # first sample (going from the left) after which the speed stays above the fraction up to the peak; same backwards for the offset
-            a = lo + on[0]; b = pk + off[-1]
+            below_on = np.nonzero(seg[:pk - lo + 1] < f_on * vp)[0]; below_off = np.nonzero(seg[pk - lo:] < f_off * vp)[0]
+            # walking out from the peak: the onset is the first sample after the last one below the fraction before the peak, the offset the last sample before the first one below it after the peak
+            # (an audit found the first version took the first / last sample ABOVE the fraction anywhere in the extended window, which noise stretches)
+            a = lo + (below_on[-1] + 1 if len(below_on) else 0); b = pk + (below_off[0] - 1 if len(below_off) else len(seg) - 1 - (pk - lo))
             if b >= a: out[k, a:b + 1] = True
     return out
 

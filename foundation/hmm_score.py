@@ -86,7 +86,7 @@ def main():
         for name, (sA, sB) in sc.items():
             pred = hmm_decode(sA, PA["valid"], sB, PB["valid"])
             res[f"{name} + HMM"] = CP.event_f1(pred, PB["S"])["ev_f1"]
-            if "sup" in name:
+            if "sup" in name and "unsup" not in name:
                 res[f"{name}, threshold 0.5 (no HMM)"] = CP.event_f1((sB > 0) & PB["valid"], PB["S"])["ev_f1"]
         rows.append(dict(dataset=tgt, **res))
         print(f"[{tgt:9s}] " + " | ".join(f"{k}: {v:.3f}" for k, v in res.items()), flush=True)

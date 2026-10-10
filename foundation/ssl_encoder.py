@@ -65,8 +65,9 @@ def train(P, steps, batch=48, seed=0, hard=False):
         neg = zb[nw, :, nt]
         if hard:                                              # + one HARD negative per reference: the same recording, 15 or more samples away.
             th = (t + rng.randint(15, T_WIN - 15, len(w))) % T_WIN   # Without it the encoder can win by encoding which window a sample
-            neg = torch.cat([neg, zb[w, :, th]])              # comes from (noise level...) instead of the local dynamics.
+            hard_neg = zb[w, :, th]                              # comes from (noise level...) instead of the local dynamics.
         pos_d = (r * q).sum(1) / TAU; neg_d = r @ neg.T / TAU
+        if hard: neg_d = torch.cat([neg_d, (r * hard_neg).sum(1, keepdim=True) / TAU], 1)   # ITS OWN hard negative only (an audit found the first version added all of them to the shared pool)
         c = neg_d.max(1).values.detach()
         loss = -(pos_d - c).mean() + torch.logsumexp(neg_d - c[:, None], 1).mean()          # CEBRA info_nce
         opt.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0); opt.step(); sched.step()

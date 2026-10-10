@@ -16,7 +16,10 @@ OUT = os.path.join(ROOT, "docs", "figs_paper"); RES = os.path.join(OUT, "results
 def fit_test(pos, lab, tests, seed, tag, dist=10):
     nv = 30 if len(pos) >= 150 else max(len(pos) // 5, 2)
     m = uneye.DNN(weights_name=os.path.join(TMP, tag), sampfreq=1000, val_samples=nv, min_sacc_dur=6, min_sacc_dist=dist, max_iter=500)
+    wp = os.path.join(TMP, tag)
+    if os.path.exists(wp): os.remove(wp)                                   # a run that never improves would otherwise be scored with the weights of the previous draw
     m.train(pos[..., 0].astype(float), pos[..., 1].astype(float), lab.astype(float), seed=seed)
+    if not os.path.exists(wp): raise RuntimeError(f'U\'n\'Eye did not save weights for {tag} seed {seed}')
     out = []
     for tp, tl in tests:
         pred, _ = m.predict(tp[..., 0].astype(float), tp[..., 1].astype(float))

@@ -1,0 +1,36 @@
+skipped sources (not usable for saccade detection): ['DUT-OMRON', 'EGTEA', 'VQA-MHUG', 'OASST-ETC']
+1000 Hz: the universal HMM finds 3102 events in archive/, median duration 20 ms (5-95 %: 6-61 ms)
+skipped sources (not usable for saccade detection): ['DUT-OMRON', 'EGTEA', 'VQA-MHUG', 'OASST-ETC']
+500 Hz: the universal HMM finds 2683 events in archive/, median duration 28 ms (5-95 %: 8-72 ms)
+[d1       ] universal HMM, no label                                                               F1 0.912  kappa 0.717
+[d1       ] + boundary at a fraction of the peak speed, from 10 labeled trials (mean of 3)        F1 0.935  kappa 0.740  fractions [(0.1, 0.06), (0.3, 0.1), (0.06, 0.03)]
+[d1       ] semi-Markov, saccade duration law 'archive', no label                                 F1 0.914  kappa 0.717
+[d1       ] semi-Markov, saccade duration law 'prior', no label                                   F1 0.916  kappa 0.718
+[d2       ] universal HMM, no label                                                               F1 0.908  kappa 0.752
+[d2       ] + boundary at a fraction of the peak speed, from 10 labeled trials (mean of 3)        F1 0.909  kappa 0.676  fractions [(0.2, 0.2), (0.3, 0.15), (0.15, 0.2)]
+[d2       ] semi-Markov, saccade duration law 'archive', no label                                 F1 0.912  kappa 0.752
+[d2       ] semi-Markov, saccade duration law 'prior', no label                                   F1 0.916  kappa 0.753
+[d3       ] universal HMM, no label                                                               F1 0.854  kappa 0.671
+[d3       ] + boundary at a fraction of the peak speed, from 10 labeled trials (mean of 3)        F1 0.854  kappa 0.608  fractions [(0.3, 0.3), (0.3, 0.3), (0.3, 0.3)]
+[d3       ] semi-Markov, saccade duration law 'archive', no label                                 F1 0.845  kappa 0.676
+[d3       ] semi-Markov, saccade duration law 'prior', no label                                   F1 0.845  kappa 0.674
+[d4       ] universal HMM, no label                                                               F1 0.932  kappa 0.813
+[d4       ] + boundary at a fraction of the peak speed, from 10 labeled trials (mean of 3)        F1 0.948  kappa 0.772  fractions [(0.3, 0.2), (0.3, 0.06), (0.3, 0.2)]
+[d4       ] semi-Markov, saccade duration law 'archive', no label                                 F1 0.934  kappa 0.813
+[d4       ] semi-Markov, saccade duration law 'prior', no label                                   F1 0.941  kappa 0.817
+[andersson] universal HMM, no label                                                               F1 0.795  kappa 0.335
+[andersson] + boundary at a fraction of the peak speed, from 10 labeled trials (mean of 3)        F1 0.824  kappa 0.332  fractions [(0.3, 0.3), (0.3, 0.3), (0.3, 0.3)]
+[andersson] semi-Markov, saccade duration law 'archive', no label                                 F1 0.747  kappa 0.338
+[andersson] semi-Markov, saccade duration law 'prior', no label                                   F1 0.747  kappa 0.338
+Andersson: composition of the samples the universal HMM calls saccade, and recall by class:
+   true class no label (padding)    :   0.1 % of predicted-saccade samples |   0.2 % of this class is called saccade | class share 17.9 %
+   true class fixation              :  41.3 % of predicted-saccade samples |  19.8 % of this class is called saccade | class share 47.7 %
+   true class SACCADE               :  26.3 % of predicted-saccade samples |  96.8 % of this class is called saccade | class share 6.2 %
+   true class PSO                   :  12.5 % of predicted-saccade samples |  84.4 % of this class is called saccade | class share 3.4 %
+   true class pursuit               :  15.6 % of predicted-saccade samples |  16.8 % of this class is called saccade | class share 21.2 %
+   true class blink                 :   4.1 % of predicted-saccade samples |  26.6 % of this class is called saccade | class share 3.6 %
+   scoring with PSO ignored                       : F1 0.794 kappa 0.385
+   scoring with blinks ignored                    : F1 0.816 kappa 0.348
+   scoring with PSO and blinks ignored            : F1 0.813 kappa 0.402
+   scoring with padding, PSO and blinks ignored   : F1 0.813 kappa 0.402
+wrote /Users/joachimbellet/Documents/GitHub/uneye/foundation/runs/hmm_improvements.json

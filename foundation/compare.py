@@ -25,9 +25,9 @@ def native_pos(S):
 
 
 def to_1khz(lab, S):
-    """(n, T_native) -> (n, T) by repeating each label"""
-    r = int(round(FD.FS / NATIVE[S.name]))
-    out = np.repeat(lab, r, axis=1)
+    """(n, T_native) -> (n, T) on EXACTLY the grid that foundation/data.py gave to S.lab (nearest native sample, np.round index): a plain np.repeat shifted every second
+    label transition of the 500 Hz datasets by one sample against the human labels (found by an independent audit)"""
+    out = FD.upsample(np.asarray(lab).astype(np.int8), NATIVE[S.name], nearest=True).astype(bool)
     T = S.lab.shape[1]
     return out[:, :T] if out.shape[1] >= T else np.pad(out, ((0, 0), (0, T - out.shape[1])))
 

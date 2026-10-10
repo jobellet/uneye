@@ -41,7 +41,7 @@ t1 = [("**U'n'Eye (benchmark)**", "d1+d2+d3 labels (weights 1+2+3); d4 unseen; A
       ("Noisy-student TCN of the HMM", "none", rowcells("selftrain_b_r1_tta", "threshold")),
       ("U'n'Eye, general weights everywhere (same labels as the BiTCN rows)", "d1+d2+d3 labels; d4 and Andersson unseen", ung),
       ("Input channels + probe + HMM", "labels of the 4 other datasets", rowcells("base_input_channels")),
-      ("BiTCN 8 channels, supervised", "d1+d2+d3 labels; d4, Andersson unseen", rowcells("sup_bitcn_b_tta", "threshold")),
+      ("BiTCN 8 channels, supervised, with 8-pass test-time augmentation", "d1+d2+d3 labels; d4, Andersson unseen", rowcells("sup_bitcn_b_tta", "threshold")),
       ("BiTCN 2 channels (vx, vy), supervised, with 8-pass test-time augmentation", "d1+d2+d3 labels; d4, Andersson unseen", rowcells("sup_bitcn_v2_tta", "threshold")),
       ("BiTCN 2 channels, supervised, single pass (what the C++ engine runs)", "d1+d2+d3 labels; d4, Andersson unseen", rowcells("sup_bitcn_v2", "threshold")),
       ("BiTCN 2 channels, leave-one-dataset-out", "the 4 OTHER datasets (zero-shot on the tested one)", lo or [None] * 6)]
@@ -53,7 +53,7 @@ for lab, lbl, cells in t1: s1 += f"| {lab} | {lbl} | " + " | ".join(fmt(cells, b
 ssl = [("Input channels (8) + probe + HMM", "base_input_channels"), ("Input channels (6) + probe + HMM", "base_input_6ch"), ("Untrained transformer (control)", "ctrl_untrained"), ("Untrained TS2Vec conv (control)", "ctrl_untrained_ts2vec"),
        ("I-JEPA a", "jepa_a"), ("I-JEPA b (lr 1e-4)", "jepa_b"), ("I-JEPA d (EMA 0.99, block 6)", "jepa_d"), ("I-JEPA e (patch 8)", "jepa_e"), ("MAE a", "mae_a"), ("MAE b", "mae_b"), ("HuBERT a", "hubert_a"),
        ("TS2Vec a", "ts2vec_a"), ("TS2Vec b (deeper)", "ts2vec_b"), ("TS2Vec a, novelty curve (no probe)", "ts2vec_a_novelty")]
-t2 = [(l, "labels of the 4 other datasets (linear probe only)" if "novelty" not in i else "none", rowcells(i)) for l, i in ssl]
+t2 = [(l, "labels of the 4 other datasets (linear probe only)" if "novelty" not in i else "none", rowcells(i, "hmm" if "novelty" in i else None)) for l, i in ssl]
 s2 = "| " + " | ".join(H) + " |\n|" + "---|" * len(H) + "\n"
 best = [(max(r[2][j][0] for r in t2 + [("", "", un)] if r[2][j]), max(r[2][j][1] for r in t2 + [("", "", un)] if r[2][j])) for j in range(6)]
 for lab, lbl, cells in t2 + [("**U'n'Eye (benchmark, for reference)**", "see table 1", un)]: s2 += f"| {lab} | {lbl} | " + " | ".join(fmt(cells, best)) + " |\n"
@@ -134,7 +134,7 @@ The change grows from the input to the output (first block 0.03, last block 0.33
 | idea | what we saw | source |
 |---|---|---|
 | Seeded CEBRA / multi-session alignment | no gain over the HMM except on dataset 2 (kappa 0.52-0.75); one human saccade alone never suffices | `free_saccade/` |
-| DINO with a [CLS] attention map | attention anti-correlated with saccades (AUC 0.14-0.23), drift to collapse; independent noise per view did not change it | `foundation/dino1d.py` |
+| DINO with a [CLS] attention map | attention anti-correlated with saccades (AUC 0.05-0.25 after the audit re-run), drift to collapse; independent noise per view did not change it | `foundation/dino1d.py` |
 | Embedding + a hyperplane chosen by physiological priors | event F1 0.54 / 0.40 / 0.45 / 0.01 / 0.37 (d1 / d2 / d3 / d4 / Andersson) | `foundation/prior_hyperplane.py` |
 | HMM with boundaries at a fraction of the peak speed, semi-Markov durations | kappa worse or unchanged | `foundation/hmm_improvements.py` |
 | Zero-shot BiTCN (leave-one-dataset-out) | loses on d2, d3, Andersson (table 1) | `foundation/lodo_bitcn.py` |
