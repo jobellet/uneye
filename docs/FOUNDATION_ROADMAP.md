@@ -234,3 +234,12 @@ Decision (owner): no further runs on this benchmark (U'n'Eye was not retrained f
 | Andersson | 0.81 / 0.58 | 0.89 / 0.81 (general weights: 0.55 / 0.33) |
 | mean | 0.86 / 0.70 | 0.92 / 0.84 |
 It wins only on d1 (F1) and d4 (F1, kappa equal), loses clearly on d2 (microsaccades during pursuit), d3 and Andersson. A detector with no dataset-specific training does not match U'n'Eye trained on the dataset; ~50 s of labeled data (see few-label section) remain the better deal. Idea dropped unless a new approach for d2/d3 appears (what is missing: pursuit and very small microsaccades are absent from the other datasets' conventions).
+
+## Pre-trained wider U-Net (masked auto-encoder), few labels — marginal (2026-10-10, `foundation/unet_ssl.py`)
+U'n'Eye topology x3 channels, input vx, vy + mask channel, pre-trained to reconstruct masked spans of the velocity (30 % of 500-sample windows, spans 8-40) on 22 887 unlabeled windows: archive sources with rate >= 200 Hz (EMTeC, GazeBase, Lund2013, GazeCom; 360EM, VEDB, DUT-OMRON, EGTEA excluded) + unlabeled train splits of the 5 benchmarks; windows with > 1 % missing samples or tracker spikes removed. Fine-tuned (all layers) on N labeled trials of d1 set B (own validation split, early stopping), test 300 trials of set A, mean of 3 draws, event F1 / kappa:
+| N | pre-trained U-Net | same U-Net from scratch | U'n'Eye retrained |
+|---|---|---|---|
+| 10 | 0.911 / 0.799 | 0.897 / 0.786 | 0.894 / 0.756 |
+| 20 | 0.922 / 0.829 | 0.910 / 0.815 | 0.921 / 0.810 |
+| 50 | 0.925 / 0.842 | 0.930 / 0.823 | 0.945 / 0.844 |
+Pre-training beats U'n'Eye at N=10 (+0.017 F1, +0.04 kappa), ties at N=20, and loses in F1 at N=50 (0.925 vs 0.945). Its gain over the same network from scratch is ~0.01 F1 at N=10-20 and zero at N=50; most of the N=10 advantage comes from the wider architecture + our augmentations, not from the pre-training. Three draws only (spread ~0.01-0.02): not a significant win. Pre-training progress figures: `docs/figs_unet/`.
