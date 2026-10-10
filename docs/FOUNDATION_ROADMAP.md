@@ -222,3 +222,15 @@ Mean of 3 draws, F1 / kappa. U'n'Eye retrained with `uneye.DNN` (its own early s
 | 300 | 0.96 / 0.87 | 0.90 / 0.87 |
 With few labels U'n'Eye has the better event F1 (kappa is equal); the BiTCN only matches it from ~200 trials on kappa and does not reach its F1 at N<=300. The BiTCN's advantage (0.90 / 0.81 vs 0.85 / 0.75) is in the zero-shot / pooled-training setting, not in the few-label regime.
 Decision (owner): no further runs on this benchmark (U'n'Eye was not retrained for N=1000 nor for the between-subject analysis on dataset 4; that figure shows the BiTCN only). Next: try another approach for the few-label regime rather than tuning this one.
+
+## Zero-shot (leave-one-dataset-out) — benchmark NOT beaten (2026-10-10, `foundation/lodo_bitcn.py`, results `foundation/runs/night/lodo_bitcn.json`)
+2-channel BiTCN trained on the train splits of the OTHER four datasets only (early stopping on 10 % of those), tested on the common test subset of the held-out dataset (threshold, TTA). Reference: U'n'Eye trained in the dataset (d1-d3: weights 1+2+3, d4: unseen by U'n'Eye too, Andersson: own weights). Event F1 / kappa:
+| held-out | BiTCN, never saw the dataset | U'n'Eye |
+|---|---|---|
+| d1 | 0.94 / 0.79 | 0.90 / 0.85 |
+| d2 | 0.75 / 0.54 | 0.94 / 0.88 |
+| d3 | 0.84 / 0.74 | 0.93 / 0.82 |
+| d4 | 0.95 / 0.85 | 0.92 / 0.85 |
+| Andersson | 0.81 / 0.58 | 0.89 / 0.81 (general weights: 0.55 / 0.33) |
+| mean | 0.86 / 0.70 | 0.92 / 0.84 |
+It wins only on d1 (F1) and d4 (F1, kappa equal), loses clearly on d2 (microsaccades during pursuit), d3 and Andersson. A detector with no dataset-specific training does not match U'n'Eye trained on the dataset; ~50 s of labeled data (see few-label section) remain the better deal. Idea dropped unless a new approach for d2/d3 appears (what is missing: pursuit and very small microsaccades are absent from the other datasets' conventions).
