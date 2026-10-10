@@ -19,7 +19,7 @@ elseif(UNEYE_SANITIZE STREQUAL "thread")
   add_link_options(-fsanitize=thread)
 endif()
 
-add_library(uneye_rt STATIC src/native_engine.cpp src/causal_engine.cpp src/gaze_engine.cpp src/onnx_engine.cpp src/detector.cpp src/safety_guard.cpp)
+add_library(uneye_rt STATIC src/native_engine.cpp src/causal_engine.cpp src/gaze_engine.cpp src/onnx_engine.cpp src/detector.cpp src/safety_guard.cpp src/bitcn.cpp)
 target_include_directories(uneye_rt PUBLIC include)
 set_source_files_properties(src/gaze_engine.cpp src/safety_guard.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")   # the safety-relevant file must compile without any warning
 if(ONNXRUNTIME_ROOT)
@@ -77,3 +77,8 @@ add_executable(test_equivalence tests/test_equivalence.cpp)    # Step 2: C++ vs 
 target_link_libraries(test_equivalence uneye_rt)
 target_compile_options(test_equivalence PRIVATE -Wall -Wextra -Werror)
 add_test(NAME equivalence COMMAND test_equivalence ${CMAKE_SOURCE_DIR})
+
+add_executable(test_bitcn tests/test_bitcn.cpp)               # two-channel (vx, vy) bidirectional TCN vs PyTorch
+target_link_libraries(test_bitcn uneye_rt)
+target_compile_options(test_bitcn PRIVATE -Wall -Wextra -Werror)
+add_test(NAME bitcn COMMAND test_bitcn ${CMAKE_SOURCE_DIR})
