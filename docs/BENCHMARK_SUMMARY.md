@@ -49,17 +49,17 @@ Verdict: no encoder (JEPA, MAE, HuBERT, TS2Vec) beats the plain input channels o
 | Wider U-Net, masked-velocity pre-trained, all layers | 0.85 / 0.79 | 0.90 / 0.81 | 0.92 / 0.84 | NA | NA | NA | NA | 10 / 10 |
 | Same wider U-Net from scratch | **0.87** / 0.77 | 0.89 / 0.81 | 0.91 / 0.82 | NA | NA | NA | NA | 10 / 10 |
 | Multi-scale input (k = 1, 2, 4, 8, 16), pre-trained | 0.81 / 0.76 | 0.89 / 0.81 | 0.91 / 0.84 | NA | NA | NA | NA | 10 / 10 |
-| Multi-scale input, from scratch | 0.87 / 0.79 | 0.90 / 0.82 | 0.91 / 0.83 | NA | NA | NA | NA | 10 / 10 |
+| Multi-scale input, from scratch | 0.87 / 0.79 | **0.90** / 0.82 | 0.91 / 0.83 | NA | NA | NA | NA | 10 / 10 |
 | Pre-trained, only the 3 blocks that change most (c6, c5, up2) | 0.78 / **0.81** | 0.81 / 0.81 | 0.82 / 0.83 | NA | NA | NA | NA | 10 / 10 |
 | Pre-trained, only the 3 blocks that change least (c0, c1, c2) | 0.77 / 0.76 | 0.81 / 0.79 | 0.79 / 0.79 | NA | NA | NA | NA | 10 / 10 |
 | Pre-trained, new head only | 0.15 / 0.21 | 0.16 / 0.24 | 0.15 / 0.22 | NA | NA | NA | NA | 10 / 10 |
-| Pre-trained + LoRA (rank 4) | 0.85 / 0.80 | 0.85 / 0.81 | (0.85 / 0.82, provisional) | NA | NA | NA | NA | 10 / 1 |
-| Pre-trained + BitFit (biases only) | 0.54 / 0.43 | 0.63 / 0.47 | (0.60 / 0.52, provisional) | NA | NA | NA | NA | 10 / 1 |
-| Pre-trained + batch-norm scale/shift only | 0.58 / 0.55 | 0.67 / 0.60 | (0.64 / 0.63, provisional) | NA | NA | NA | NA | 10 / 1 |
-| Pre-trained + LP-FT (head, then all) | 0.82 / 0.75 | **0.90** / 0.82 | (0.91 / 0.84, provisional) | NA | NA | NA | NA | 10 / 1 |
+| Pre-trained + LoRA (rank 4) | 0.85 / 0.80 | 0.86 / 0.81 | 0.86 / 0.82 | NA | NA | NA | NA | 10 / 10 |
+| Pre-trained + BitFit (biases only) | 0.54 / 0.43 | 0.60 / 0.47 | 0.57 / 0.43 | NA | NA | NA | NA | 10 / 10 |
+| Pre-trained + batch-norm scale/shift only | 0.58 / 0.55 | 0.65 / 0.61 | 0.63 / 0.57 | NA | NA | NA | NA | 10 / 10 |
+| Pre-trained + LP-FT (head, then all) | 0.82 / 0.75 | 0.90 / 0.81 | 0.91 / 0.84 | NA | NA | NA | NA | 10 / 10 |
 
 N = number of labeled 1-second trials; 10 draws of the trials for N = 10 / 20 / 50 (pre-trained U-Nets, U'n'Eye), 3 draws for the other cells. The last column gives the number of draws behind each row (N = 10 / 50). Cells with fewer than 3 draws are shown in parentheses (provisional, never bold): the experiment was still running when this file was generated.
-Verdict: the pre-trained wider U-Net ties U'n'Eye in F1 at N <= 20 and loses at N = 50, but has a better kappa at every N; the pre-training itself adds about 0.01 over the same network from scratch. Multi-scale input does not help. Freezing: training only the blocks that change most is clearly worse than training everything (F1 about 0.8 against 0.9), and the control that trains only the blocks that change least is as bad; the head alone gives F1 0.15 (probably under-trained: 600 steps at lr 3e-4 on a frozen backbone, not tuned). So 'freeze what hardly changes' did not help here. LoRA / BitFit / batch-norm-only / LP-FT: provisional (1 draw) until the run is finished.
+Verdict: the pre-trained wider U-Net ties U'n'Eye in F1 at N <= 20 and loses at N = 50, but has a better kappa at every N; the pre-training itself adds about 0.01 over the same network from scratch. Multi-scale input does not help. Freezing: training only the blocks that change most is clearly worse than training everything (F1 about 0.8 against 0.9), and the control that trains only the blocks that change least is as bad; the head alone gives F1 0.15 (probably under-trained: 600 steps at lr 3e-4 on a frozen backbone, not tuned). So 'freeze what hardly changes' did not help here. Parameter-efficient methods (10 draws): LoRA (13 411 trainable parameters) reaches F1 0.85 / 0.86 / 0.86 and kappa 0.80-0.82, below full fine-tuning at N = 20 and 50 (0.90 / 0.92 in F1) but with a good kappa; BitFit (biases only, 511 parameters) and batch-norm-only are poor (F1 0.54-0.65); LP-FT (head first, then everything) equals full fine-tuning (0.82 / 0.90 / 0.91) without improving on it. None of them beats U'n'Eye in F1 at N = 50 (0.94), and none beats plain full fine-tuning: in this small network the pre-trained weights are not general enough for a few parameters to be enough.
 
 ## 4. Generalization between subjects (dataset 4, 10 subjects)
 | method | trained on one subject, tested on the same subject | trained on one subject, tested on the 9 others | trained on 3 trials of every subject, tested on all |
