@@ -7,18 +7,20 @@ Goal: match or beat U'n'Eye on BOTH F1 and kappa. If a quick test does not beat 
 ## 1. All five datasets (no or little target data)
 | method | labels used for training | d1 | d2 | d3 | d4 | Andersson | mean |
 |---|---|---|---|---|---|---|---|
-| **U'n'Eye (benchmark)** | d1+d2+d3 labels (weights 1+2+3); d4 unseen; Andersson with its own weights | 0.90 / 0.85 | 0.94 / 0.88 | 0.93 / 0.82 | 0.92 / 0.85 | **0.89** / **0.81** | **0.92** / **0.84** |
-| Universal HMM | none (fitted on archive/ only) | 0.91 / 0.72 | 0.91 / 0.76 | 0.85 / 0.67 | 0.94 / 0.80 | 0.79 / 0.33 | 0.88 / 0.66 |
+| **U'n'Eye (benchmark)** | d1+d2+d3 labels (weights 1+2+3); d4 unseen; Andersson with its own weights | 0.90 / 0.85 | 0.94 / 0.88 | 0.93 / 0.82 | 0.92 / 0.85 | **0.88** / **0.82** | **0.91** / **0.85** |
+| Universal HMM | none (fitted on archive/ only) | 0.91 / 0.72 | 0.91 / 0.76 | 0.85 / 0.67 | 0.94 / 0.80 | 0.80 / 0.33 | 0.88 / 0.66 |
 | Noisy-student TCN of the HMM | none | 0.90 / 0.75 | 0.91 / 0.79 | 0.84 / 0.64 | 0.92 / **0.85** | 0.56 / 0.34 | 0.83 / 0.67 |
-| U'n'Eye, general weights everywhere (same labels as the BiTCN rows) | d1+d2+d3 labels; d4 and Andersson unseen | 0.90 / 0.85 | 0.94 / 0.88 | 0.93 / 0.82 | 0.92 / 0.85 | 0.55 / 0.33 | 0.85 / 0.75 |
+| U'n'Eye, general weights everywhere (same labels as the BiTCN rows) | d1+d2+d3 labels; d4 and Andersson unseen | 0.90 / 0.85 | 0.94 / 0.88 | 0.93 / 0.82 | 0.92 / 0.85 | 0.54 / 0.34 | 0.84 / 0.75 |
+| Weak supervision: student of a Dawid-Skene label model over 6 labeling functions | none | 0.87 / 0.69 | 0.90 / 0.79 | 0.60 / 0.35 | 0.90 / 0.78 | 0.43 / 0.42 | 0.74 / 0.60 |
+| Weak supervision control: student of the majority vote | none | 0.79 / 0.66 | 0.91 / 0.77 | 0.54 / 0.29 | 0.81 / 0.74 | 0.65 / 0.35 | 0.74 / 0.56 |
 | Input channels + probe + HMM | labels of the 4 other datasets | 0.90 / 0.74 | 0.81 / 0.05 | 0.57 / 0.58 | 0.86 / 0.84 | 0.64 / 0.32 | 0.75 / 0.51 |
-| BiTCN 8 channels, supervised | d1+d2+d3 labels; d4, Andersson unseen | 0.93 / 0.87 | 0.95 / **0.92** | 0.93 / 0.82 | 0.91 / 0.84 | 0.75 / 0.59 | 0.89 / 0.81 |
+| BiTCN 8 channels, supervised, with 8-pass test-time augmentation | d1+d2+d3 labels; d4, Andersson unseen | 0.93 / 0.87 | 0.95 / **0.92** | 0.93 / 0.82 | 0.91 / 0.84 | 0.75 / 0.59 | 0.89 / 0.81 |
 | BiTCN 2 channels (vx, vy), supervised, with 8-pass test-time augmentation | d1+d2+d3 labels; d4, Andersson unseen | **0.94** / **0.87** | **0.95** / 0.91 | **0.94** / **0.85** | 0.92 / 0.84 | 0.76 / 0.56 | 0.90 / 0.81 |
 | BiTCN 2 channels, supervised, single pass (what the C++ engine runs) | d1+d2+d3 labels; d4, Andersson unseen | 0.90 / 0.87 | 0.94 / 0.90 | 0.92 / 0.84 | 0.89 / 0.84 | 0.68 / 0.55 | 0.87 / 0.80 |
 | BiTCN 2 channels, leave-one-dataset-out | the 4 OTHER datasets (zero-shot on the tested one) | 0.94 / 0.79 | 0.75 / 0.54 | 0.84 / 0.74 | **0.95** / 0.85 | 0.81 / 0.58 | 0.86 / 0.70 |
 
-Notes: the first row mixes the general weights (d1-d3; d4 unseen by it as well) and its own weights for Andersson (with the general weights Andersson is 0.55 / 0.33). U'n'Eye is trained on the labels of the datasets it is tested on, except d4 (and Andersson with general weights); the leave-one-dataset-out row is the only fully zero-shot row.
-Verdict: on the datasets whose labels they were trained on or that are similar (d1, d2, d3) and on d4, the 2-channel BiTCN trained on d1+d2+d3 labels is at least as good as U'n'Eye (F1 0.94 / 0.95 / 0.94 / 0.92 against 0.90 / 0.94 / 0.93 / 0.92, kappa 0.87 / 0.91 / 0.85 / 0.84 against 0.85 / 0.88 / 0.82 / 0.85), but on Andersson it is clearly below U'n'Eye trained with its own weights (0.76 / 0.56 against 0.89 / 0.81), so the five-dataset MEAN stays with U'n'Eye (0.92 / 0.84 against 0.90 / 0.81). (A mean of 0.85 / 0.75 for U'n'Eye, used earlier in the project, was computed with its general weights on Andersson, which is unfavourable to it.) With nothing from the tested dataset (leave-one-dataset-out row) it does not beat U'n'Eye: clear losses on d2, d3, Andersson.
+Notes: the first row mixes the general weights (d1-d3; d4 unseen by it as well) and its own weights for Andersson (with the general weights Andersson is 0.54 / 0.34). U'n'Eye is trained on the labels of the datasets it is tested on, except d4 (and Andersson with general weights); the leave-one-dataset-out row is the only fully zero-shot row.
+Verdict: on the datasets whose labels they were trained on or that are similar (d1, d2, d3) and on d4, the 2-channel BiTCN trained on d1+d2+d3 labels is at least as good as U'n'Eye (F1 0.94 / 0.95 / 0.94 / 0.92 against 0.90 / 0.94 / 0.93 / 0.92, kappa 0.87 / 0.91 / 0.85 / 0.84 against 0.85 / 0.88 / 0.82 / 0.85), but on Andersson it is clearly below U'n'Eye trained with its own weights (0.76 / 0.56 against 0.88 / 0.82), so the five-dataset MEAN stays with U'n'Eye (0.91 / 0.85 against 0.90 / 0.81). (A mean of 0.84 / 0.75 for U'n'Eye, used earlier in the project, was computed with its general weights on Andersson, which is unfavourable to it.) With nothing from the tested dataset (leave-one-dataset-out row) it does not beat U'n'Eye: clear losses on d2, d3, Andersson.
 
 ## 2. Self-supervised representations (frozen encoder, linear probe on other datasets, HMM or threshold readout): no gain
 | method | labels used for training | d1 | d2 | d3 | d4 | Andersson | mean |
@@ -36,8 +38,8 @@ Verdict: on the datasets whose labels they were trained on or that are similar (
 | HuBERT a | labels of the 4 other datasets (linear probe only) | 0.75 / 0.74 | 0.70 / 0.40 | 0.36 / 0.20 | 0.34 / 0.29 | 0.70 / 0.37 | 0.57 / 0.40 |
 | TS2Vec a | labels of the 4 other datasets (linear probe only) | 0.85 / 0.81 | 0.62 / 0.59 | 0.44 / 0.18 | 0.44 / 0.44 | 0.72 / 0.45 | 0.61 / 0.49 |
 | TS2Vec b (deeper) | labels of the 4 other datasets (linear probe only) | 0.80 / 0.77 | 0.61 / 0.17 | 0.42 / 0.24 | 0.61 / 0.68 | 0.72 / 0.51 | 0.63 / 0.47 |
-| TS2Vec a, novelty curve (no probe) | none | 0.65 / 0.00 | 0.62 / 0.00 | 0.54 / 0.00 | 0.61 / 0.00 | 0.24 / 0.00 | 0.53 / 0.00 |
-| **U'n'Eye (benchmark, for reference)** | see table 1 | 0.90 / **0.85** | **0.94** / **0.88** | **0.93** / **0.82** | **0.92** / **0.85** | **0.89** / **0.81** | **0.92** / **0.84** |
+| TS2Vec a, novelty curve (no probe) | none | 0.34 / 0.31 | 0.45 / 0.35 | 0.29 / 0.14 | 0.20 / 0.15 | 0.38 / 0.07 | 0.33 / 0.20 |
+| **U'n'Eye (benchmark, for reference)** | see table 1 | 0.90 / **0.85** | **0.94** / **0.88** | **0.93** / **0.82** | **0.92** / **0.85** | **0.88** / **0.82** | **0.91** / **0.85** |
 
 Verdict: no encoder (JEPA, MAE, HuBERT, TS2Vec) beats the plain input channels or U'n'Eye; several equal the untrained control (MAE b is exactly the control: its best checkpoint was step 0). DINO attention maps and a CEBRA-style seeded embedding were also tried before (table 6).
 
@@ -46,20 +48,34 @@ Verdict: no encoder (JEPA, MAE, HuBERT, TS2Vec) beats the plain input channels o
 |---|---|---|---|---|---|---|---|---|
 | **U'n’Eye retrained (benchmark)** | 0.83 / 0.67 | 0.90 / 0.77 | **0.94** / 0.83 | **0.95** / 0.86 | **0.95** / 0.86 | **0.96** / **0.87** | NA | 10 / 10 |
 | BiTCN 2 channels from scratch | 0.77 / 0.79 | 0.82 / **0.83** | 0.84 / **0.85** | 0.86 / **0.86** | 0.91 / **0.87** | 0.90 / 0.87 | **0.92** / **0.87** | 3 / 3 |
-| Wider U-Net, masked-velocity pre-trained, all layers | 0.85 / 0.79 | 0.90 / 0.81 | 0.92 / 0.84 | NA | NA | NA | NA | 10 / 10 |
+| Wider U-Net, masked-velocity pre-trained, all layers | 0.85 / 0.79 | **0.90** / 0.82 | 0.92 / 0.84 | NA | NA | NA | NA | 10 / 10 |
 | Same wider U-Net from scratch | **0.87** / 0.77 | 0.89 / 0.81 | 0.91 / 0.82 | NA | NA | NA | NA | 10 / 10 |
-| Multi-scale input (k = 1, 2, 4, 8, 16), pre-trained | 0.81 / 0.76 | 0.89 / 0.81 | 0.91 / 0.84 | NA | NA | NA | NA | 10 / 10 |
-| Multi-scale input, from scratch | 0.87 / 0.79 | **0.90** / 0.82 | 0.91 / 0.83 | NA | NA | NA | NA | 10 / 10 |
-| Pre-trained, only the 3 blocks that change most (c6, c5, up2) | 0.78 / **0.81** | 0.81 / 0.81 | 0.82 / 0.83 | NA | NA | NA | NA | 10 / 10 |
-| Pre-trained, only the 3 blocks that change least (c0, c1, c2) | 0.77 / 0.76 | 0.81 / 0.79 | 0.79 / 0.79 | NA | NA | NA | NA | 10 / 10 |
-| Pre-trained, new head only | 0.15 / 0.21 | 0.16 / 0.24 | 0.15 / 0.22 | NA | NA | NA | NA | 10 / 10 |
-| Pre-trained + LoRA (rank 4) | 0.85 / 0.80 | 0.86 / 0.81 | 0.86 / 0.82 | NA | NA | NA | NA | 10 / 10 |
-| Pre-trained + BitFit (biases only) | 0.54 / 0.43 | 0.60 / 0.47 | 0.57 / 0.43 | NA | NA | NA | NA | 10 / 10 |
-| Pre-trained + batch-norm scale/shift only | 0.58 / 0.55 | 0.65 / 0.61 | 0.63 / 0.57 | NA | NA | NA | NA | 10 / 10 |
-| Pre-trained + LP-FT (head, then all) | 0.82 / 0.75 | 0.90 / 0.81 | 0.91 / 0.84 | NA | NA | NA | NA | 10 / 10 |
+| Multi-scale input (k = 1, 2, 4, 8, 16), pre-trained | 0.83 / 0.77 | 0.89 / 0.82 | 0.91 / 0.84 | NA | NA | NA | NA | 10 / 10 |
+| Multi-scale input, from scratch | 0.87 / 0.79 | 0.90 / 0.82 | 0.91 / 0.83 | NA | NA | NA | NA | 10 / 10 |
+| Pre-trained, only the 3 blocks that change most (c6, c5, up2) | 0.75 / 0.78 | 0.82 / 0.81 | 0.83 / 0.82 | NA | NA | NA | NA | 10 / 10 |
+| Pre-trained, only the 3 blocks that change least (c0, c1, c2) | 0.81 / 0.78 | 0.84 / 0.79 | 0.81 / 0.79 | NA | NA | NA | NA | 10 / 10 |
+| Pre-trained, new head only | 0.13 / 0.10 | 0.14 / 0.15 | 0.13 / 0.13 | NA | NA | NA | NA | 10 / 10 |
+| Pre-trained + LoRA (rank 4) | 0.86 / **0.80** | 0.87 / 0.81 | 0.88 / 0.82 | NA | NA | NA | NA | 10 / 10 |
+| Pre-trained + BitFit (biases only) | 0.54 / 0.39 | 0.59 / 0.44 | 0.58 / 0.42 | NA | NA | NA | NA | 10 / 10 |
+| Pre-trained + batch-norm scale/shift only | 0.61 / 0.50 | 0.63 / 0.57 | 0.63 / 0.55 | NA | NA | NA | NA | 10 / 10 |
+| Pre-trained + LP-FT (head, then all) | 0.82 / 0.74 | 0.90 / 0.82 | 0.91 / 0.84 | NA | NA | NA | NA | 10 / 10 |
 
 N = number of labeled 1-second trials; 10 draws of the trials for N = 10 / 20 / 50 (pre-trained U-Nets, U'n'Eye), 3 draws for the other cells. The last column gives the number of draws behind each row (N = 10 / 50). Cells with fewer than 3 draws are shown in parentheses (provisional, never bold): the experiment was still running when this file was generated.
-Verdict: the pre-trained wider U-Net ties U'n'Eye in F1 at N <= 20 and loses at N = 50, but has a better kappa at every N; the pre-training itself adds about 0.01 over the same network from scratch. Multi-scale input does not help. Freezing: training only the blocks that change most is clearly worse than training everything (F1 about 0.8 against 0.9), and the control that trains only the blocks that change least is as bad; the head alone gives F1 0.15 (probably under-trained: 600 steps at lr 3e-4 on a frozen backbone, not tuned). So 'freeze what hardly changes' did not help here. Parameter-efficient methods (10 draws): LoRA (13 411 trainable parameters) reaches F1 0.85 / 0.86 / 0.86 and kappa 0.80-0.82, below full fine-tuning at N = 20 and 50 (0.90 / 0.92 in F1) but with a good kappa; BitFit (biases only, 511 parameters) and batch-norm-only are poor (F1 0.54-0.65); LP-FT (head first, then everything) equals full fine-tuning (0.82 / 0.90 / 0.91) without improving on it. None of them beats U'n'Eye in F1 at N = 50 (0.94), and none beats plain full fine-tuning: in this small network the pre-trained weights are not general enough for a few parameters to be enough.
+Verdict: the pre-trained wider U-Net ties U'n'Eye in F1 at N <= 20 and loses at N = 50, but has a better kappa at every N; the pre-training itself adds about 0.01 over the same network from scratch. Multi-scale input does not help. Freezing: training only the blocks that change most is clearly worse than training everything (F1 about 0.8 against 0.9), and the control that trains only the blocks that change least is as bad; the head alone gives F1 0.13-0.14 (probably under-trained: 600 steps at lr 3e-4 on a frozen backbone, not tuned). So 'freeze what hardly changes' did not help here. Parameter-efficient methods (10 draws): LoRA (13 411 trainable parameters) reaches F1 0.86 / 0.87 / 0.88 and kappa 0.80-0.82, below full fine-tuning at N = 20 and 50 (0.90 / 0.92 in F1) but with a good kappa; BitFit (biases only, 511 parameters) and batch-norm-only are poor (F1 0.54-0.63); LP-FT (head first, then everything) equals full fine-tuning (0.82 / 0.90 / 0.91) without improving on it. None of them beats U'n'Eye in F1 at N = 50 (0.94), and none beats plain full fine-tuning: in this small network the pre-trained weights are not general enough for a few parameters to be enough.
+
+## 3b. Zero-shot detector, then calibration of the annotation convention (suggestion of the Antigravity review; `foundation/conventions.py`)
+| method | d1 | d2 | d3 | d4 | Andersson |
+|---|---|---|---|---|---|
+| **U'n'Eye (benchmark; all labels of the dataset)** | 0.90 / **0.85** | **0.94** / **0.88** | **0.93** / **0.82** | 0.92 / 0.85 | **0.88** / **0.82** |
+| Zero-shot BiTCN (leave-one-dataset-out), threshold: N = 0 | 0.94 / 0.79 | 0.75 / 0.54 | 0.84 / 0.74 | 0.95 / 0.85 | 0.81 / 0.58 |
+| Zero-shot BiTCN, hybrid decoding (scaled posteriors + minimum-duration chain, no label) | 0.93 / 0.83 | 0.86 / 0.78 | 0.91 / 0.72 | 0.86 / 0.68 | 0.80 / 0.40 |
+| + 3-parameter calibration on N = 3 labeled trials of the target | 0.94 / 0.80 | 0.75 / 0.62 | 0.84 / 0.69 | 0.91 / 0.76 | 0.86 / 0.67 |
+| + 3-parameter calibration on N = 10 labeled trials of the target | 0.94 / 0.83 | 0.76 / 0.68 | 0.87 / 0.74 | **0.96** / **0.87** | 0.87 / 0.68 |
+| + 3-parameter calibration on N = 20 (d1, Andersson) labeled trials of the target | 0.94 / 0.83 | NA | NA | NA | 0.87 / 0.68 |
+| + 3-parameter calibration on N = 30 (d2, d3, d4) labeled trials of the target | NA | 0.76 / 0.68 | 0.87 / 0.74 | 0.96 / 0.86 | NA |
+| + 3-parameter calibration on N = 50 (d1 only) labeled trials of the target | **0.94** / 0.83 | NA | NA | NA | NA |
+
+The detector is the leave-one-dataset-out BiTCN (trained on the labels of the four OTHER datasets); the calibrator has 4 parameters fitted by grid search on the N labeled trials (amplitude floor, onset shift, offset shift, merge gap); dataset 1 uses the protocol of table 3 (10 draws, calibrate on set B, test on set A[:300]), the others calibrate on their train subset (5 draws) and test on the common test subset. Diagnostics (`night/conventions_diag.json`): onset / offset errors of matched events are systematic per dataset (Andersson: predicted offset 19 ms later than the human one; d2: predicted onset 8 ms later), a minimum amplitude of 0.3-0.5 deg raises Andersson F1 from 0.81 to 0.87, and the two Andersson coders agree at F1 0.97 / kappa 0.89 on the benchmark trials (the human ceiling). Verdict: on dataset 1 ten labeled trials (F1 0.94 / kappa 0.83) match U'n'Eye trained on 50 (0.94 / 0.83, table 3) and beat it clearly at N = 10 and 20 (0.83 / 0.67 and 0.90 / 0.77); three trials already give 0.94 / 0.80; on d2 the gap is NOT a convention (only 0.74 F1 even with a very tolerant overlap: events are missed or invented), on d3 and Andersson calibration helps a little but stays below U'n'Eye trained in the dataset.
 
 ## 4. Generalization between subjects (dataset 4, 10 subjects)
 | method | trained on one subject, tested on the same subject | trained on one subject, tested on the 9 others | trained on 3 trials of every subject, tested on all |
@@ -73,8 +89,8 @@ Verdict: the pre-trained wider U-Net ties U'n'Eye in F1 at N <= 20 and loses at 
 | block | c0 | c1 | c2 | c3 | up1 | c4 | up2 | c5 | c6 |
 |---|---|---|---|---|---|---|---|---|---|
 | parameters | 540 | 9180 | 18180 | 18180 | 18180 | 36180 | 18180 | 36180 | 9090 |
-| mean relative weight change over 5 datasets | 0.032 | 0.117 | 0.139 | 0.153 | 0.152 | 0.183 | 0.189 | 0.266 | 0.329 |
-| spread between datasets (std) | 0.002 | 0.003 | 0.009 | 0.008 | 0.005 | 0.011 | 0.012 | 0.018 | 0.022 |
+| mean relative weight change over 5 datasets | 0.034 | 0.125 | 0.151 | 0.164 | 0.160 | 0.194 | 0.200 | 0.275 | 0.328 |
+| spread between datasets (std) | 0.001 | 0.003 | 0.008 | 0.006 | 0.006 | 0.012 | 0.014 | 0.022 | 0.024 |
 
 The change grows from the input to the output (first block 0.03, last block 0.33) and the ranking is the same on all datasets (rank correlation >= 0.98): early layers are nearly general, the last ones adapt.
 
@@ -82,7 +98,7 @@ The change grows from the input to the output (first block 0.03, last block 0.33
 | idea | what we saw | source |
 |---|---|---|
 | Seeded CEBRA / multi-session alignment | no gain over the HMM except on dataset 2 (kappa 0.52-0.75); one human saccade alone never suffices | `free_saccade/` |
-| DINO with a [CLS] attention map | attention anti-correlated with saccades (AUC 0.14-0.23), drift to collapse; independent noise per view did not change it | `foundation/dino1d.py` |
+| DINO with a [CLS] attention map | attention anti-correlated with saccades (AUC 0.05-0.25 after the audit re-run), drift to collapse; independent noise per view did not change it | `foundation/dino1d.py` |
 | Embedding + a hyperplane chosen by physiological priors | event F1 0.54 / 0.40 / 0.45 / 0.01 / 0.37 (d1 / d2 / d3 / d4 / Andersson) | `foundation/prior_hyperplane.py` |
 | HMM with boundaries at a fraction of the peak speed, semi-Markov durations | kappa worse or unchanged | `foundation/hmm_improvements.py` |
 | Zero-shot BiTCN (leave-one-dataset-out) | loses on d2, d3, Andersson (table 1) | `foundation/lodo_bitcn.py` |
@@ -90,7 +106,7 @@ The change grows from the input to the output (first block 0.03, last block 0.33
 | Training U'n'Eye / the BiTCN on 1000 trials, other-algorithm curves (Sheynikhovich, Otero-Millan, Engbert-Mergenthaler) | NA: not run | |
 
 ## 7. Known limitations of this comparison (found by an independent read-only review with Antigravity `agy`, each point checked in the code)
-- **Not the same labels on Andersson.** The benchmark row uses U'n'Eye's own Andersson weights (in-domain); the BiTCN rows never saw Andersson. Row "U'n'Eye, general weights everywhere" is the like-for-like comparison: there the BiTCN is better or equal on every dataset except the kappa of d4 (0.84 against 0.85), with a mean of 0.90 / 0.81 against 0.85 / 0.75 (the gap comes mostly from Andersson, 0.76 / 0.56 against 0.55 / 0.33).
+- **Not the same labels on Andersson.** The benchmark row uses U'n'Eye's own Andersson weights (in-domain); the BiTCN rows never saw Andersson. Row "U'n'Eye, general weights everywhere" is the like-for-like comparison: there the BiTCN is better or equal on every dataset except the kappa of d4 (0.84 against 0.85), with a mean of 0.90 / 0.81 against 0.84 / 0.75 (the gap comes mostly from Andersson, 0.76 / 0.56 against 0.54 / 0.34).
 - **Test-time augmentation is not in the C++ engine.** The headline BiTCN rows use 8 passes (4 rotations x mirror); `cpp/src/bitcn.cpp` runs one pass, i.e. the "single pass" row (F1 0.87 / kappa 0.80), not the headline.
 - **Readout chosen on the test sets.** In tables 1-2 each row uses the better of the HMM and the threshold readout, decided after seeing both on the test subsets (two options only; the network rows all use the threshold). Table 2 is affected the most.
 - **Unlabeled test positions in the pre-training pool (table 3).** The pool of `foundation/unet_ssl.py` / `unet_ms.py` contains windows of the unlabeled set-A trials of dataset 1, which is also the few-label TEST set (trained on set B, tested on set A, as in the article). No label was used, but the pre-trained rows may be slightly optimistic; the from-scratch rows and U'n'Eye are not affected. The pre-trained U-Net did not beat U'n'Eye anyway, so the conclusion is unchanged (the bias is in the direction of the benchmark being under-estimated).

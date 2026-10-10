@@ -92,10 +92,10 @@ def pretrain(minutes, lr=1e-3, bs=128, seed=0, snap=False):
     print("[pretrain] done, best val", best)
 
 
-def finetune_one(sel_pos, sel_lab, init, seed, steps=600, lr=3e-4, bs=32):
+def finetune_one(sel_pos, sel_lab, init, seed, steps=600, lr=3e-4, bs=32, ckpt="unet_pre.pt"):
     rng = np.random.RandomState(seed); torch.manual_seed(seed); net = WUNet(nout=1).to(DEV)
     if init:
-        sd = {k: v for k, v in torch.load(os.path.join(RUNS, "unet_pre.pt"), weights_only=False).items() if not k.startswith("head")}; net.load_state_dict(sd, strict=False)
+        sd = {k: v for k, v in torch.load(os.path.join(RUNS, ckpt), weights_only=False).items() if not k.startswith(("head", "disc"))}; net.load_state_dict(sd, strict=False)
     n = len(sel_pos); nv = max(n // 5, 2); perm = rng.permutation(n); vi, ti = perm[:nv], perm[nv:]
     opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-2); best, bad, state = 1e9, 0, {k: v.clone() for k, v in net.state_dict().items()}
     vp, vl = sel_pos[vi], sel_lab[vi] == 1; vX = torch.as_tensor(make_input(vp), device=DEV); vY = torch.as_tensor(vl.astype(np.float32), device=DEV); vV = torch.as_tensor(np.isfinite(vp).all(2), device=DEV).float()

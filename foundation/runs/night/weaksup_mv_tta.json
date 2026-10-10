@@ -1,0 +1,106 @@
+{
+ "id": "weaksup_mv_tta",
+ "family": "label-free weak supervision (student of a label model)",
+ "labels_used": "none for training (labeled train splits only select the checkpoint)",
+ "paper": "Ratner et al. 2016 (data programming); Dawid & Skene 1979; Xie et al. 2020",
+ "hyper": {
+  "labels": "majority vote of >= 3 of 6 labeling functions (control)",
+  "steps": 4000,
+  "tta": true
+ },
+ "test": {
+  "d1": {
+   "threshold": {
+    "f1": 0.7850208044382803,
+    "kappa": 0.6631678337869091
+   },
+   "hmm": {
+    "f1": 0.7866666666666667,
+    "kappa": 0.7713103119351664
+   }
+  },
+  "d2": {
+   "threshold": {
+    "f1": 0.9148455162019593,
+    "kappa": 0.7692464041318513
+   },
+   "hmm": {
+    "f1": 0.7782805429864253,
+    "kappa": 0.7737112117500412
+   }
+  },
+  "d3": {
+   "threshold": {
+    "f1": 0.5365853658536585,
+    "kappa": 0.2896123323051867
+   },
+   "hmm": {
+    "f1": 0.808641975308642,
+    "kappa": 0.7096277475389254
+   }
+  },
+  "d4": {
+   "threshold": {
+    "f1": 0.8140703517587939,
+    "kappa": 0.7427529749603368
+   },
+   "hmm": {
+    "f1": 0.6834437086092716,
+    "kappa": 0.7619071518702153
+   }
+  },
+  "andersson": {
+   "threshold": {
+    "f1": 0.6508710801393728,
+    "kappa": 0.34525327702264696
+   },
+   "hmm": {
+    "f1": 0.599344262295082,
+    "kappa": 0.2840459513773924
+   }
+  }
+ },
+ "mean": {
+  "threshold": {
+   "f1": 0.7402786236784129,
+   "kappa": 0.5620065644413861
+  },
+  "hmm": {
+   "f1": 0.7312754311732175,
+   "kappa": 0.6601204748943481
+  }
+ },
+ "minutes": 4.6,
+ "finished": "2026-10-10 19:50",
+ "best_val_event_f1": 0.716031291114293,
+ "log": [
+  {
+   "step": 500,
+   "loss": 0.2952185026407242,
+   "val_f1_hmm": 0.7702681371026165,
+   "val_kappa_hmm": 0.6935096979552948,
+   "val_f1_thr": 0.716031291114293
+  },
+  {
+   "step": 1000,
+   "loss": 0.23220330128073693,
+   "val_f1_hmm": 0.7255475748962541,
+   "val_kappa_hmm": 0.6311190446071913,
+   "val_f1_thr": 0.658490655385741
+  },
+  {
+   "step": 1500,
+   "loss": 0.2294727482497692,
+   "val_f1_hmm": 0.7027997314877957,
+   "val_kappa_hmm": 0.6157836265613261,
+   "val_f1_thr": 0.6885627278706593
+  },
+  {
+   "step": 2000,
+   "loss": 0.22798983165621758,
+   "val_f1_hmm": 0.7237254473660044,
+   "val_kappa_hmm": 0.6384635894049682,
+   "val_f1_thr": 0.6988258141819389
+  }
+ ]
+}
