@@ -1,0 +1,89 @@
+{
+ "id": "mae_b",
+ "family": "self-supervised representation + linear probe + HMM",
+ "labels_used": "labels of the other 4 datasets (linear probe only); the encoder itself saw no label",
+ "paper": "He et al. 2022 (MAE), Nie et al. 2023 (PatchTST)",
+ "hyper": {
+  "lr": 0.0001,
+  "block": 6,
+  "patch": 4,
+  "ema": 0.996,
+  "steps": 5000,
+  "batch": 64,
+  "eval_every": 500,
+  "patience": 3,
+  "objective": "mae",
+  "max_minutes": 25.0,
+  "depth": 6,
+  "wd": 0.04
+ },
+ "test": {
+  "d1": {
+   "threshold": {
+    "f1": 0.36687116564417177,
+    "kappa": 0.6587556922690134
+   },
+   "hmm": {
+    "f1": 0.7854785478547855,
+    "kappa": 0.7659344027569049
+   }
+  },
+  "d2": {
+   "threshold": {
+    "f1": 0.14129257431700565,
+    "kappa": 0.14092388129154143
+   },
+   "hmm": {
+    "f1": 0.4431535269709544,
+    "kappa": 0.20837220744430585
+   }
+  },
+  "d3": {
+   "threshold": {
+    "f1": 0.540650406504065,
+    "kappa": 0.5506280310654075
+   },
+   "hmm": {
+    "f1": 0.1932885906040268,
+    "kappa": 0.1678046290333608
+   }
+  },
+  "d4": {
+   "threshold": {
+    "f1": 0.1305,
+    "kappa": 0.3843313098070805
+   },
+   "hmm": {
+    "f1": 0.3683839096683134,
+    "kappa": 0.5546840052511233
+   }
+  },
+  "andersson": {
+   "threshold": {
+    "f1": 0.2566573674866853,
+    "kappa": 0.35739879901418037
+   },
+   "hmm": {
+    "f1": 0.6078078078078077,
+    "kappa": 0.49626685220676425
+   }
+  }
+ },
+ "mean": {
+  "threshold": {
+   "f1": 0.2871943027903855,
+   "kappa": 0.4184075426894447
+  },
+  "hmm": {
+   "f1": 0.4796224765811776,
+   "kappa": 0.4386124193384918
+  }
+ },
+ "minutes": 13.1,
+ "finished": "2026-10-10 02:18",
+ "best_step": 0,
+ "best_val_event_f1": 0.4964711997199858,
+ "untrained_val_event_f1": 0.4964711997199858,
+ "input_channels_val_event_f1": 0.6604387858899367,
+ "steps_run": 1500
+}
