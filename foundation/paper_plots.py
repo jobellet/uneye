@@ -15,7 +15,7 @@ if A:
         ax[j].errorbar(Ns, m, s, color=c, marker="o", capsize=3, label="2-channel BiTCN")
         if U:
             un = sorted(U); ax[j].errorbar(un, [np.mean([v[j] for v in U[N]]) for N in un], [np.std([v[j] for v in U[N]]) for N in un], color="k", marker="s", capsize=3, ls="--", label="U'n'Eye (retrained)"); ax[j].legend(fontsize=8, loc="lower right")
-         ax[j].set_xscale("log"); ax[j].set_xlabel("number of labeled trials (1 s each)"); ax[j].set_ylabel(nm); ax[j].set_ylim(0.4, 1); ax[j].grid(alpha=.3)
+        ax[j].set_xscale("log"); ax[j].set_xlabel("number of labeled trials (1 s each)"); ax[j].set_ylabel(nm); ax[j].set_ylim(0.4, 1); ax[j].grid(alpha=.3)
     fig.suptitle("Dataset 1: train on N trials of set B, test on set A"); fig.tight_layout(); fig.savefig(os.path.join(OUT, "n_labeled.png"), dpi=150)
 if R["B"]:
     rows = [k for k in R["B"] if k != "all"]; rows = sorted(rows, key=float) + (["all"] if "all" in R["B"] else []); n = len(R["B"][rows[0]])
