@@ -202,3 +202,10 @@ python foundation/calibrate.py --target d1             # calibration curve vs U'
 python free_saccade/benchmark_cebra.py                 # label-free baselines incl. HMM
 ```
 `foundation/runs/*.pt` are local only (not in git); retrain with `train_lodo.py`.
+
+## Overnight 2026-10-09/10 (details: docs/OVERNIGHT_REPORT.md)
+17 steps, 0 failures. Mean event F1 / kappa over the 5 benchmarks (same test subsets):
+- Supervised BiTCN (d1+d2+d3 labels, EMA+TTA, `sup_bitcn_b_tta`): 0.89 / 0.81, above U'n'Eye 0.85 / 0.75; weak point Andersson (0.75 / 0.59).
+- Label-free noisy student of the universal HMM (`selftrain_b_r1_tta`): 0.83 / 0.67 (kappa above U'n'Eye mean, F1 slightly below); universal HMM alone 0.88 / 0.66.
+- Self-supervised representations (JEPA a/b/d/e, MAE a/b, HuBERT, TS2Vec a/b) + probe + HMM: 0.46-0.68 F1, none beats plain input channels (0.75 / 0.51); several equal or below the untrained control (mae_b equals the control: best checkpoint was step 0). Only ts2vec_a is notable with 20 labeled trials on d1/d2 (0.84 / 0.71). Novelty-curve detection from TS2Vec is poor (F1 <= 0.33).
+- Conclusion: for the C++ tool, ship the bidirectional TCN (supervised or HMM-distilled), not a SSL foundation encoder; SSL representation learning adds nothing measurable here.
