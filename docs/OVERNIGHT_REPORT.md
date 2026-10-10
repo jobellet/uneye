@@ -1,13 +1,13 @@
 # Overnight comparison of candidate architectures and training heuristics
 
-Generated 2026-10-10 02:33 by `foundation/night_report.py` from `foundation/runs/night/*.json` (MacBook Air M1, one GPU job at a time). The numbers are those of the files; nothing is typed by hand in the tables.
+Generated 2026-10-10 03:04 by `foundation/night_report.py` from `foundation/runs/night/*.json` (MacBook Air M1, one GPU job at a time). The numbers are those of the files; nothing is typed by hand in the tables.
 
 ## Summary
 
 - Best mean event F1 over the 5 benchmarks: **sup_bitcn_ema_tta** (0.88 F1, 0.80 kappa, readout: threshold); best mean kappa: **sup_bitcn_ema_tta** (0.88 / 0.80, readout: threshold).
 - Reference U'n'Eye (supervised): 0.85 F1 / 0.75 kappa on the same subsets (Andersson with its general weights is 0.55 / 0.33; with its own weights 0.89 / 0.81). The label-free universal HMM: 0.88 / 0.66.
 - Control: the random-initialised transformer encoder gives 0.48 / 0.44 (hmm): a trained encoder only counts if it beats this.
-- Steps of the night finished: 15; failed or timed out: 0.
+- Steps of the night finished: 16; failed or timed out: 0.
 
 ## Protocol (the same for every row)
 
@@ -67,9 +67,15 @@ Already tried before tonight (not repeated):
 | `ts2vec_a_novelty` | self-supervised | none (the encoder saw no label; no probe either) | **0.33 / 0.20** | hmm | 0.33 / 0.20 | n/a | 0.34 / 0.31 | 0.45 / 0.35 | 0.29 / 0.14 | 0.20 / 0.15 | 0.38 / 0.07 | 12.4 |
 | `ts2vec_b_novelty` | self-supervised | none (the encoder saw no label; no probe either) | **0.16 / 0.22** | hmm | 0.16 / 0.22 | n/a | 0.16 / 0.31 | 0.18 / 0.27 | 0.19 / 0.24 | 0.10 / 0.15 | 0.16 / 0.13 | 11.8 |
 | `selftrain_r1_tta` | label-free student | none for training | **0.83 / 0.64** | threshold | 0.66 / 0.63 | 0.83 / 0.64 | 0.89 / 0.74 | 0.90 / 0.78 | 0.78 / 0.53 | 0.92 / 0.83 | 0.68 / 0.33 | 4.6 |
+| `selftrain_b_r1_tta` | label-free student | none for training | **0.83 / 0.67** | threshold | 0.61 / 0.58 | 0.83 / 0.67 | 0.90 / 0.75 | 0.91 / 0.79 | 0.84 / 0.64 | 0.92 / 0.85 | 0.56 / 0.34 | 9.2 |
+| `selftrain_b_r3_tta` | label-free student | none for training | **0.82 / 0.67** | threshold | 0.63 / 0.59 | 0.82 / 0.67 | 0.91 / 0.77 | 0.88 / 0.80 | 0.79 / 0.61 | 0.90 / 0.86 | 0.64 / 0.31 | 9.2 |
+| `selftrain_b_r2_tta` | label-free student | none for training | **0.81 / 0.67** | threshold | 0.63 / 0.60 | 0.81 / 0.67 | 0.89 / 0.76 | 0.88 / 0.79 | 0.81 / 0.63 | 0.90 / 0.86 | 0.56 / 0.33 | 8.0 |
 | `selftrain_r1` | label-free student | none for training (labeled train splits only select the chec | **0.80 / 0.64** | threshold | 0.68 / 0.64 | 0.80 / 0.64 | 0.89 / 0.74 | 0.90 / 0.78 | 0.77 / 0.53 | 0.92 / 0.83 | 0.54 / 0.34 | 4.6 |
 | `selftrain_r2_tta` | label-free student | none for training | **0.80 / 0.70** | threshold | 0.61 / 0.60 | 0.80 / 0.70 | 0.88 / 0.76 | 0.87 / 0.79 | 0.78 / 0.59 | 0.87 / 0.85 | 0.60 / 0.51 | 4.6 |
+| `selftrain_b_r1` | label-free student | none for training (labeled train splits only select the chec | **0.79 / 0.68** | threshold | 0.63 / 0.59 | 0.79 / 0.68 | 0.89 / 0.75 | 0.91 / 0.79 | 0.84 / 0.64 | 0.91 / 0.85 | 0.39 / 0.36 | 9.2 |
+| `selftrain_b_r3` | label-free student | none for training (labeled train splits only select the chec | **0.79 / 0.67** | threshold | 0.64 / 0.60 | 0.79 / 0.67 | 0.90 / 0.76 | 0.87 / 0.80 | 0.79 / 0.61 | 0.90 / 0.86 | 0.47 / 0.32 | 9.2 |
 | `selftrain_r2` | label-free student | none for training (labeled train splits only select the chec | **0.78 / 0.70** | threshold | 0.64 / 0.61 | 0.78 / 0.70 | 0.87 / 0.76 | 0.87 / 0.79 | 0.79 / 0.59 | 0.86 / 0.85 | 0.51 / 0.49 | 4.6 |
+| `selftrain_b_r2` | label-free student | none for training (labeled train splits only select the chec | **0.78 / 0.68** | threshold | 0.65 / 0.61 | 0.78 / 0.68 | 0.89 / 0.76 | 0.88 / 0.79 | 0.81 / 0.63 | 0.89 / 0.86 | 0.41 / 0.34 | 8.0 |
 | `sup_bitcn_ema_tta` | supervised | labels of d1+d2+d3 train splits (d4 and Andersson never seen | **0.88 / 0.80** | threshold | 0.57 / 0.37 | 0.88 / 0.80 | 0.92 / 0.87 | 0.96 / 0.92 | 0.88 / 0.82 | 0.91 / 0.84 | 0.70 / 0.54 | 9.0 |
 | `sup_bitcn_tta` | supervised | labels of d1+d2+d3 train splits (d4 and Andersson never seen | **0.86 / 0.78** | threshold | 0.61 / 0.40 | 0.86 / 0.78 | 0.90 / 0.88 | 0.95 / 0.91 | 0.90 / 0.80 | 0.83 / 0.79 | 0.70 / 0.53 | 9.0 |
 | `sup_bitcn` | supervised | labels of d1+d2+d3 train splits (d4 and Andersson never seen | **0.84 / 0.78** | threshold | 0.60 / 0.40 | 0.84 / 0.78 | 0.89 / 0.88 | 0.94 / 0.91 | 0.88 / 0.80 | 0.82 / 0.79 | 0.68 / 0.53 | 9.0 |
@@ -118,6 +124,7 @@ The headline column is the better mean event F1 of the two readouts (shown separ
 | jepa_e | done | 9.6 |
 | mae_b | done | 13.3 |
 | label_eff | done | 14.7 |
+| selftrain_b | done | 30.4 |
 
 ## Limits
 
