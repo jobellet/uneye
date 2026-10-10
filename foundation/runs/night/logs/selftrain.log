@@ -1,0 +1,49 @@
+[selftrain] pool (13500, 480, 2), HMM pseudo-labels: 8.1 % saccade samples
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[selftrain_r1] step 500/4000 loss 0.3082 | validation: HMM F1 0.650 kappa 0.641, threshold F1 0.802 (best 0.650 *saved*, patience 0/3) | d1 0.70/0.73 d2 0.56/0.66 d3 0.76/0.65 d4 0.64/0.77 andersson 0.58/0.39 | 71 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[selftrain_r1] step 1000/4000 loss 0.2425 | validation: HMM F1 0.606 kappa 0.577, threshold F1 0.791 (best 0.650, patience 1/3) | d1 0.65/0.67 d2 0.54/0.61 d3 0.70/0.63 d4 0.53/0.62 andersson 0.61/0.35 | 140 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[selftrain_r1] step 1500/4000 loss 0.2388 | validation: HMM F1 0.580 kappa 0.561, threshold F1 0.809 (best 0.650, patience 2/3) | d1 0.62/0.64 d2 0.56/0.61 d3 0.60/0.59 d4 0.51/0.62 andersson 0.61/0.35 | 208 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[selftrain_r1] step 2000/4000 loss 0.2370 | validation: HMM F1 0.567 kappa 0.564, threshold F1 0.819 (best 0.650, patience 3/3) | d1 0.61/0.66 d2 0.48/0.58 d3 0.62/0.61 d4 0.49/0.62 andersson 0.64/0.34 | 277 s
+[selftrain_r1] early stop
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[selftrain_r1] mean over 5 datasets: HMM F1 0.680 kappa 0.638 | threshold F1 0.804 kappa 0.644 | d1 0.76/0.77 d2 0.69/0.71 d3 0.77/0.71 d4 0.56/0.72 andersson 0.63/0.27 (4.6 min)
+[selftrain_r1_tta] mean over 5 datasets: HMM F1 0.662 kappa 0.626 | threshold F1 0.834 kappa 0.643 | d1 0.75/0.76 d2 0.67/0.70 d3 0.74/0.70 d4 0.53/0.69 andersson 0.63/0.27 (4.6 min)
+[selftrain_r1] relabeled the pool: 8.4 % saccade samples
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[selftrain_r2] step 500/4000 loss 0.2997 | validation: HMM F1 0.617 kappa 0.613, threshold F1 0.770 (best 0.617 *saved*, patience 0/3) | d1 0.64/0.70 d2 0.50/0.62 d3 0.71/0.63 d4 0.64/0.76 andersson 0.59/0.36 | 69 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[selftrain_r2] step 1000/4000 loss 0.2297 | validation: HMM F1 0.517 kappa 0.564, threshold F1 0.771 (best 0.617, patience 1/3) | d1 0.54/0.66 d2 0.40/0.55 d3 0.61/0.61 d4 0.49/0.65 andersson 0.55/0.36 | 138 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[selftrain_r2] step 1500/4000 loss 0.2269 | validation: HMM F1 0.585 kappa 0.588, threshold F1 0.795 (best 0.617, patience 2/3) | d1 0.63/0.69 d2 0.45/0.59 d3 0.70/0.62 d4 0.57/0.69 andersson 0.58/0.36 | 207 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[selftrain_r2] step 2000/4000 loss 0.2250 | validation: HMM F1 0.596 kappa 0.580, threshold F1 0.787 (best 0.617, patience 3/3) | d1 0.57/0.63 d2 0.51/0.60 d3 0.73/0.62 d4 0.60/0.70 andersson 0.58/0.36 | 275 s
+[selftrain_r2] early stop
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[selftrain_r2] mean over 5 datasets: HMM F1 0.639 kappa 0.610 | threshold F1 0.781 kappa 0.696 | d1 0.68/0.76 d2 0.65/0.67 d3 0.73/0.68 d4 0.52/0.69 andersson 0.61/0.25 (4.6 min)
+[selftrain_r2_tta] mean over 5 datasets: HMM F1 0.606 kappa 0.600 | threshold F1 0.801 kappa 0.701 | d1 0.65/0.75 d2 0.61/0.66 d3 0.72/0.66 d4 0.50/0.67 andersson 0.55/0.26 (4.6 min)
+[selftrain_r2] relabeled the pool: 9.3 % saccade samples

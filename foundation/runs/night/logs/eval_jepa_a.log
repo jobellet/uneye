@@ -1,0 +1,1 @@
+[jepa_a] mean over 5 datasets: HMM F1 0.613 kappa 0.391 | threshold F1 0.419 kappa 0.492 | d1 0.76/0.73 d2 0.57/0.24 d3 0.46/0.14 d4 0.53/0.40 andersson 0.76/0.45 (1.1 min)

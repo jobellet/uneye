@@ -1,0 +1,25 @@
+{
+ "args": {
+  "name": "ctrl_untrained",
+  "lr": 0.0003,
+  "block": 12,
+  "patch": 4,
+  "ema": 0.996,
+  "steps": 0,
+  "batch": 64,
+  "eval_every": 500,
+  "patience": 3,
+  "objective": "jepa",
+  "max_minutes": 1000000000.0,
+  "depth": 6,
+  "wd": 0.04
+ },
+ "baseline_probe_auc": 0.8546912451052361,
+ "untrained_probe_auc": 0.9050984944499474,
+ "untrained_event_f1": 0.4964711997199858,
+ "untrained_kappa": 0.47868384687119325,
+ "baseline_event_f1": 0.6604387858899367,
+ "baseline_kappa": 0.5392994061876455,
+ "best_event_f1": 0.4964711997199858,
+ "log": []
+}

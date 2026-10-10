@@ -1,0 +1,56 @@
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn] step 500/6000 loss 0.1975 | validation (d1-d3 held-out trials): F1 0.899 kappa 0.839 | EMA F1 0.899 kappa 0.839 (best 0.899 *saved*, patience 0/3) | 66 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn] step 1000/6000 loss 0.0904 | validation (d1-d3 held-out trials): F1 0.915 kappa 0.860 | EMA F1 0.904 kappa 0.834 (best 0.915 *saved*, patience 0/3) | 133 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn] step 1500/6000 loss 0.0819 | validation (d1-d3 held-out trials): F1 0.906 kappa 0.858 | EMA F1 0.899 kappa 0.834 (best 0.915, patience 1/3) | 201 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn] step 2000/6000 loss 0.0750 | validation (d1-d3 held-out trials): F1 0.919 kappa 0.862 | EMA F1 0.895 kappa 0.829 (best 0.919 *saved*, patience 0/3) | 269 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn] step 2500/6000 loss 0.0732 | validation (d1-d3 held-out trials): F1 0.891 kappa 0.862 | EMA F1 0.921 kappa 0.851 (best 0.921 *saved*, patience 0/3) | 337 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn] step 3000/6000 loss 0.0680 | validation (d1-d3 held-out trials): F1 0.891 kappa 0.860 | EMA F1 0.911 kappa 0.864 (best 0.921, patience 1/3) | 405 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn] step 3500/6000 loss 0.0647 | validation (d1-d3 held-out trials): F1 0.881 kappa 0.859 | EMA F1 0.913 kappa 0.863 (best 0.921, patience 2/3) | 473 s
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn] step 4000/6000 loss 0.0621 | validation (d1-d3 held-out trials): F1 0.884 kappa 0.864 | EMA F1 0.874 kappa 0.847 (best 0.921, patience 3/3) | 541 s
+[sup_bitcn] early stop
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn] mean over 5 datasets: HMM F1 0.604 kappa 0.400 | threshold F1 0.844 kappa 0.782 | d1 0.77/0.64 d2 0.70/0.59 d3 0.50/0.27 d4 0.36/0.24 andersson 0.69/0.27 (9.0 min)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn_tta] mean over 5 datasets: HMM F1 0.612 kappa 0.399 | threshold F1 0.857 kappa 0.783 | d1 0.77/0.65 d2 0.70/0.58 d3 0.52/0.27 d4 0.36/0.24 andersson 0.72/0.26 (9.0 min)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+/Users/joachimbellet/Documents/GitHub/uneye/foundation/bitcn.py:38: RuntimeWarning: invalid value encountered in multiply
+  c, s = np.cos(np.deg2rad(th)), np.sin(np.deg2rad(th)); q = np.stack([c * p[..., 0] - s * p[..., 1], s * p[..., 0] + c * p[..., 1]], 2)
+[sup_bitcn_ema_tta] mean over 5 datasets: HMM F1 0.566 kappa 0.368 | threshold F1 0.875 kappa 0.797 | d1 0.68/0.58 d2 0.63/0.51 d3 0.51/0.28 d4 0.33/0.23 andersson 0.69/0.24 (9.0 min)

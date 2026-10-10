@@ -1,0 +1,1 @@
+[base_input_6ch] mean over 5 datasets: HMM F1 0.757 kappa 0.505 | threshold F1 0.176 kappa 0.255 | d1 0.90/0.74 d2 0.82/0.05 d3 0.56/0.58 d4 0.86/0.84 andersson 0.64/0.32 (0.2 min)
