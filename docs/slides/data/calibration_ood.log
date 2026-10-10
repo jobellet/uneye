@@ -1,0 +1,41 @@
+set A (calibration):
+ limit  recall_clean  dangerous_total  dangerous_noise  dangerous_burst  degraded_clean  admissible
+   8.0       0.83535              233                0               79         0.13880       False
+  10.0       0.85940              238                0               84         0.08555        True
+  12.0       0.86500              230                0               80         0.05645        True
+  14.0       0.87275              228                0               79         0.04130        True
+  16.0       0.87555              227                0               78         0.03730        True
+  18.0       0.87835              239               11               76         0.03145        True
+  20.0       0.87835              259               31               76         0.03135        True
+  23.1       0.87835              265               36               76         0.03120        True
+  28.0       0.87835              267               37               76         0.02895        True
+
+chosen limit: 16 deg/s (current 23.1); recall budget 0.02 below 0.878
+
+set B (test, scored once): limit 23.1 vs 16
+perturbation   level  dangerous_current  dangerous_chosen  recall_current  recall_chosen
+        none  0.0000                  0                 0           0.886          0.886
+       noise  0.0200                  2                 2           0.671          0.666
+       noise  0.0500                 28                 0           0.221          0.129
+       noise  0.1000                  0                 0           0.030          0.030
+       noise  0.2000                  0                 0           0.002          0.002
+       burst  0.1000                 46                46           0.854          0.841
+       burst  0.5000                 37                37           0.731          0.730
+       burst  2.0000                  0                 0           0.820          0.820
+     dropout  0.0020                  0                 0           0.648          0.648
+     dropout  0.0100                  0                 0           0.257          0.254
+      spikes  0.0010                  0                 0           0.856          0.856
+      spikes  0.0100                  0                 0           0.634          0.634
+  saturation  5.0000                  0                 0           0.873          0.873
+  saturation  2.0000                  0                 0           0.531          0.531
+      frozen  0.0020                  0                 0           0.272          0.272
+       drift  5.0000                  1                 1           0.116          0.116
+       drift 50.0000                  1                 1           0.005          0.005
+       scale  0.1000                  0                 0           0.169          0.169
+       scale 10.0000                118               118           0.451          0.451
+  rate_wrong  1.0000                 32                32           0.780          0.786
+rate_correct  1.0000                  0                 0           0.000          0.000
+    deadline  0.0005                  0                 0           0.802          0.802
+    deadline  0.0100                  0                 0           0.172          0.172
+   net_stuck  1.0000                  0                 0           0.732          0.732
+total dangerous: 265 -> 237; cases with 0: 16 -> 17 of 24

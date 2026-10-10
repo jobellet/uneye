@@ -209,3 +209,16 @@ python free_saccade/benchmark_cebra.py                 # label-free baselines in
 - Label-free noisy student of the universal HMM (`selftrain_b_r1_tta`): 0.83 / 0.67 (kappa above U'n'Eye mean, F1 slightly below); universal HMM alone 0.88 / 0.66.
 - Self-supervised representations (JEPA a/b/d/e, MAE a/b, HuBERT, TS2Vec a/b) + probe + HMM: 0.46-0.68 F1, none beats plain input channels (0.75 / 0.51); several equal or below the untrained control (mae_b equals the control: best checkpoint was step 0). Only ts2vec_a is notable with 20 labeled trials on d1/d2 (0.84 / 0.71). Novelty-curve detection from TS2Vec is poor (F1 <= 0.33).
 - Conclusion: for the C++ tool, ship the bidirectional TCN (supervised or HMM-distilled), not a SSL foundation encoder; SSL representation learning adds nothing measurable here.
+
+## Few-label regime (article analysis, dataset 1: N labeled trials of set B -> test on 300 trials of set A) — benchmark NOT beaten
+Mean of 3 draws, F1 / kappa. U'n'Eye retrained with `uneye.DNN` (its own early stopping), BiTCN 2 channels with a fixed 1500 steps and no validation:
+| N | U'n'Eye | BiTCN (vx, vy) |
+|---|---|---|
+| 10 | 0.89 / 0.76 | 0.77 / 0.79 |
+| 20 | 0.92 / 0.81 | 0.82 / 0.83 |
+| 50 | 0.95 / 0.84 | 0.84 / 0.85 |
+| 100 | 0.95 / 0.86 | 0.86 / 0.86 |
+| 200 | 0.95 / 0.86 | 0.91 / 0.87 |
+| 300 | 0.96 / 0.87 | 0.90 / 0.87 |
+With few labels U'n'Eye has the better event F1 (kappa is equal); the BiTCN only matches it from ~200 trials on kappa and does not reach its F1 at N<=300. The BiTCN's advantage (0.90 / 0.81 vs 0.85 / 0.75) is in the zero-shot / pooled-training setting, not in the few-label regime.
+Decision (owner): no further runs on this benchmark (U'n'Eye was not retrained for N=1000 nor for the between-subject analysis on dataset 4; that figure shows the BiTCN only). Next: try another approach for the few-label regime rather than tuning this one.

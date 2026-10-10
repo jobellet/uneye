@@ -2,15 +2,21 @@
 import json, os
 import numpy as np, matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "figs_paper"); R = json.load(open(os.path.join(OUT, "results.json")))
-A = {}
-for k, v in R["A"].items(): A.setdefault(int(k.split("_")[0]), []).append(v)
+def group(d):
+    g = {}
+    for k, v in d.items(): g.setdefault(int(k.split("_")[0]), []).append(v)
+    return g
+A = group(R["A"]); RU = os.path.join(OUT, "results_uneye.json"); U = group(json.load(open(RU))["A"]) if os.path.exists(RU) else {}
 if A:
     Ns = sorted(A); fig, ax = plt.subplots(1, 2, figsize=(9, 3.6))
     for j, (nm, c) in enumerate((("F1", "#d9534f"), ("Cohen's kappa", "#337ab7"))):
         for N in Ns: ax[j].scatter([N] * len(A[N]), [v[j] for v in A[N]], s=12, color=c, alpha=.4)
         m = [np.mean([v[j] for v in A[N]]) for N in Ns]; s = [np.std([v[j] for v in A[N]]) for N in Ns]
-        ax[j].errorbar(Ns, m, s, color=c, marker="o", capsize=3); ax[j].set_xscale("log"); ax[j].set_xlabel("number of labeled trials (1 s each)"); ax[j].set_ylabel(nm); ax[j].set_ylim(0.4, 1); ax[j].grid(alpha=.3)
-    fig.suptitle("Dataset 1: train on N trials of set B, test on set A (2-channel BiTCN)"); fig.tight_layout(); fig.savefig(os.path.join(OUT, "n_labeled.png"), dpi=150)
+        ax[j].errorbar(Ns, m, s, color=c, marker="o", capsize=3, label="2-channel BiTCN")
+        if U:
+            un = sorted(U); ax[j].errorbar(un, [np.mean([v[j] for v in U[N]]) for N in un], [np.std([v[j] for v in U[N]]) for N in un], color="k", marker="s", capsize=3, ls="--", label="U'n'Eye (retrained)"); ax[j].legend(fontsize=8, loc="lower right")
+         ax[j].set_xscale("log"); ax[j].set_xlabel("number of labeled trials (1 s each)"); ax[j].set_ylabel(nm); ax[j].set_ylim(0.4, 1); ax[j].grid(alpha=.3)
+    fig.suptitle("Dataset 1: train on N trials of set B, test on set A"); fig.tight_layout(); fig.savefig(os.path.join(OUT, "n_labeled.png"), dpi=150)
 if R["B"]:
     rows = [k for k in R["B"] if k != "all"]; rows = sorted(rows, key=float) + (["all"] if "all" in R["B"] else []); n = len(R["B"][rows[0]])
     fig, ax = plt.subplots(1, 2, figsize=(11, 4.6))
