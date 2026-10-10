@@ -4,12 +4,14 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <stdexcept>
 
 namespace uneye {
 
 static double median(std::vector<double>& v) {
     size_t n = v.size(), h = n / 2;
+    if (n == 0) return 0.0;
     std::nth_element(v.begin(), v.begin() + h, v.end());
     double hi = v[h];
     if (n % 2) return hi;
@@ -18,6 +20,7 @@ static double median(std::vector<double>& v) {
 }
 
 void features2(const float* pos, int T, double fs, float* out) {
+    if (T <= 0) return;
     std::vector<double> p(2 * (size_t)T);
     std::vector<unsigned char> valid(T);
     for (int t = 0; t < T; ++t) valid[t] = std::isfinite(pos[2 * t]) && std::isfinite(pos[2 * t + 1]);
@@ -53,19 +56,22 @@ void features2(const float* pos, int T, double fs, float* out) {
 }
 
 BiTCN::BiTCN(const std::string& path) {
-    FILE* f = std::fopen(path.c_str(), "rb");
+    std::unique_ptr<FILE, int (*)(FILE*)> f(std::fopen(path.c_str(), "rb"), &std::fclose);      // closed on every exit, including exceptions
     if (!f) throw std::runtime_error("cannot open " + path);
-    auto rd = [&](void* p, size_t n) { if (std::fread(p, 1, n, f) != n) { std::fclose(f); throw std::runtime_error("truncated " + path); } };
+    auto rd = [&](void* p, size_t n) { if (std::fread(p, 1, n, f.get()) != n) throw std::runtime_error("truncated " + path); };
     int32_t h[5]; rd(h, sizeof h);
-    if (h[0] != 0x42544e32) { std::fclose(f); throw std::runtime_error("bad magic in " + path); }
+    if (h[0] != 0x42544e32) throw std::runtime_error("bad magic in " + path);
+    if (h[1] < 1 || h[1] > 16 || h[2] < 1 || h[2] > 512 || h[3] < 0 || h[3] > 64 || h[4] < 1 || h[4] > 31 || h[4] % 2 == 0) throw std::runtime_error("implausible header in " + path);
     nin_ = h[1]; ch_ = h[2]; int nb = h[3]; stem_.k = h[4]; stem_.dil = 1;
     auto vec = [&](std::vector<float>& v, size_t n) { v.resize(n); rd(v.data(), n * 4); };
     vec(stem_.w, (size_t)ch_ * nin_ * stem_.k); vec(stem_.b, ch_); vec(stem_.scale, ch_); vec(stem_.shift, ch_);
     for (int i = 0; i < nb; ++i) {
-        Layer L; int32_t d; rd(&d, 4); L.dil = d; L.k = 3;
+        Layer L; int32_t d; rd(&d, 4);
+        if (d < 1 || d > 4096) throw std::runtime_error("implausible dilation in " + path);
+        L.dil = d; L.k = 3;
         vec(L.w, (size_t)ch_ * ch_ * 3); vec(L.b, ch_); vec(L.scale, ch_); vec(L.shift, ch_); blocks_.push_back(std::move(L));
     }
-    vec(head_w_, ch_); rd(&head_b_, 4); std::fclose(f);
+    vec(head_w_, ch_); rd(&head_b_, 4);
 }
 
 int BiTCN::receptive_field() const {

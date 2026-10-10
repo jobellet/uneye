@@ -165,7 +165,7 @@ void SafetyGuard::step(const gaze::Sample& raw, const gaze::Output& eo, double c
     }
 
     // ---- velocity (3-sample mean of displacements; none across a gap or invalid data, as in the engine) and robust noise
-    const double px = last_x_, py = last_y_;     // last valid position before this sample (start point of an event)
+    const double px = have_valid_ ? last_x_ : (valid ? x : 0.0), py = have_valid_ ? last_y_ : (valid ? y : 0.0);     // last valid position before this sample (start point of an event); the sample itself before any valid one
     double dx = 0, dy = 0;
     if (valid) {
         if (have_valid_ && invalid_run_ == 0 && !gap) { dx = x - last_x_; dy = y - last_y_; }

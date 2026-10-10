@@ -32,15 +32,18 @@ def rowcells(jid, readout=None): return per_dataset(jid, readout) or [None] * 6
 # ---------------------------------------------------------------- table 1: all five datasets
 uneye = J("ref_uneye")["test"]; own = J("ref_uneye_andersson_own"); un = [(uneye[k]["threshold"]["f1"], uneye[k]["threshold"]["kappa"]) for k in DS[:4]] + [(own["f1"], own["kappa"])]
 un += [(float(np.mean([x[0] for x in un])), float(np.mean([x[1] for x in un])))]
+ung = [(uneye[k]["threshold"]["f1"], uneye[k]["threshold"]["kappa"]) for k in DS]; ung += [(float(np.mean([x[0] for x in ung])), float(np.mean([x[1] for x in ung])))]
 lodo = J("lodo_bitcn"); lo = [(lodo[k]["f1"], lodo[k]["kappa"]) for k in DS] if lodo and all(k in lodo for k in DS) else None
 if lo: lo += [(float(np.mean([x[0] for x in lo])), float(np.mean([x[1] for x in lo])))]
 H = ["method", "labels used for training", "d1", "d2", "d3", "d4", "Andersson", "mean"]
 t1 = [("**U'n'Eye (benchmark)**", "d1+d2+d3 labels (weights 1+2+3); d4 unseen; Andersson with its own weights", un),
       ("Universal HMM", "none (fitted on archive/ only)", rowcells("ref_universal_hmm")),
       ("Noisy-student TCN of the HMM", "none", rowcells("selftrain_b_r1_tta", "threshold")),
+      ("U'n'Eye, general weights everywhere (same labels as the BiTCN rows)", "d1+d2+d3 labels; d4 and Andersson unseen", ung),
       ("Input channels + probe + HMM", "labels of the 4 other datasets", rowcells("base_input_channels")),
       ("BiTCN 8 channels, supervised", "d1+d2+d3 labels; d4, Andersson unseen", rowcells("sup_bitcn_b_tta", "threshold")),
-      ("BiTCN 2 channels (vx, vy), supervised", "d1+d2+d3 labels; d4, Andersson unseen", rowcells("sup_bitcn_v2_tta", "threshold")),
+      ("BiTCN 2 channels (vx, vy), supervised, with 8-pass test-time augmentation", "d1+d2+d3 labels; d4, Andersson unseen", rowcells("sup_bitcn_v2_tta", "threshold")),
+      ("BiTCN 2 channels, supervised, single pass (what the C++ engine runs)", "d1+d2+d3 labels; d4, Andersson unseen", rowcells("sup_bitcn_v2", "threshold")),
       ("BiTCN 2 channels, leave-one-dataset-out", "the 4 OTHER datasets (zero-shot on the tested one)", lo or [None] * 6)]
 s1 = "| " + " | ".join(H) + " |\n|" + "---|" * len(H) + "\n"
 best = [(max(r[2][j][0] for r in t1 if r[2][j]), max(r[2][j][1] for r in t1 if r[2][j])) for j in range(6)]
@@ -107,7 +110,7 @@ Goal: match or beat U'n'Eye on BOTH F1 and kappa. If a quick test does not beat 
 
 ## 1. All five datasets (no or little target data)
 {s1}
-Notes: U'n'Eye row mixes the general weights (d1-d3; d4 unseen by it as well) and its own weights for Andersson (with the general weights Andersson is 0.55 / 0.33). U'n'Eye is trained on the labels of the datasets it is tested on, except d4 (and Andersson with general weights); the leave-one-dataset-out row is the only fully zero-shot row.
+Notes: the first row mixes the general weights (d1-d3; d4 unseen by it as well) and its own weights for Andersson (with the general weights Andersson is 0.55 / 0.33). U'n'Eye is trained on the labels of the datasets it is tested on, except d4 (and Andersson with general weights); the leave-one-dataset-out row is the only fully zero-shot row.
 Verdict: on the datasets whose labels they were trained on or that are similar (d1, d2, d3) and on d4, the 2-channel BiTCN trained on d1+d2+d3 labels is at least as good as U'n'Eye (F1 0.94 / 0.95 / 0.94 / 0.92 against 0.90 / 0.94 / 0.93 / 0.92, kappa 0.87 / 0.91 / 0.85 / 0.84 against 0.85 / 0.88 / 0.82 / 0.85), but on Andersson it is clearly below U'n'Eye trained with its own weights (0.76 / 0.56 against 0.89 / 0.81), so the five-dataset MEAN stays with U'n'Eye (0.92 / 0.84 against 0.90 / 0.81). (A mean of 0.85 / 0.75 for U'n'Eye, used earlier in the project, was computed with its general weights on Andersson, which is unfavourable to it.) With nothing from the tested dataset (leave-one-dataset-out row) it does not beat U'n'Eye: clear losses on d2, d3, Andersson.
 
 ## 2. Self-supervised representations (frozen encoder, linear probe on other datasets, HMM or threshold readout): no gain
@@ -137,6 +140,15 @@ The change grows from the input to the output (first block 0.03, last block 0.33
 | Zero-shot BiTCN (leave-one-dataset-out) | loses on d2, d3, Andersson (table 1) | `foundation/lodo_bitcn.py` |
 | Wider U-Net + masked-velocity pre-training, multi-scale inputs | marginal / no gain in F1 (table 3) | `foundation/unet_ssl.py`, `unet_ms.py` |
 | Training U'n'Eye / the BiTCN on 1000 trials, other-algorithm curves (Sheynikhovich, Otero-Millan, Engbert-Mergenthaler) | NA: not run | |
+
+## 7. Known limitations of this comparison (found by an independent read-only review with Antigravity `agy`, each point checked in the code)
+- **Not the same labels on Andersson.** The benchmark row uses U'n'Eye's own Andersson weights (in-domain); the BiTCN rows never saw Andersson. Row "U'n'Eye, general weights everywhere" is the like-for-like comparison: there the BiTCN is better or equal on every dataset except the kappa of d4 (0.84 against 0.85), with a mean of 0.90 / 0.81 against 0.85 / 0.75 (the gap comes mostly from Andersson, 0.76 / 0.56 against 0.55 / 0.33).
+- **Test-time augmentation is not in the C++ engine.** The headline BiTCN rows use 8 passes (4 rotations x mirror); `cpp/src/bitcn.cpp` runs one pass, i.e. the "single pass" row (F1 0.87 / kappa 0.80), not the headline.
+- **Readout chosen on the test sets.** In tables 1-2 each row uses the better of the HMM and the threshold readout, decided after seeing both on the test subsets (two options only; the network rows all use the threshold). Table 2 is affected the most.
+- **Unlabeled test positions in the pre-training pool (table 3).** The pool of `foundation/unet_ssl.py` / `unet_ms.py` contains windows of the unlabeled set-A trials of dataset 1, which is also the few-label TEST set (trained on set B, tested on set A, as in the article). No label was used, but the pre-trained rows may be slightly optimistic; the from-scratch rows and U'n'Eye are not affected. The pre-trained U-Net did not beat U'n'Eye anyway, so the conclusion is unchanged (the bias is in the direction of the benchmark being under-estimated).
+- **U'n'Eye was not evaluated leave-one-dataset-out** (it is trained on d1+d2+d3 labels), so the zero-shot row has no matched baseline except the "general weights" row.
+- **Event F1 ignores predicted runs shorter than 3 samples** (`online/metrics.py`, `min_event = 3`): the same for every method, but 1-2-sample spurious detections are not penalised.
+- Checked and not material: U'n'Eye on Andersson with a threshold of 0.5 on the saccade probability instead of the argmax (as in `uneye/classifier.py`): F1 0.890 / kappa 0.815 against 0.883 / 0.817.
 
 Reproduce: `.venv/bin/python foundation/make_summary.py`.
 """
