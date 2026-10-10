@@ -70,5 +70,11 @@
   "state": "done",
   "started": "01:22",
   "minutes": 33.3
+ },
+ {
+  "id": "jepa_e",
+  "state": "done",
+  "started": "01:55",
+  "minutes": 9.6
  }
 ]
