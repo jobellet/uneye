@@ -25,11 +25,11 @@ def fit_test(pos, lab, tests, seed, tag, dist=10):
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--only", default="AB"); ap.add_argument("--reps", type=int, default=3); a = ap.parse_args()
+    ap = argparse.ArgumentParser(); ap.add_argument("--only", default="AB"); ap.add_argument("--reps", type=int, default=3); ap.add_argument("--ns", default="10,20,50,100,200,300,1000"); a = ap.parse_args()
     res = json.load(open(RES)) if os.path.exists(RES) else {"A": {}, "B": {}}; save = lambda: json.dump(res, open(RES, "w"), indent=1)
     if "A" in a.only:
         tr, te = FD.load("d1", "test"), FD.load("d1", "train"); tp, tl = te.pos[:300], te.lab[:300]
-        for N in (10, 20, 50, 100, 200, 300, 1000):
+        for N in [int(v) for v in a.ns.split(',')]:
             for r in range(a.reps):
                 key = f"{N}_{r}"
                 if key in res["A"]: continue
