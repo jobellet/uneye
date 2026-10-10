@@ -1,0 +1,78 @@
+{
+ "d1": {
+  "2 channels, common noise scale (feats2)": {
+   "degrees": [
+    0.9368505195843325,
+    0.8726363462044145
+   ],
+   "per-trial per-axis z-score": [
+    0.9201581027667984,
+    0.8562367719525327
+   ],
+   "x scaled by 0.3 (archive-like anisotropy)": [
+    0.9115113547376664,
+    0.8419667454676082
+   ],
+   "y scaled by 0.3": [
+    0.9284578696343403,
+    0.865492143090415
+   ]
+  },
+  "2 channels, noise per component (feats2c)": {
+   "degrees": [
+    0.948220064724919,
+    0.8778203797567453
+   ],
+   "per-trial per-axis z-score": [
+    0.948220064724919,
+    0.8778203797567453
+   ],
+   "x scaled by 0.3 (archive-like anisotropy)": [
+    0.948220064724919,
+    0.8778203797567453
+   ],
+   "y scaled by 0.3": [
+    0.948220064724919,
+    0.8778203797567453
+   ]
+  }
+ },
+ "d4": {
+  "2 channels, common noise scale (feats2)": {
+   "degrees": [
+    0.9173989455184534,
+    0.8432682981267721
+   ],
+   "per-trial per-axis z-score": [
+    0.8989547038327526,
+    0.8353992966375181
+   ],
+   "x scaled by 0.3 (archive-like anisotropy)": [
+    0.8102073365231259,
+    0.7930499503875438
+   ],
+   "y scaled by 0.3": [
+    0.9203539823008849,
+    0.8385882099384715
+   ]
+  },
+  "2 channels, noise per component (feats2c)": {
+   "degrees": [
+    0.9269162210338681,
+    0.8350699546274436
+   ],
+   "per-trial per-axis z-score": [
+    0.9269162210338681,
+    0.8350699546274436
+   ],
+   "x scaled by 0.3 (archive-like anisotropy)": [
+    0.9269162210338681,
+    0.8350699546274436
+   ],
+   "y scaled by 0.3": [
+    0.9269162210338681,
+    0.8350699546274436
+   ]
+  }
+ }
+}

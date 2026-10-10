@@ -40,6 +40,13 @@ def feats2(pos, fs):
     vv = np.arcsinh(v / sg); vv[~valid] = 0.0; return vv.astype(np.float32)
 
 
+def feats2c(pos, fs):
+    """like feats2 but each velocity component is divided by ITS OWN robust noise level: robust to a per-axis rescaling of the positions (the unlabeled archive is z-scored axis by axis, which makes the x noise
+    2-4x smaller than the y noise; the benchmarks in degrees have x / y noise ratios of 0.8-1, 2 for the search-coil dataset 2). Loses the real noise anisotropy of a tracker, keeps the rest."""
+    p = np.asarray(pos, np.float64); v, valid = D.velocity(p, fs); sg = np.maximum(D.robust_sigma(v), 1e-9)          # (n, 1, 2): one level per component
+    vv = np.arcsinh(v / sg); vv[~valid] = 0.0; return vv.astype(np.float32)
+
+
 P, D_MODEL, DEPTH, HEADS, K_PROTO, N_IN = 4, 192, 6, 6, 512, 8
 BASE, G_LEN, L_LEN, N_LOCAL = 480, 336, 84, 6
 

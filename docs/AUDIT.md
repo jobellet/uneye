@@ -25,6 +25,9 @@ One Antigravity `agy` agent (model `gemini-3.8-flash-medium`, read-only: file re
 ## Review of the code added on the branch `vibe/lost-ncut-memory-readouts-d0df29` (`foundation/lost1d.py`, written by another agent)
 Reviewed by `agy` before running (first review truncated, second one complete), every finding checked in the code. Fixed: PatchCore took the MINIMUM over the memory chunks of the best similarity (a nearest neighbour needs the maximum); TokenCut used `D - A_n` instead of the normalised Laplacian `I - A_n`; the arbitrary sign of the Fiedler vector was not oriented (overlapping windows cancelled: now TokenCut's own rule, largest |value| positive, no label); keys were averaged over the heads instead of concatenated (LOST / TokenCut); features were computed on the NaN-padded window (same flaw as `dino_eval.py`, also fixed there); k-means could start from two identical tokens. Not changed (design limits, documented): k-means always splits a fixation window in two, LOST always picks a seed. Result: no readout beats the speed channel (docs/BENCHMARK_SUMMARY.md section 6).
 
+## Found by the owner's question (not by the audit): per-axis z-scoring of the archive
+The input of every model divides both velocity components by one common noise level, but the archive is z-scored axis by axis (x noise 2-4x smaller than y). Measured and tested in `docs/BENCHMARK_SUMMARY.md` section 3c; `feats2c` (noise per component) added in `foundation/dino1d.py`, option `--inputs 2c` in `foundation/sup_bitcn.py`, `--feats 2c --tag _c` in `foundation/unet_ssl.py`.
+
 ## Rejected (checked, not errors, or no effect)
 - `hmm_improvements.py:27` "peak index adds `(s - lo)` twice": wrong algebra, `lo + (s - lo) = s`, the index is right.
 - `hmm_improvements.py` semi-Markov transition remark: not demonstrated.

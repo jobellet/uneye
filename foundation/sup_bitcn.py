@@ -20,15 +20,17 @@ BASE = 480
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--name", default="sup_bitcn"); ap.add_argument("--steps", type=int, default=6000); ap.add_argument("--lr", type=float, default=2e-3)
-    ap.add_argument("--max-minutes", type=float, default=30); ap.add_argument("--pos-weight", type=float, default=3.0); ap.add_argument("--inputs", type=int, default=8, choices=[2, 8]); a = ap.parse_args()
-    if a.inputs == 2:
+    ap.add_argument("--max-minutes", type=float, default=30); ap.add_argument("--pos-weight", type=float, default=3.0); ap.add_argument("--inputs", default="8", choices=["2", "2c", "8"]); a = ap.parse_args()
+    if a.inputs == "2":
         from foundation.dino1d import feats2; BT.FEATS = feats2
+    elif a.inputs == "2c":
+        from foundation.dino1d import feats2c; BT.FEATS = feats2c
     rng = np.random.RandomState(0); torch.manual_seed(0)
     train, val = {}, {}
     for k in ("d1", "d2", "d3"):
         S = FD.load(k, "train"); perm = np.random.RandomState(2).permutation(len(S)); nv = max(len(S) // 10, 20)
         val[k] = FD.Set(k, S.pos[perm[:nv]], S.lab[perm[:nv]], S.coarse); train[k] = (S.pos[perm[nv:]], S.lab[perm[nv:]])
-    net = BT.BiTCN(nin=a.inputs).to(DEV); ema = copy.deepcopy(net).eval(); opt = torch.optim.AdamW(net.parameters(), lr=a.lr, weight_decay=1e-2)
+    net = BT.BiTCN(nin=8 if a.inputs == "8" else 2).to(DEV); ema = copy.deepcopy(net).eval(); opt = torch.optim.AdamW(net.parameters(), lr=a.lr, weight_decay=1e-2)
     def val_f1(m):
         out = []
         for k, S in val.items():
