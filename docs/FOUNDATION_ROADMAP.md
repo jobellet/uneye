@@ -252,3 +252,12 @@ Mean ± std over 10 draws of N labeled trials, event F1 / kappa:
 | 20 | 0.898±0.018 / 0.815±0.011 | 0.888±0.017 / 0.810±0.011 | 0.897±0.024 / 0.775±0.048 |
 | 50 | 0.921±0.008 / 0.842±0.008 | 0.915±0.017 / 0.823±0.013 | 0.941±0.014 / 0.830±0.022 |
 Paired F1 difference pre-trained minus U'n'Eye: N=10 +0.021 (se 0.035, 8/10 wins), N=20 +0.001 (se 0.006), N=50 -0.020 (se 0.005, 2/10 wins). The N=10 "win" of the 3-draw table was luck (one draw is a failure for the pre-trained net, F1 spread 0.16). Verdict: kappa is better than U'n'Eye at every N (+0.11, +0.04, +0.01), event F1 is tied at N<=20 and worse at N=50. Pre-training itself adds ~0.01 over the same network from scratch: the benchmark is NOT beaten in F1. The pre-training idea is parked.
+
+## Multi-scale input (p[n]-p[n-k], k = 1, 2, 4, 8, 16; x, y) with leak-free masked pre-training — no gain (2026-10-10, `foundation/unet_ms.py`)
+Hidden POSITION spans (25 %); every channel value whose window [n-k, n] touches a hidden position is blanked (so a large-lag difference cannot reveal the displacement inside a hidden span); noise scale estimated on visible values only (checked: altering the hidden positions changes no visible input, max change 0.0). Pre-training reconstructs the 10 channels where blanked (val loss 0.461 after 11 250 steps, 25 min). Same fine-tuning protocol and draws as above, 10 draws, mean±std, event F1 / kappa:
+| N | multi-scale pre-trained | multi-scale scratch | 2-channel pre-trained | 2-channel scratch | U'n'Eye |
+|---|---|---|---|---|---|
+| 10 | 0.813±0.217 / 0.761±0.129 | 0.867±0.064 / 0.786±0.027 | 0.846±0.162 / 0.785±0.073 | 0.871±0.049 / 0.774±0.055 | 0.826±0.107 / 0.672±0.135 |
+| 20 | 0.894±0.015 / 0.814±0.014 | 0.899±0.015 / 0.818±0.014 | 0.898±0.018 / 0.815±0.011 | 0.888±0.017 / 0.810±0.011 | 0.897±0.024 / 0.775±0.048 |
+| 50 | 0.911±0.008 / 0.838±0.008 | 0.909±0.013 / 0.833±0.013 | 0.921±0.008 / 0.842±0.008 | 0.915±0.017 / 0.823±0.013 | 0.941±0.014 / 0.830±0.022 |
+Multi-scale pre-trained minus U'n'Eye: F1 -0.013 / -0.003 / -0.030 (N = 10 / 20 / 50, the last significant), kappa +0.088 / +0.039 / +0.008. The multi-scale input does not beat the instantaneous velocity (50: 0.911 vs 0.921 pre-trained), and pre-training does not help it either (scratch = pre-trained within noise). Conclusion: what limits F1 here is not the input scale; the U-Net family reaches the same plateau (~0.90 at N=20, ~0.92 at N=50) as U'n'Eye, whose F1 stays higher at N=50. Benchmark not beaten in F1; kappa advantage at small N is the only robust difference. Parked.
