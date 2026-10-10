@@ -1,0 +1,2 @@
+# uneye/ — the original Python package
+`classifier.py` `DNN` (train / predict / test / crossvalidate; CPU unless CUDA), `functions.py` `UNet`, `accuracy` (event metrics), `merge_saccades`, `binary_prediction`, `EM_saccade_detection` (Engbert-Mergenthaler). Usage and parameters: `../README.md`. Input: x, y in degrees, 1 s trials; velocity = first difference. Keep behavior unchanged: the C++ ports and the references in `foundation/compare.py` depend on it.

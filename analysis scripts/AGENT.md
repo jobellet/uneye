@@ -1,0 +1,3 @@
+# analysis scripts/ — notebooks of the 2019 article (large, mostly outputs)
+`analyses.ipynb` (performance tables; F1 vs number of training samples on dataset 1; simulated data), `evaluation_networks.ipynb` (train-set x test-set and between-subject matrices on dataset 4), `crossvalidation.ipynb`, `Engbert_Mergenthaler.ipynb`, `Andersson et al. 2017 .ipynb`, `Data.ipynb`; `simulate.py` synthetic traces; `training/`, `summary/` stored weights and results.
+Do not read whole notebooks (440 tracked files, big outputs). The two analyses redone with the new model are in `../foundation/paper_figs.py` and `../foundation/uneye_curves.py`.
