@@ -118,6 +118,18 @@ for N, lab in ((0, "N = 0 (mean embedding)"), (3, "N = 3"), (10, "N = 10"), (20,
 best8 = [(max([r[1][j][0] for r in rows8 if r[1][j]] or [9]), max([r[1][j][1] for r in rows8 if r[1][j]] or [9])) for j in range(5)]
 s8 = "| method | d1 | d2 | d3 | d4 | Andersson |\n|---|---|---|---|---|---|\n"
 for lab, cells in rows8: s8 += f"| {lab} | " + " | ".join(fmt(cells[:5], best8)) + " |\n"
+WF = J("workflow_sim"); WC = ["C1", "C2", "C3", "C4", "C5", "P1", "P4", "P5"]
+def wf(ds, c):
+    v = [x[:2] for k, x in (WF or {}).items() if x is not None and k.startswith(f"{ds}_{c}_")]
+    return (float(np.mean([a[0] for a in v])), float(np.mean([a[1] for a in v]))) if v else None
+rows9 = []
+for ds in DS:
+    rows9.append((ds, [wf(ds, c) for c in WC]))
+mean9 = [tuple(np.mean([r[1][j][i] for r in rows9], 0) for i in (0, 1)) if all(r[1][j] for r in rows9) else None for j in range(len(WC))]
+rows9.append(("**mean (5 datasets)**", mean9))
+best9 = [(max([r[1][j][0] for r in rows9[:-1] if r[1][j]] or [9]), max([r[1][j][1] for r in rows9[:-1] if r[1][j]] or [9])) for j in range(len(WC))]
+s9 = "| dataset | " + " | ".join(WC) + " |\n|" + "---|" * (len(WC) + 1) + "\n"
+for lab, cells in rows9: s9 += f"| {lab} | " + " | ".join(fmt(cells, best9) if lab[0] != "*" else [("%.2f / %.2f" % c if c else "NA") for c in cells]) + " |\n"
 # ---------------------------------------------------------------- table 4: between subjects (dataset 4)
 B = json.load(open(os.path.join(ROOT, "docs", "figs_paper", "results.json")))["B"]; subj = [k for k in B if k != "all"]
 diag = float(np.mean([B[k][i][0] for i, k in enumerate(sorted(subj, key=float))])); off = float(np.mean([B[k][j][0] for i, k in enumerate(sorted(subj, key=float)) for j in range(len(B[k])) if j != i]))
@@ -167,6 +179,10 @@ Models trained only in degrees (all supervised rows, the calibrator, FiLM) never
 
 ## 3d. HMM + boundaries at the zeros of the acceleration (owner's idea; `foundation/accel_boundaries.py`)
 Stage 1: the label-free universal HMM finds the events. Stage 2 (no label): the trace is smoothed BEFORE differentiating (Savitzky-Golay, order 3, 15 ms), the tangential acceleration d|v|/dt is computed, the onset is the speed minimum before the peak (first zero of the acceleration going back from the peak), the offset is either the FIRST zero of the acceleration after the peak ("first inflection": post-saccadic oscillation not included, Andersson's convention) or the last zero after the last sample above the noise floor (oscillations included). Onset / offset error (ms, mean +- std of matched events) and scores, HMM alone then HMM + a-priori rule: d1 offset -12.0 -> +7.5, F1 / kappa 0.912 / 0.717 -> 0.930 / 0.795; d2 0.913 / 0.764 -> 0.919 / 0.744 (the rule "first" gives 0.919 / 0.811); d3 0.854 / 0.670 -> 0.854 / 0.620; d4 0.936 / 0.799 -> 0.950 / 0.736; Andersson offset +16.7 -> -4.6, onset spread 14.5 -> 6.9, 0.795 / 0.332 -> 0.787 / 0.602. Mean over the five datasets: 0.882 / 0.656 -> 0.888 / 0.699 (a priori) or 0.886 / 0.717 (rule chosen on 10 labeled trials). Verdict: with no label at all the rule fixes the Andersson convention (kappa 0.33 -> 0.60) and helps d1; "last zero" over-extends d3 and d4 by 11-12 ms and "first inflection" is the better rule for d2, so the choice of the rule is dataset-dependent (one bit, which 10 labeled trials find reliably for d2 and Andersson). Below the calibrated 4-parameter detector on d3 and d4, and below U'n'Eye on Andersson (0.88 / 0.82).
+
+## 3e. Simulated EyeLive workflow: 50 s pre-labeled without labels, corrected by a simulated expert, U'n'Eye trained on them (`foundation/workflow_sim.py`)
+{s9}
+C1 = pseudo-labels (universal HMM + acceleration-zero rule, no label); C2 = + the expert deletes the false positives; C3 = + adds the missed saccades; C4 = both; C5 = human labels (reference); P1 / P4 / P5 = C1 / C4 / C5 labels but the network starts from the shipped weights `weights_1+2+3` instead of random weights (only d4 and Andersson, which those weights never saw). Test subsets of `night_eval.data()`, 3 draws, N trials of the train subset covering 50 s (50, 50, 35, 67 and 13 trials; datasets at 500 Hz upsampled to 1 kHz), the expert is simulated with the benchmark's human labels (an oracle: boundaries of the benchmark for the events kept, no errors, no fatigue). Verdict: deleting false positives and adding missed saccades brings the mean F1 from 0.84 to 0.91, as good as training on all human labels (0.90), but the kappa stays at 0.76 against 0.82: the remaining gap is the convention of the boundaries, which this simulation does not correct. Training on its own pseudo-labels already improves the pseudo-labeler on Andersson (0.79 / 0.60 -> 0.86 / 0.72). The pre-trained start helps a lot on d4 (human labels 0.83 / 0.82 -> 0.96 / 0.90) and not on Andersson. Unexplained: on d4 the human-label run (C5) has a lower F1 than the corrected pseudo-labels.
 
 ## 4. Generalization between subjects (dataset 4, 10 subjects)
 {s4}

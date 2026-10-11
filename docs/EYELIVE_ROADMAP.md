@@ -222,3 +222,11 @@ Inference of the trained network online: the U-Net looks at a window of about 20
 2. Signing certificates (Windows) and an Apple developer account for distribution (section 11).
 3. Whether a lab still needs a TTL output (the state block of 12.4 replaces it for MATLAB / PsychoPy).
 4. Whether the continuous-review mode may use several CPU cores for retraining during an experiment (proposal: at most one, lower priority, configurable).
+
+### 12.10 Result of the workflow simulation (`foundation/workflow_sim.py`, table in `docs/BENCHMARK_SUMMARY.md` section 3e) and what it changes
+Mean over the 5 datasets (F1 / kappa): pseudo-labels as they come 0.84 / 0.70; + false positives deleted 0.90 / 0.74; + missed saccades added 0.91 / 0.75; both 0.91 / 0.76; full human labels 0.90 / 0.82. Per dataset: d1 and d4 gain mostly from deleting false positives (d4: 0.71 -> 0.95), d3 from adding missed saccades (0.83 -> 0.89), d2 and Andersson already start high. Consequences for the Review tab and the trainer:
+* Priorities of the review UI: (1) one-click deletion of false positives with the most doubtful ones first, (2) add missed events, (3) **boundary editing**, which is what the kappa needs (the part of the gain this simulation does NOT measure: 0.76 -> 0.82 is the gap left by the convention of the boundaries, 0.11 on d2).
+* The trained network improves on the pseudo-labeler by itself on Andersson (0.79 / 0.60 -> 0.86 / 0.72 with no correction): training is worth offering even without review.
+* The start from pre-trained weights must be offered and chosen on the validation score: large gain on d4 (human labels 0.83 / 0.82 -> 0.96 / 0.90), none on Andersson.
+* Cost: each training on 50 s took 5-80 s with PyTorch on a CPU; the C++ trainer has to match it (milestone M5).
+* Limits: oracle expert, 3 draws, binary saccade-versus-rest only, and one unexplained anomaly (d4, full human labels give a lower F1 than corrected pseudo-labels).
