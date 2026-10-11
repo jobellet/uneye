@@ -238,3 +238,17 @@ Mean over the 5 datasets (F1 / kappa): pseudo-labels as they come 0.84 / 0.70; +
 * **No code signing required.** Distribution is an unsigned archive with SHA-256 checksums and `docs/eyelive/INSTALL_UNSIGNED.md` (how to unblock the download, how to allow it in Windows SmartScreen / Defender and in macOS Gatekeeper without administrator rights). Section 11's signing rows are optional improvements, not requirements.
 * **Landing-position prediction: best effort for now**, lower priority (the owner has another project with the benchmarks and will do it later). The `Predict` tab keeps showing the ballistic-table prediction of the existing engine; the research track (section 6) is postponed.
 * **Validation on a real stream at the laboratory (planned for 2026-10-12).** The aim is to test the unit handling (pixels) and the detection on real EyeLink data. Nothing of the application can run live by then; what can be prepared is described in the chat and in `docs/eyelive/LAB_TEST.md` once the owner has chosen between a recorded file and a live executable.
+
+### 13.x Scale from a learned duration/amplitude curve (owner's idea) — negative result, 2026-10-11
+
+`foundation/scale_mainseq.py`: reference curves (median log duration, optionally log peak speed, per log-amplitude bin) built from the OTHER datasets (human labels, or label-free detector events), then the scale c (deg/unit) minimising the median log-distance of the session's events. Data are in degrees, so the true c is 1 (error factor = ĉ/c_true; 40 events):
+
+| dataset | duration only (human ref) | duration + speed (human ref) | duration + speed (detector ref) |
+|---|---|---|---|
+| d1 | 3.96 | 1.12 | 0.67 |
+| d2 | 0.74 | 5.01 (grid edge) | 5.01 (grid edge) |
+| d3 | 1.12 | 1.00 | 0.89 |
+| d4 | 4.28 | 1.95 | 1.26 |
+| Andersson | 0.05 | 0.22 | 0.19 |
+
+Conclusion: duration alone is unusable (errors ×4 or ×20). Duration + speed works on d1/d3/d4 (within ×2) but fails on d2 and Andersson, because the duration/amplitude relation depends on the dataset (task, saccade type, filtering, rate), not only on the physics. Not retained as the main estimator (no more tuning, per the stop rule). Kept: (1) agreement-based selection (`select_scale`, T08); (2) manual entry in the Acquire tab: pixels per degree, or screen width / distance / horizontal resolution (T13, `SessionConfig.deg_per_unit`), which always overrides the automatic value; (3) the duration+speed estimate may be shown as a second, advisory value when it agrees with (1) within ×1.5. To be re-tested on the real pixel recording of the lab test.
