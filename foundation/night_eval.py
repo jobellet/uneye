@@ -110,6 +110,9 @@ def references():
 
 if __name__ == "__main__":
     from foundation import dino1d as DN
+    if os.environ.get("UNEYE_AXIS_EQ") == "1":                                       # axis-equalised input: only the plain-input baseline, under another id (the references do not depend on it)
+        t0 = time.time(); res = eval_features(lambda pos: DN.feats(pos, 1000.0))
+        save("base_input_channels_c", "baseline", "labels of the other 4 datasets (linear probe)", "-", {"input": "8 velocity channels, axes equalised (UNEYE_AXIS_EQ=1)"}, res, (time.time() - t0) / 60); sys.exit(0)
     if "--six" in sys.argv:
         from free_saccade.cebra_seed import feats as feats6
         t0 = time.time(); res = eval_features(lambda pos: feats6(np.asarray(pos, np.float64), 1000.0))

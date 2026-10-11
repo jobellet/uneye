@@ -60,7 +60,7 @@ def make_masks(rng, B, N, Lb, nseg=4):
 def hubert_targets(pool, patch, k=64, n_tok=200000):
     """HuBERT iteration 1: k-means (k = 64) of the input tokens (patch x 8 channels, standardised), the 'MFCC k-means' teacher of the paper"""
     from sklearn.cluster import MiniBatchKMeans
-    path = os.path.join(ROOT, "foundation", "runs", f"hubert_km_p{patch}.npz")
+    path = os.path.join(ROOT, "foundation", "runs", f"hubert_km_p{patch}{'_c' if os.environ.get('UNEYE_AXIS_EQ') == '1' else ''}.npz")
     if os.path.exists(path): z = np.load(path); return z["c"], z["mu"], z["sd"]
     rng = np.random.RandomState(0); idx = rng.randint(0, len(pool), 3000)
     toks = feats(augment(pool[idx], rng, True), 1000.0)[:, :DN.BASE // patch * patch].reshape(-1, patch * DN.N_IN)[:n_tok]

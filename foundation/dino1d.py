@@ -18,6 +18,7 @@ Run from the repository root:  python foundation/dino1d.py --train [--steps 4000
 import argparse, json, math, os, sys, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(ROOT, "online"))
+import os
 import numpy as np, torch, torch.nn as nn, torch.nn.functional as F
 from foundation.train_lodo import augment, DEV
 from free_saccade import data as FS
@@ -29,10 +30,17 @@ def feats(pos, fs):
     """the 6 rotation-invariant channels of cebra_seed.feats + the two velocity components (vx, vy) / robust noise, arcsinh-compressed:
     NOT invariant to rotation (like U'n'Eye's input); the random rotations of the augmentation make the network learn it. They let it integrate the
     displacement along a direction, i.e. see the position jump between before and after a saccade (bidirectional attention, as for an image)."""
-    p = np.asarray(pos, np.float64); f6 = feats6(p, fs)
+    p = np.asarray(pos, np.float64)
+    if os.environ.get("UNEYE_AXIS_EQ") == "1": p = equalize_axes(p, fs)           # per-axis rescaling robust variant (see foundation/rerun_eq.py)
+    f6 = feats6(p, fs)
     v, valid = D.velocity(p, fs); sg = np.maximum(D.robust_sigma(v).mean(2, keepdims=True), 1e-9)
     vv = np.arcsinh(v / sg); vv[~valid] = 0.0
     return np.concatenate([f6, vv.astype(np.float32)], 2)
+
+
+def equalize_axes(p, fs):
+    """divide each position axis of every window by the robust noise level of ITS OWN velocity: the result does not depend on a per-axis rescaling of the input (the archive is z-scored axis by axis)"""
+    v, _ = D.velocity(p, fs); return p / np.maximum(D.robust_sigma(v), 1e-9)
 
 def feats2(pos, fs):
     """only the two velocity components (vx, vy) / robust noise, arcsinh-compressed (the vv channels of feats): the minimal input"""

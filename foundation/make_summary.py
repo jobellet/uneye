@@ -33,11 +33,18 @@ def rowcells(jid, readout=None): return per_dataset(jid, readout) or [None] * 6
 uneye = J("ref_uneye")["test"]; own = J("ref_uneye_andersson_own"); un = [(uneye[k]["threshold"]["f1"], uneye[k]["threshold"]["kappa"]) for k in DS[:4]] + [(own["f1"], own["kappa"])]
 un += [(float(np.mean([x[0] for x in un])), float(np.mean([x[1] for x in un])))]
 ung = [(uneye[k]["threshold"]["f1"], uneye[k]["threshold"]["kappa"]) for k in DS]; ung += [(float(np.mean([x[0] for x in ung])), float(np.mean([x[1] for x in ung])))]
+AC, ACS = J("accel_boundaries_15ms"), J("accel_boundaries_select_15ms")
+def acc_row(get):
+    c = [get(k) for k in DS]; return c + [(float(np.mean([x[0] for x in c])), float(np.mean([x[1] for x in c])))] if all(x is not None for x in c) else [None] * 6
+acc_apriori = acc_row(lambda k: (AC[k]["a-priori mix"]["f1"], AC[k]["a-priori mix"]["kappa"]) if AC else None)
+acc_sel10 = acc_row(lambda k: (ACS[k]["10"]["f1"], ACS[k]["10"]["kappa"]) if ACS else None)
 lodo = J("lodo_bitcn"); lo = [(lodo[k]["f1"], lodo[k]["kappa"]) for k in DS] if lodo and all(k in lodo for k in DS) else None
 if lo: lo += [(float(np.mean([x[0] for x in lo])), float(np.mean([x[1] for x in lo])))]
 H = ["method", "labels used for training", "d1", "d2", "d3", "d4", "Andersson", "mean"]
 t1 = [("**U'n'Eye (benchmark)**", "d1+d2+d3 labels (weights 1+2+3); d4 unseen; Andersson with its own weights", un),
       ("Universal HMM", "none (fitted on archive/ only)", rowcells("ref_universal_hmm")),
+      ("Universal HMM + acceleration-zero boundaries (offset 'first inflection' for Andersson, 'last zero' for the others, a priori)", "none (fitted on archive/ only)", acc_apriori),
+      ("Universal HMM + acceleration-zero boundaries, offset rule chosen per dataset on 10 labeled trials", "10 labeled trials of the target (one choice among 4 rules)", acc_sel10),
       ("Noisy-student TCN of the HMM", "none", rowcells("selftrain_b_r1_tta", "threshold")),
       ("U'n'Eye, general weights everywhere (same labels as the BiTCN rows)", "d1+d2+d3 labels; d4 and Andersson unseen", ung),
       ("Weak supervision: student of a Dawid-Skene label model over 6 labeling functions", "none", rowcells("weaksup_ds_tta", "threshold")),
@@ -54,6 +61,7 @@ for lab, lbl, cells in t1: s1 += f"| {lab} | {lbl} | " + " | ".join(fmt(cells, b
 # ---------------------------------------------------------------- table 2: self-supervised representations
 ssl = [("Input channels (8) + probe + HMM", "base_input_channels"), ("Input channels (6) + probe + HMM", "base_input_6ch"), ("Untrained transformer (control)", "ctrl_untrained"), ("Untrained TS2Vec conv (control)", "ctrl_untrained_ts2vec"),
        ("I-JEPA a", "jepa_a"), ("I-JEPA b (lr 1e-4)", "jepa_b"), ("I-JEPA d (EMA 0.99, block 6)", "jepa_d"), ("I-JEPA e (patch 8)", "jepa_e"), ("MAE a", "mae_a"), ("MAE b", "mae_b"), ("HuBERT a", "hubert_a"),
+       ("[axis-equalised input] Input channels (8) + probe + HMM", "base_input_channels_c"), ("[axis-equalised input] Untrained transformer (control)", "ctrl_untrained_c"), ("[axis-equalised input] I-JEPA a", "jepa_a_c"), ("[axis-equalised input] TS2Vec a", "ts2vec_a_c"),
        ("TS2Vec a", "ts2vec_a"), ("TS2Vec b (deeper)", "ts2vec_b"), ("TS2Vec a, novelty curve (no probe)", "ts2vec_a_novelty")]
 t2 = [(l, "labels of the 4 other datasets (linear probe only)" if "novelty" not in i else "none", rowcells(i, "hmm" if "novelty" in i else None)) for l, i in ssl]
 s2 = "| " + " | ".join(H) + " |\n|" + "---|" * len(H) + "\n"
@@ -138,7 +146,7 @@ Verdict: on the datasets whose labels they were trained on or that are similar (
 
 ## 2. Self-supervised representations (frozen encoder, linear probe on other datasets, HMM or threshold readout): no gain
 {s2}
-Verdict: no encoder (JEPA, MAE, HuBERT, TS2Vec) beats the plain input channels or U'n'Eye; several equal the untrained control (MAE b is exactly the control: its best checkpoint was step 0). DINO attention maps and a CEBRA-style seeded embedding were also tried before (table 6).
+Verdict: no encoder (JEPA, MAE, HuBERT, TS2Vec) beats the plain input channels or U'n'Eye. Re-run with the axis-equalised input (each position axis divided by the noise of its own velocity, because the archive is z-scored axis by axis; fast version, 12 min per training, MAE and HuBERT not re-run because TS2Vec and JEPA did not beat the baseline in absolute terms): the equalised plain-input baseline gives 0.69 / 0.45 (0.75 / 0.51 before: better on d3, worse on d1 and d2), TS2Vec a 0.63 / 0.52 (0.61 / 0.49 before) and I-JEPA a is exactly the untrained control (best checkpoint = step 0): same conclusion; several equal the untrained control (MAE b is exactly the control: its best checkpoint was step 0). DINO attention maps and a CEBRA-style seeded embedding were also tried before (table 6).
 
 ## 3. Few labels, dataset 1 (train on N labeled trials of set B, test on 300 trials of set A)
 {s3}
@@ -156,6 +164,9 @@ The unlabeled archive is z-scored (per file, clipped at +-6) while the benchmark
 - The archive has a noise ratio x / y of 0.27-0.58 in the four sources against 0.83-0.98 in the benchmarks (dataset 2, search coil: 1.97): it is z-scored axis by axis.
 - Pre-training the wider U-Net with the per-component input (same pool, same protocol) changes nothing for the pre-trained rows (F1 0.846 / 0.902 / 0.921 against 0.848 / 0.901 / 0.919 for N = 10 / 20 / 50) and slightly helps the from-scratch rows (0.897 / 0.899 / 0.921 against 0.871 / 0.888 / 0.915): the pre-training conclusion does not depend on this.
 Models trained only in degrees (all supervised rows, the calibrator, FiLM) never saw the archive and are not affected. The self-supervised encoders of the overnight comparison (JEPA, MAE, HuBERT, TS2Vec, DINO) and the universal HMM (fitted on archive windows) were trained on the mixed pool with the common-scale input; they were not re-run with the per-component input (only the wider U-Net was).
+
+## 3d. HMM + boundaries at the zeros of the acceleration (owner's idea; `foundation/accel_boundaries.py`)
+Stage 1: the label-free universal HMM finds the events. Stage 2 (no label): the trace is smoothed BEFORE differentiating (Savitzky-Golay, order 3, 15 ms), the tangential acceleration d|v|/dt is computed, the onset is the speed minimum before the peak (first zero of the acceleration going back from the peak), the offset is either the FIRST zero of the acceleration after the peak ("first inflection": post-saccadic oscillation not included, Andersson's convention) or the last zero after the last sample above the noise floor (oscillations included). Onset / offset error (ms, mean +- std of matched events) and scores, HMM alone then HMM + a-priori rule: d1 offset -12.0 -> +7.5, F1 / kappa 0.912 / 0.717 -> 0.930 / 0.795; d2 0.913 / 0.764 -> 0.919 / 0.744 (the rule "first" gives 0.919 / 0.811); d3 0.854 / 0.670 -> 0.854 / 0.620; d4 0.936 / 0.799 -> 0.950 / 0.736; Andersson offset +16.7 -> -4.6, onset spread 14.5 -> 6.9, 0.795 / 0.332 -> 0.787 / 0.602. Mean over the five datasets: 0.882 / 0.656 -> 0.888 / 0.699 (a priori) or 0.886 / 0.717 (rule chosen on 10 labeled trials). Verdict: with no label at all the rule fixes the Andersson convention (kappa 0.33 -> 0.60) and helps d1; "last zero" over-extends d3 and d4 by 11-12 ms and "first inflection" is the better rule for d2, so the choice of the rule is dataset-dependent (one bit, which 10 labeled trials find reliably for d2 and Andersson). Below the calibrated 4-parameter detector on d3 and d4, and below U'n'Eye on Andersson (0.88 / 0.82).
 
 ## 4. Generalization between subjects (dataset 4, 10 subjects)
 {s4}
