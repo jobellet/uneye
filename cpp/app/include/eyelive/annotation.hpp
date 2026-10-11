@@ -13,7 +13,7 @@ namespace eyelive {
 
 class ExpertLabels {
  public:
-    explicit ExpertLabels(int n_classes = 2);
+    explicit ExpertLabels(int n_classes = 3);              // default classes: 0 fixation (background), 1 saccade, 2 blink
     int n_classes() const;
     void set_n_classes(int n);                                    // 2..kMaxClasses; events of removed classes are deleted
 

@@ -6,7 +6,7 @@
 
 namespace eyelive {
 
-constexpr int kMaxClasses = 5;                 // class 0 = background (fixation), 1..4 = user-defined (default: 1 saccade, 2 PSO, 3 pursuit, 4 blink)
+constexpr int kMaxClasses = 5;                 // class 0 = background (fixation), 1..4 = user-defined. DEFAULT = 3 classes: 0 fixation (smooth pursuit stays in it), 1 saccade (post-saccadic oscillations are part of it), 2 blink
 constexpr uint8_t kIgnoreLabel = 255;          // per-sample label meaning "not used for training"
 
 enum SampleFlags : uint32_t { kFlagValid = 1u, kFlagBlink = 2u };
@@ -35,8 +35,8 @@ struct SessionInfo {
     double rate_hz = 1000.0;                   // sampling rate (measured or declared)
     double deg_per_unit = 1.0;                 // 1.0 = the stream is in degrees; otherwise degrees per stream unit
     bool scale_estimated = false;              // true when deg_per_unit was selected automatically (calib.hpp: select_scale)
-    int n_classes = 2;
-    std::vector<std::string> class_names{"fixation", "saccade"};
+    int n_classes = 3;
+    std::vector<std::string> class_names{"fixation", "saccade", "blink"};
 };
 
 }  // namespace eyelive

@@ -13,7 +13,7 @@ namespace eyelive {
 struct DetectorInfo {
     std::string id;                    // stable machine name, e.g. "hmm_accel", "fast_threshold", "unet_1+2+3", "unet_andersson5", "tcn_causal", "user:<file>"
     std::string name;                  // label shown in the GUI
-    int n_classes = 2;                 // classes it can output (background included)
+    int n_classes = 2;                 // classes it OWN output has (background included); the engine adds the blink class (2) from the invalid-sample runs, whatever the detector
     bool causal = true;                // false: needs samples after the event (see decision_delay_ms)
     double decision_delay_ms = 0;      // typical delay between an event's offset and its FINAL publication
     double provisional_latency_ms = -1;// delay between the onset and the PROVISIONAL event, -1 = no provisional events

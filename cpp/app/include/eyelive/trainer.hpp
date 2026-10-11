@@ -16,7 +16,7 @@ struct TrainTrace {                    // one reviewed stretch of the recording
 };
 
 struct TrainConfig {
-    int n_classes = 2;                 // 2..5
+    int n_classes = 3;                 // 2..5; default 3 = fixation, saccade, blink
     double max_seconds_of_data = 50.0; // default 50 s; the GUI may raise it (the trainer uses at most this much reviewed data, most recent first)
     bool rotation_aug = true;          // random rotations of the (x, y) trace, ON by default; false disables it
     int rotations = 4;                 // number of rotated copies per trial (as uneye.DNN: angles 0.25, 0.75, 1.25, 1.75 x pi)

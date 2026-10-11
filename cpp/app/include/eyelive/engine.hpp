@@ -21,7 +21,7 @@ struct SessionConfig {
     double rate_hz = 0;                 // 0 = measure from the first 500 ms
     double deg_per_unit = 0;            // 0 = automatic (calib.hpp: select_scale once enough events exist); otherwise exact (e.g. 1/pixels_per_degree)
     std::string detector_id = "hmm_accel";
-    int n_classes = 2;
+    int n_classes = 3;                  // fixation, saccade, blink (blink events come from the invalid-sample runs flagged by the input guard)
 };
 
 struct EngineStats {
