@@ -1,0 +1,22 @@
+# Dear ImGui front-end (tasks T12-T17). The shell (T12) owns this file's structure: it builds libraries `imgui` and `glfw` from cpp/third_party and the executable `eyelive` from every gui/src/*.cpp.
+# Tabs are plain .cpp files under gui/src/ that register themselves (eyelive::TabRegistrar); nobody else edits this file.
+enable_language(C)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/glfw ${CMAKE_BINARY_DIR}/glfw)
+set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/third_party/imgui)
+add_library(imgui STATIC ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp
+            ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp)
+target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(imgui PUBLIC glfw)
+if(APPLE)
+  target_link_libraries(imgui PUBLIC "-framework OpenGL")
+endif()
+file(GLOB GUI_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+if(GUI_SRC)
+  add_library(eyelive_gui_lib STATIC ${GUI_SRC})
+  target_include_directories(eyelive_gui_lib PUBLIC ${EYELIVE_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(eyelive_gui_lib PUBLIC imgui eyelive_contracts)
+endif()

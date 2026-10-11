@@ -1,0 +1,65 @@
+// Engine facade used by the GUI and the CLI (CONTRACT). The real implementation is task T18 (threads, queues, wiring of recorder, source, detectors, state block, triggers, trainer);
+// the GUI tasks develop against MockEngine (gui/include/eyelive/gui/mock_engine.hpp, provided by T12) and never include a module implementation.
+#pragma once
+#include <memory>
+#include <string>
+#include <vector>
+#include "eyelive/annotation.hpp"
+#include "eyelive/calib.hpp"
+#include "eyelive/detector.hpp"
+#include "eyelive/source.hpp"
+#include "eyelive/trace.hpp"
+#include "eyelive/trainer.hpp"
+#include "eyelive/trigger.hpp"
+
+namespace eyelive {
+
+struct SessionConfig {
+    SourceSpec source;
+    std::string session_path = "session.eyelive";
+    double duration_s = 3600;           // planned duration: with the measured rate it sizes the preallocation
+    double rate_hz = 0;                 // 0 = measure from the first 500 ms
+    double deg_per_unit = 0;            // 0 = automatic (calib.hpp: select_scale once enough events exist); otherwise exact (e.g. 1/pixels_per_degree)
+    std::string detector_id = "hmm_accel";
+    int n_classes = 2;
+};
+
+struct EngineStats {
+    bool running = false; double rate_hz_measured = 0; double rate_hz_standard = 0; uint64_t samples = 0, dropped_packets = 0, gaps = 0;
+    double recorded_s = 0, capacity_s = 0; uint64_t bytes_allocated = 0;
+    double cpu_percent = 0; double detect_latency_ms_p50 = 0, detect_latency_ms_p95 = 0; double publish_jitter_ms_p95 = 0;
+    uint64_t events_final = 0, events_provisional = 0;
+    double deg_per_unit = 1; bool scale_estimated = false; double scale_agreement = 0; bool scale_low_confidence = false;
+    std::string warning;                // human-readable, empty if none
+};
+
+class IEngine {
+ public:
+    virtual ~IEngine() = default;
+    // session
+    virtual bool start(const SessionConfig& cfg, std::string* error) = 0;   // allocates the session file (fails loudly), starts the threads
+    virtual void stop() = 0;
+    virtual EngineStats stats() const = 0;
+    virtual const ITraceView& trace() const = 0;                            // valid between start() and stop(); also after stop() until the next start()
+    virtual std::vector<Event> events() const = 0;                          // detector events (final, then still-provisional ones), snapshot copy
+    // detectors
+    virtual std::vector<DetectorInfo> available_detectors() const = 0;
+    virtual bool set_detector(const std::string& id, std::string* error) = 0;     // hot swap at a safe moment; the previous events are kept (provenance)
+    // expert review
+    virtual ExpertLabels& expert() = 0;
+    virtual bool prelabel(const std::string& detector_id, int64_t from, int64_t to, std::string* error) = 0;   // runs the detector in batch on [from, to] and loads the result into expert()
+    virtual AgreementStats agreement_with_expert(uint8_t cls) const = 0;
+    virtual CalibParams fit_calibration_to_expert(uint8_t cls, std::string* error) = 0;     // mode 2
+    // training
+    virtual bool start_training(const TrainConfig& cfg, std::string* error) = 0;            // uses the reviewed material of expert(); the trainer runs in the background with capped cores
+    virtual TrainProgress training_progress() const = 0;
+    virtual void cancel_training() = 0;
+    virtual bool deploy_trained_model(const std::string& name, std::string* error) = 0;     // saves the model and registers it as detector "user:<name>"
+    // triggers
+    virtual void set_trigger_rules(const std::vector<TriggerRule>& rules) = 0;
+    virtual std::vector<TriggerLogEntry> trigger_log() const = 0;
+};
+
+std::unique_ptr<IEngine> make_engine();                                     // defined by T18
+
+}  // namespace eyelive

@@ -82,3 +82,9 @@ add_executable(test_bitcn tests/test_bitcn.cpp)               # two-channel (vx,
 target_link_libraries(test_bitcn uneye_rt)
 target_compile_options(test_bitcn PRIVATE -Wall -Wextra -Werror)
 add_test(NAME bitcn COMMAND test_bitcn ${CMAKE_SOURCE_DIR})
+
+# ---------------------------------------------------------------- EyeLive (cpp/app): see docs/EYELIVE_ROADMAP.md and docs/tasks/README.md
+option(EYELIVE_BUILD_APP "Build the EyeLive modules and their tests (no GUI dependency)" ON)
+if(EYELIVE_BUILD_APP)
+  add_subdirectory(app)
+endif()

@@ -1,0 +1,108 @@
+{
+  "_comment": "Who may change which files. A pull request from a branch named jules/<TASK>-<anything> may only touch the paths of its task (glob, '**' = any depth). Checked by cpp/app/ci/check_ownership.py in CI. Contracts (cpp/app/include/eyelive/*.hpp), cpp/app/CMakeLists.txt, docs/tasks/*.md and the base workflow belong to the integrator and are never owned by a task.",
+  "T01": [
+    "cpp/app/recorder/**",
+    "docs/tasks/status/T01.md"
+  ],
+  "T02": [
+    "cpp/app/source/**",
+    "cpp/app/tools/send_udp.py",
+    "cpp/app/tools/pylink_sender_template.py",
+    "docs/tasks/status/T02.md"
+  ],
+  "T03": [
+    "cpp/app/state/**",
+    "cpp/app/readers/**",
+    "docs/tasks/status/T03.md"
+  ],
+  "T04": [
+    "cpp/app/detect_hmm/**",
+    "docs/tasks/status/T04.md"
+  ],
+  "T05": [
+    "cpp/app/detect_fast/**",
+    "docs/tasks/status/T05.md"
+  ],
+  "T06": [
+    "cpp/app/detect_net/**",
+    "docs/tasks/status/T06.md"
+  ],
+  "T07": [
+    "cpp/app/annot/**",
+    "cpp/scripts/export_agreement_golden.py",
+    "docs/tasks/status/T07.md"
+  ],
+  "T08": [
+    "cpp/app/calib/**",
+    "cpp/scripts/export_calib_golden.py",
+    "docs/tasks/status/T08.md"
+  ],
+  "T09": [
+    "cpp/app/train/**",
+    "cpp/scripts/export_unet_golden.py",
+    "docs/tasks/status/T09.md"
+  ],
+  "T12": [
+    "cpp/app/gui/CMakeLists.txt",
+    "cpp/app/gui/src/shell_*.cpp",
+    "cpp/app/gui/include/eyelive/gui/shell_*.hpp",
+    "cpp/app/gui/include/eyelive/gui/mock_engine.hpp",
+    "docs/tasks/status/T12.md"
+  ],
+  "T13": [
+    "cpp/app/gui/src/tab_acquire.cpp",
+    "cpp/app/gui/include/eyelive/gui/tab_acquire.hpp",
+    "docs/tasks/status/T13.md"
+  ],
+  "T14": [
+    "cpp/app/gui/src/tab_live.cpp",
+    "cpp/app/gui/src/widgets_plot.cpp",
+    "cpp/app/gui/include/eyelive/gui/tab_live.hpp",
+    "cpp/app/gui/include/eyelive/gui/widgets_plot.hpp",
+    "docs/tasks/status/T14.md"
+  ],
+  "T15": [
+    "cpp/app/gui/src/tab_review.cpp",
+    "cpp/app/gui/src/widgets_timeline.cpp",
+    "cpp/app/gui/include/eyelive/gui/tab_review.hpp",
+    "cpp/app/gui/include/eyelive/gui/widgets_timeline.hpp",
+    "docs/tasks/status/T15.md"
+  ],
+  "T16": [
+    "cpp/app/gui/src/tab_detection.cpp",
+    "cpp/app/gui/src/tab_train.cpp",
+    "cpp/app/gui/include/eyelive/gui/tab_detection.hpp",
+    "cpp/app/gui/include/eyelive/gui/tab_train.hpp",
+    "docs/tasks/status/T16.md"
+  ],
+  "T17": [
+    "cpp/app/gui/src/tab_triggers.cpp",
+    "cpp/app/gui/src/tab_predict.cpp",
+    "cpp/app/gui/src/tab_log.cpp",
+    "cpp/app/gui/include/eyelive/gui/tab_triggers.hpp",
+    "cpp/app/gui/include/eyelive/gui/tab_predict.hpp",
+    "cpp/app/gui/include/eyelive/gui/tab_log.hpp",
+    "docs/tasks/status/T17.md"
+  ],
+  "T18": [
+    "cpp/app/engine/**",
+    "docs/tasks/status/T18.md"
+  ],
+  "T19": [
+    "cpp/app/trigger/**",
+    "docs/tasks/status/T19.md"
+  ],
+  "T20": [
+    "cpp/app/cli/**",
+    "docs/tasks/status/T20.md"
+  ],
+  "T21": [
+    ".github/workflows/eyelive-release.yml",
+    "cpp/app/packaging/**",
+    "docs/tasks/status/T21.md"
+  ],
+  "T22": [
+    "docs/eyelive/**",
+    "docs/tasks/status/T22.md"
+  ]
+}

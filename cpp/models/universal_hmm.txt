@@ -1,0 +1,3 @@
+# fs d mu0 mu1 sd0 sd1 p_on p_stay   (score = log10(1 + |detrended velocity| / robust noise); state 0 fixation, states 1..d the saccade chain)
+1000 6 0.416573763 1.32039225 0.201105669 0.766239583 0.00554218027 0.949469511
+500 3 0.406975567 1.3010565 0.20460619 0.573560297 0.00969478964 0.928820044

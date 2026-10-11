@@ -8,5 +8,6 @@
 | `figs_paper/` | article analyses redone (`n_labeled.png`, `subjects.png`, `results*.json`) by `foundation/paper_figs.py` |
 | `safety/` | `hazards.md` (hazard analysis, residual failures), `soup.md` (software of unknown provenance) |
 | `EXPLAIN.md`, `QA.md` | plain-language explanations and Q&A about the changes vs upstream |
+| `EYELIVE_ROADMAP.md`, `tasks/` | EyeLive design (requirements, architecture, measured evidence) and the work packages for coding agents (`tasks/README.md`, one file `tasks/Txx.md` per task) |
 | `ARCHIVE_DATA.md` | structure of the unlabeled `archive/` recordings |
 | `slides/` | `make_figures.py` and data for the slide figures (German labels); `slides/data/` mostly generated |

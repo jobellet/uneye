@@ -25,3 +25,9 @@ docs/slides/data/trace_*.csv
 data/Andersson/
 foundation/runs/*.pt
 foundation/runs/*.log
+cpp/third_party/imgui/
+cpp/third_party/glfw/
+cpp/build/
+cpp/build_app/
+cpp/imgui.ini
+a.o

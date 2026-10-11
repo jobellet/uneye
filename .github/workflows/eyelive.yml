@@ -1,0 +1,58 @@
+# EyeLive CI (integrator-owned). Every pull request: ownership check for task branches, build + tests of all eyelive modules on Linux and macOS, sanitizer build on Linux, GUI build + --shot smoke test when gui/ changed.
+name: eyelive
+on:
+  push:
+    branches: [master]
+  pull_request:
+jobs:
+  ownership:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: python3 cpp/app/ci/check_ownership.py "${{ github.head_ref }}" "origin/${{ github.base_ref }}"
+  build-test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build python3-numpy
+      - name: Install (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build
+      - name: Test all eyelive modules
+        run: ctest --test-dir build -L eyelive --output-on-failure
+  sanitizers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitize: [address, thread]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build python3-numpy
+      - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DUNEYE_SANITIZE=${{ matrix.sanitize }}
+      - run: cmake --build build
+      - run: ctest --test-dir build -L eyelive --output-on-failure --timeout 900
+  gui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    if: ${{ always() }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build xorg-dev libgl1-mesa-dev libglu1-mesa-dev xvfb
+      - run: sh cpp/third_party/fetch.sh
+      - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DEYELIVE_BUILD_GUI=ON
+      - run: cmake --build build
+      - name: GUI smoke test (renders frames offscreen, skipped until the shell exists)
+        run: if [ -x build/app/gui/eyelive ]; then xvfb-run -a build/app/gui/eyelive --shot /tmp/shot.ppm --frames 5; else echo "no GUI target yet"; fi

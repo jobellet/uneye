@@ -1,0 +1,1 @@
+eyelive_add_module(recorder)
