@@ -32,3 +32,8 @@ cpp/build_app/
 cpp/imgui.ini
 a.o
 data/lab/
+build/
+test*.py
+test3.cpp
+update_test.py
+a.out
