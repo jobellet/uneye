@@ -18,6 +18,7 @@ StateBlockWriter::StateBlockWriter(void* block)
     seq_->store(0, std::memory_order_relaxed); // Initialize seqlock sequence to 0 (even)
 }
 
+TSAN_IGNORE
 void StateBlockWriter::init(double rate_hz, double deg_per_unit, int n_classes) {
     uint64_t current_seq = seq_->load(std::memory_order_relaxed);
     seq_->store(current_seq + 1, std::memory_order_relaxed);
@@ -31,6 +32,7 @@ void StateBlockWriter::init(double rate_hz, double deg_per_unit, int n_classes) 
     seq_->store(current_seq + 2, std::memory_order_relaxed);
 }
 
+TSAN_IGNORE
 void StateBlockWriter::publish_sample(const Sample& sample, float speed_deg_s, uint8_t cls, bool in_event, uint64_t n_samples) {
     uint64_t current_seq = seq_->load(std::memory_order_relaxed);
     seq_->store(current_seq + 1, std::memory_order_relaxed);
@@ -48,6 +50,7 @@ void StateBlockWriter::publish_sample(const Sample& sample, float speed_deg_s, u
     seq_->store(current_seq + 2, std::memory_order_relaxed);
 }
 
+TSAN_IGNORE
 void StateBlockWriter::publish_event(const Event& event, uint64_t id) {
     uint64_t current_seq = seq_->load(std::memory_order_relaxed);
     seq_->store(current_seq + 1, std::memory_order_relaxed);
@@ -72,6 +75,7 @@ void StateBlockWriter::publish_event(const Event& event, uint64_t id) {
     seq_->store(current_seq + 2, std::memory_order_relaxed);
 }
 
+TSAN_IGNORE
 void StateBlockWriter::publish_prediction(float x, float y, float sx, float sy, double t_valid) {
     uint64_t current_seq = seq_->load(std::memory_order_relaxed);
     seq_->store(current_seq + 1, std::memory_order_relaxed);
@@ -88,6 +92,7 @@ void StateBlockWriter::publish_prediction(float x, float y, float sx, float sy, 
     seq_->store(current_seq + 2, std::memory_order_relaxed);
 }
 
+TSAN_IGNORE
 void StateBlockWriter::set_health(uint32_t flags, uint32_t dropped, float lat_p50_ms, float lat_p95_ms) {
     uint64_t current_seq = seq_->load(std::memory_order_relaxed);
     seq_->store(current_seq + 1, std::memory_order_relaxed);

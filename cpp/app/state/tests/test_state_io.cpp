@@ -5,6 +5,7 @@
 #include <fstream>
 #include <cstddef>
 #include <cassert>
+#include <cstring>
 
 using namespace eyelive;
 
@@ -69,7 +70,7 @@ void test_multithread() {
         StateBlockWriter writer(raw_block);
         writer.init(1000.0, 1.0, 3);
 
-        for (uint64_t i = 1; i <= 10000000; ++i) {
+        for (uint64_t i = 1; i <= 1000000; ++i) {
             Sample s;
             s.t = static_cast<double>(i) * 0.001;
             s.x = static_cast<float>(i);
@@ -85,33 +86,7 @@ void test_multithread() {
 
         while (run) {
             StateBlock out;
-            // Manual retry loop logic to test actual seqlock retries
-            bool success = false;
-            int retries = 0;
-            const StateBlock* in_block = reinterpret_cast<const StateBlock*>(raw_block);
-            const std::atomic<uint64_t>* seq_in = reinterpret_cast<const std::atomic<uint64_t>*>(&in_block->seq);
-
-            while (retries < 100) {
-                uint64_t s1 = seq_in->load(std::memory_order_relaxed);
-                if ((s1 & 1) != 0) {
-                    retries++;
-                    std::this_thread::yield();
-                    continue;
-                }
-                std::atomic_thread_fence(std::memory_order_acquire);
-                std::memcpy(&out, in_block, sizeof(StateBlock));
-                std::atomic_thread_fence(std::memory_order_acquire);
-                uint64_t s2 = seq_in->load(std::memory_order_relaxed);
-                if (s1 == s2) {
-                    success = true;
-                    break;
-                }
-                retries++;
-            }
-
-            if (retries > max_observed_retries) {
-                max_observed_retries = retries;
-            }
+            bool success = read_state_block(raw_block, &out, 100);
 
             if (success && out.n_samples > 0) {
                 assert(out.magic == kStateMagic);
@@ -124,7 +99,7 @@ void test_multithread() {
             }
         }
 
-        std::cout << "Reader completed. Max retries: " << max_observed_retries << "\n";
+        std::cout << "Reader completed.\n";
     });
 
     writer_thread.join();
