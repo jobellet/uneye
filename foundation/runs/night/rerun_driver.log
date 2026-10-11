@@ -1,3 +1,16 @@
 === 17:26 pool
     -> exit 0 in 1.0 min
 === 17:27 pretrain
+    -> exit 0 in 19.2 min
+=== 17:46 finetune
+    -> exit 0 in 8.0 min
+=== 17:54 ms_pretrain
+    -> exit 0 in 25.3 min
+=== 18:19 ms_finetune
+    -> exit 0 in 10.0 min
+=== 18:29 layers_stats
+    -> exit 0 in 9.3 min
+=== 18:38 layers_freeze
+    -> exit 0 in 26.7 min
+=== 19:05 peft
+    -> exit 0 in 28.6 min

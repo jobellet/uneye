@@ -50,9 +50,9 @@ jobs:
     if: ${{ always() }}
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build xorg-dev libgl1-mesa-dev libglu1-mesa-dev xvfb
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build xorg-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev xvfb
       - run: sh cpp/third_party/fetch.sh
-      - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DEYELIVE_BUILD_GUI=ON
+      - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DEYELIVE_BUILD_GUI=ON -DGLFW_BUILD_WAYLAND=OFF
       - run: cmake --build build
       - name: GUI smoke test (renders frames offscreen, skipped until the shell exists)
         run: if [ -x build/app/gui/eyelive ]; then xvfb-run -a build/app/gui/eyelive --shot /tmp/shot.ppm --frames 5; else echo "no GUI target yet"; fi
