@@ -1,4 +1,7 @@
 #include "eyelive/annotation.hpp"
+#ifdef NDEBUG
+#undef NDEBUG      // the test relies on assert(): in Release it would be compiled out (and its parser, which advances inside assert(), would never terminate)
+#endif
 #include <cassert>
 #include <cmath>
 #include <iostream>

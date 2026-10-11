@@ -3,6 +3,9 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#ifdef NDEBUG
+#undef NDEBUG      // the test relies on assert(): keep it active in Release
+#endif
 #include <cassert>
 #include <cmath>
 #include <chrono>
