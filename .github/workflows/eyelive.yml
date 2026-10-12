@@ -37,8 +37,8 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          grep -E "error" build.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=compile::$l"; done
-          { echo "### ${{ github.job }}: build errors"; echo '```'; grep -E "error|Error|undefined reference|FAILED" build.log | head -40 | cut -c1-400; echo '```'; echo "### last lines"; echo '```'; tail -60 build.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          grep -E ": error|undefined reference|ld returned|CMake Error|ninja: build stopped" build.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=compile::$l"; done
+          { echo "### ${{ github.job }}: build errors"; echo '```'; grep -E ": error|undefined reference|ld returned|CMake Error|FAILED:" build.log | head -40 | cut -c1-400; echo '```'; echo "### last lines"; echo '```'; tail -60 build.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Test all eyelive modules
         shell: bash
         run: |
@@ -70,8 +70,8 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          grep -E "error" build.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=compile::$l"; done
-          { echo "### ${{ github.job }}: build errors"; echo '```'; grep -E "error|Error|undefined reference|FAILED" build.log | head -40 | cut -c1-400; echo '```'; echo "### last lines"; echo '```'; tail -60 build.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          grep -E ": error|undefined reference|ld returned|CMake Error|ninja: build stopped" build.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=compile::$l"; done
+          { echo "### ${{ github.job }}: build errors"; echo '```'; grep -E ": error|undefined reference|ld returned|CMake Error|FAILED:" build.log | head -40 | cut -c1-400; echo '```'; echo "### last lines"; echo '```'; tail -60 build.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Test
         shell: bash
         run: |
@@ -101,8 +101,8 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          grep -E "error" build.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=compile::$l"; done
-          { echo "### ${{ github.job }}: build errors"; echo '```'; grep -E "error|Error|undefined reference|FAILED" build.log | head -40 | cut -c1-400; echo '```'; echo "### last lines"; echo '```'; tail -60 build.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          grep -E ": error|undefined reference|ld returned|CMake Error|ninja: build stopped" build.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=compile::$l"; done
+          { echo "### ${{ github.job }}: build errors"; echo '```'; grep -E ": error|undefined reference|ld returned|CMake Error|FAILED:" build.log | head -40 | cut -c1-400; echo '```'; echo "### last lines"; echo '```'; tail -60 build.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: GUI smoke tests (offscreen frames; the image must not be uniform)
         run: |
           set -e
