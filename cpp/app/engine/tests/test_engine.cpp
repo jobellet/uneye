@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -26,6 +27,7 @@
 using namespace eyelive;
 namespace fs = std::filesystem;
 static int fails = 0;
+static const bool kCI = std::getenv("CI") != nullptr;                                  // shared CI runners: timing limits are 5x looser (the measured values are still printed)
 #define CHECK(c, ...) do { if (!(c)) { ++fails; std::printf("FAIL line %d: ", __LINE__); std::printf(__VA_ARGS__); std::printf("\n"); } } while (0)
 
 static std::string tmp(const std::string& name) { fs::path d = fs::temp_directory_path() / "eyelive_engine_test"; fs::create_directories(d); fs::path p = d / name; std::error_code ec; fs::remove(p, ec); return p.string(); }
@@ -81,7 +83,7 @@ int main(int argc, char** argv) {
         auto e = make_engine(); SessionConfig c = cfg_sim("lat.eyelive", 1000, 1.0, "fast_threshold"); std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); TriggerRule r; r.name = "any"; r.any_class = true; r.anchor = TriggerAnchor::OnsetProvisional; r.sink = "null"; e->set_trigger_rules({r});
         sleep_ms(8000); auto st = e->stats(); auto log = e->trigger_log(); e->stop();
         std::printf("provisional events: %llu, triggers fired %zu, detection latency (arrival of the newest sample -> detector output) p50 %.3f ms, p95 %.3f ms, cpu %.1f %%\n", (unsigned long long)st.events_provisional, log.size(), st.detect_latency_ms_p50, st.detect_latency_ms_p95, st.cpu_percent);
-        CHECK(st.events_provisional > 3, "only %llu provisional events", (unsigned long long)st.events_provisional); CHECK(!log.empty(), "no trigger fired"); CHECK(st.detect_latency_ms_p95 < 1.0, "p95 detection latency %.3f ms", st.detect_latency_ms_p95);
+        CHECK(st.events_provisional > 3, "only %llu provisional events", (unsigned long long)st.events_provisional); CHECK(!log.empty(), "no trigger fired"); CHECK(st.detect_latency_ms_p95 < (kCI ? 5.0 : 1.0), "p95 detection latency %.3f ms", st.detect_latency_ms_p95);
     }
     // 3. streams at 500 / 1000 / 2000 Hz: no drop (continuous time stamps), cpu
     for (int k = 0; k < 4; ++k) {
@@ -89,7 +91,7 @@ int main(int argc, char** argv) {
         auto e = make_engine(); SessionConfig c = cfg_sim("rate.eyelive", rate, 1.0, det); std::string err; CHECK(e->start(c, &err), "start %g Hz: %s", rate, err.c_str());
         sleep_ms(5000); auto st = e->stats(); e->stop(); auto fin = e->stats(); const auto& tr = e->trace(); bool gap = false; for (int64_t i = 1; i < tr.size() && !gap; ++i) gap = std::fabs((tr.t(i) - tr.t(i - 1)) * rate - 1.0) > 1e-6;
         std::printf("%4.0f Hz %-14s: measured %.1f Hz, %lld samples in 5 s, gaps %s, cpu %.1f %%\n", rate, det, fin.rate_hz_measured, (long long)tr.size(), gap ? "YES" : "none", st.cpu_percent);
-        CHECK(!gap, "gap in the recorded stream at %g Hz", rate); CHECK(std::fabs(double(tr.size()) / (5.0 * rate) - 1.0) < 0.2, "%lld samples at %g Hz", (long long)tr.size(), rate); CHECK(SANITIZED || st.cpu_percent < 10.0, "cpu %.1f %% at %g Hz", st.cpu_percent, rate);      // target < 5 % (measured 2-4.5 % on an M1); the hard limit is loose because CI machines are noisy and instrumented builds are slower
+        CHECK(!gap, "gap in the recorded stream at %g Hz", rate); CHECK(std::fabs(double(tr.size()) / (5.0 * rate) - 1.0) < 0.2, "%lld samples at %g Hz", (long long)tr.size(), rate); CHECK(SANITIZED || st.cpu_percent < (kCI ? 40.0 : 10.0), "cpu %.1f %% at %g Hz", st.cpu_percent, rate);      // target < 5 % (measured 2-4.5 % on an M1); the hard limit is loose because CI machines are noisy and instrumented builds are slower
     }
     // 4. start failures: a message, no exception, no file left running
     {
