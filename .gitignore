@@ -32,3 +32,5 @@ cpp/build_app/
 cpp/imgui.ini
 a.o
 data/lab/
+
+build/
