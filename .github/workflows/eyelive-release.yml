@@ -1,0 +1,95 @@
+# EyeLive release builds (task T21): unsigned zips with SHA-256 files for Windows, macOS and Linux, static C++ runtime, dependency check, tests. Runs on a tag `eyelive-v*`, by hand (workflow_dispatch) and, for Windows only, on pull requests touching cpp/app.
+name: eyelive-release
+on:
+  push:
+    tags: ['eyelive-v*']
+  workflow_dispatch:
+  pull_request:
+    paths: ['cpp/app/**', 'cpp/CMakeLists.txt', '.github/workflows/eyelive-release.yml']
+jobs:
+  build:
+    if: github.event_name != 'pull_request' || matrix.os == 'windows-2022'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, name: windows, experimental: true }
+          - { os: macos-14, name: macos, experimental: false }
+          - { os: ubuntu-24.04, name: linux, experimental: false }
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}      # the Windows build has never been run by the authors: its failure does not block the other platforms
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        id: ver
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#eyelive-v}"; if [ "${GITHUB_REF_TYPE}" != "tag" ]; then v="dev-$(git rev-parse --short HEAD)"; fi; echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Install (Linux)
+        if: matrix.name == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build xorg-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev xvfb
+      - name: Install (macOS)
+        if: matrix.name == 'macos'
+        run: brew install ninja
+      - name: Fetch Dear ImGui and GLFW
+        shell: bash
+        run: sh cpp/third_party/fetch.sh
+      - name: Configure (Linux / macOS)
+        if: matrix.name != 'windows'
+        run: |
+          flags=""; if [ "${{ matrix.name }}" = "linux" ]; then flags="-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc -DGLFW_BUILD_WAYLAND=OFF"; fi
+          cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DEYELIVE_PORTABLE=ON -DEYELIVE_BUILD_GUI=ON $flags
+      - name: Configure (Windows, MSVC, static runtime)
+        if: matrix.name == 'windows'
+        run: cmake -S cpp -B build -G "Visual Studio 17 2022" -A x64 -DEYELIVE_PORTABLE=ON -DEYELIVE_BUILD_GUI=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        shell: bash
+        run: ctest --test-dir build -C Release -L eyelive --output-on-failure --timeout 900
+      - name: GUI smoke test (Linux, offscreen)
+        if: matrix.name == 'linux'
+        run: xvfb-run -a build/app/gui/eyelive --mock --shot /tmp/a.ppm --frames 5
+      - name: Sign (Windows, skipped without secret)
+        if: matrix.name == 'windows' && env.WINDOWS_CERT_PFX_BASE64 != ''
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          Get-ChildItem -Recurse build -Include eyelive.exe,eyelive_cli.exe | ForEach-Object { signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f cert.pfx /p $env:WINDOWS_CERT_PASSWORD $_.FullName }
+      - name: Sign and notarize (macOS, skipped without secrets)
+        if: matrix.name == 'macos' && env.MACOS_CERT_P12_BASE64 != ''
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+        run: echo "see cpp/app/packaging/SIGNING.md: certificate import, codesign --options runtime, notarytool"
+      - name: Package (zip, SHA-256, dependency check, sizes)
+        shell: bash
+        run: python3 cpp/app/packaging/package.py --build-dir build --os ${{ matrix.name }} --version "${{ steps.ver.outputs.version }}" --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eyelive-${{ matrix.name }}
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Combined checksums
+        run: cd dist && sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            dist/*.zip
+            dist/SHA256SUMS.txt

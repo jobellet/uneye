@@ -1,0 +1,51 @@
+# Libraries an EyeLive executable may depend on (direct dependencies, case-insensitive, one name or prefix per line). check_dependencies.py fails when any other library is linked.
+# [macos]  otool -L: system libraries and frameworks that ship with the operating system
+[macos]
+/usr/lib/libSystem.B.dylib
+/usr/lib/libc++.1.dylib
+/usr/lib/libc++abi.dylib
+/usr/lib/libobjc.A.dylib
+/System/Library/Frameworks/OpenGL.framework/
+/System/Library/Frameworks/Cocoa.framework/
+/System/Library/Frameworks/IOKit.framework/
+/System/Library/Frameworks/CoreFoundation.framework/
+/System/Library/Frameworks/CoreVideo.framework/
+/System/Library/Frameworks/AppKit.framework/
+/System/Library/Frameworks/Foundation.framework/
+/System/Library/Frameworks/CoreGraphics.framework/
+/System/Library/Frameworks/CoreServices.framework/
+# [linux]  readelf -d NEEDED: libc and the X11 / GL libraries every desktop has (libstdc++ and libgcc are linked statically)
+[linux]
+libc.so.6
+libm.so.6
+libpthread.so.0
+libdl.so.2
+librt.so.1
+libgcc_s.so.1
+ld-linux
+libGL.so.1
+libGLX.so.0
+libX11.so.6
+libXrandr.so.2
+libXinerama.so.1
+libXcursor.so.1
+libXi.so.6
+libXext.so.6
+libxkbcommon.so.0
+# [windows]  dumpbin /dependents: system DLLs only (the Visual C++ runtime is linked statically with /MT, so VCRUNTIME / MSVCP / api-ms-win-crt are NOT allowed)
+[windows]
+KERNEL32.dll
+USER32.dll
+GDI32.dll
+SHELL32.dll
+ADVAPI32.dll
+OPENGL32.dll
+WINMM.dll
+IMM32.dll
+WS2_32.dll
+OLE32.dll
+OLEAUT32.dll
+SETUPAPI.dll
+VERSION.dll
+dwmapi.dll
+SHLWAPI.dll
