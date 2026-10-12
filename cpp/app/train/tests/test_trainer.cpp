@@ -11,6 +11,16 @@
 #include "eyelive/trainer.hpp"
 #include "synth.hpp"
 #include "uneye/engine.hpp"
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define SANITIZED 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#define SANITIZED 1
+#endif
+#endif
+#ifndef SANITIZED
+#define SANITIZED 0
+#endif
 using namespace eyelive;
 static int fails = 0;
 #define CHECK(c, ...) do { if (!(c)) { ++fails; std::printf("FAIL line %d: ", __LINE__); std::printf(__VA_ARGS__); std::printf("\n"); } } while (0)
@@ -24,14 +34,16 @@ static Run run_training(ITrainer& t, std::vector<TrainTrace> tr, TrainConfig cfg
 int main(int, char** argv) {
     (void)argv; const std::string dir = (std::filesystem::temp_directory_path() / "eyelive_train_test").string(); std::filesystem::create_directories(dir);
     TrainConfig cfg; cfg.n_classes = 2; cfg.max_epochs = 150; cfg.n_threads = 4; cfg.seed = 1;
-    auto data = [&](uint64_t seed, double rot) { return std::vector<TrainTrace>{synth_trace(50.0, 1000.0, seed, false, rot)}; };
+    const bool light = SANITIZED || std::getenv("EYELIVE_LIGHT_TESTS") != nullptr;      // sanitizer builds are 10-20x slower: they check races and memory errors on a short run, not accuracy
+    if (light) { cfg.max_epochs = 6; cfg.n_threads = 2; }
+    auto data = [&](uint64_t seed, double rot) { return std::vector<TrainTrace>{synth_trace(light ? 12.0 : 50.0, 1000.0, seed, false, rot)}; };
 
     // 1. train on 50 s, 2 classes
     auto trainer = make_trainer(); Run a = run_training(*trainer, data(1, 0.0), cfg);
     std::printf("run 1: %zu epochs, %.1f s wall (%.2f s/epoch, 4 threads), val F1 %.3f kappa %.3f, message '%s'\n", a.log.size() - 1, a.wall, a.wall / std::max<size_t>(1, a.log.size() - 1), a.last.val_event_f1, a.last.val_kappa, a.last.message.c_str());
     CHECK(!a.last.failed, "training failed: %s", a.last.message.c_str());
-    CHECK(a.last.val_event_f1 >= 0.9, "validation event F1 %.3f < 0.9", a.last.val_event_f1);
-    CHECK(a.last.message == "early stopping", "did not stop by early stopping: '%s'", a.last.message.c_str());
+    if (!light) { CHECK(a.last.val_event_f1 >= 0.9, "validation event F1 %.3f < 0.9", a.last.val_event_f1);
+    CHECK(a.last.message == "early stopping", "did not stop by early stopping: '%s'", a.last.message.c_str()); }
     { int per_epoch = 0; double prev = -1; bool mono = true; for (auto& p : a.log) { if (!p.finished) ++per_epoch; if (p.elapsed_s < prev) mono = false; prev = p.elapsed_s; }
       CHECK(mono, "elapsed_s not monotonic"); CHECK(per_epoch == a.last.epoch, "progress callbacks (%d) != epochs (%d)", per_epoch, a.last.epoch); }
 
@@ -49,6 +61,7 @@ int main(int, char** argv) {
         std::ifstream js(path.substr(0, path.size() - 4) + ".json"); CHECK(bool(js), "sidecar json missing");
     }
 
+    if (!light) {
     // 3. transfer: a model trained on one orientation, retrained on a rotated copy of the data, against random initialisation
     {
         TrainConfig c2 = cfg; c2.seed = 2; c2.max_epochs = 60; c2.rotation_aug = false;                          // no rotation augmentation: the pretrained model has not seen the new orientation
@@ -58,9 +71,10 @@ int main(int, char** argv) {
         CHECK(x.first_ok_epoch > 0 && (r.first_ok_epoch < 0 || x.first_ok_epoch < r.first_ok_epoch), "transfer did not converge faster");
     }
 
+    }
     // 4. rotation_aug switch: count distinct orientations in the prepared training windows
     {
-        TrainConfig c3 = cfg; c3.rotation_aug = true; auto d1 = train::make_dataset(data(3, 0.0), c3); c3.rotation_aug = false; auto d0 = train::make_dataset(data(3, 0.0), c3);
+        TrainConfig c3 = cfg; c3.max_epochs = 100; c3.rotation_aug = true; auto d1 = train::make_dataset(data(3, 0.0), c3); c3.rotation_aug = false; auto d0 = train::make_dataset(data(3, 0.0), c3);
         std::vector<int> o1 = d1.train.orient, o0 = d0.train.orient; std::sort(o1.begin(), o1.end()); o1.erase(std::unique(o1.begin(), o1.end()), o1.end()); std::sort(o0.begin(), o0.end()); o0.erase(std::unique(o0.begin(), o0.end()), o0.end());
         std::printf("distinct orientations in the training windows: with rotation_aug %zu (%d windows), without %zu (%d windows)\n", o1.size(), d1.train.n, o0.size(), d0.train.n);
         CHECK(o1.size() == 5 && o0.size() == 1, "orientation counts %zu / %zu", o1.size(), o0.size()); CHECK(d1.train.n == 5 * d0.train.n, "window counts %d vs %d", d1.train.n, d0.train.n);
@@ -77,7 +91,7 @@ int main(int, char** argv) {
 
     // 6. three classes (fixation, saccade, blink) trains without error
     {
-        TrainConfig c5 = cfg; c5.n_classes = 3; c5.max_epochs = 3; auto t3 = make_trainer(); Run r = run_training(*t3, std::vector<TrainTrace>{synth_trace(50.0, 1000.0, 4, true)}, c5);
+        TrainConfig c5 = cfg; c5.n_classes = 3; c5.max_epochs = 3; auto t3 = make_trainer(); Run r = run_training(*t3, std::vector<TrainTrace>{synth_trace(light ? 12.0 : 50.0, 1000.0, 4, true)}, c5);
         std::printf("3 classes: %d epochs, val loss %.4f kappa %.3f\n", r.last.epoch, r.last.val_loss, r.last.val_kappa); CHECK(!r.last.failed && r.last.epoch == 3, "3-class run failed or wrong epoch count: %s", r.last.message.c_str());
         std::string e; CHECK(t3->save_model(dir + "/trainer_test_model3.bin", &e), "save 3 classes: %s", e.c_str());
     }

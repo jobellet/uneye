@@ -30,6 +30,7 @@ static const bool kCI = std::getenv("CI") != nullptr;                           
 static void sleep_ms(double ms) { std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(ms)); }
 static Event ev(double t_onset, uint8_t cls, float amp, bool provisional, double dur_s = 0.03) { Event e; e.t_onset = t_onset; e.t_offset = t_onset + dur_s; e.cls = cls; e.amplitude_deg = provisional ? 0.f : amp; e.provisional = provisional; e.confidence = 1.0f; return e; }
 static TriggerRule rule(const char* name, uint8_t cls, double delay_ms = 0, TriggerAnchor a = TriggerAnchor::OnsetProvisional) { TriggerRule r; r.name = name; r.cls = cls; r.delay_ms = delay_ms; r.anchor = a; r.sink = "null"; return r; }
+static bool wait_log(ITriggerEngine& t, size_t n, double ms = 1500) { for (double w = 0; w < ms; w += 5) { if (t.log_snapshot().size() >= n) return true; sleep_ms(5); } return false; }
 static size_t count_of(ITriggerEngine& t, const std::string& name) { size_t n = 0; for (auto& e : t.log_snapshot()) n += e.rule == name; return n; }
 
 int main() {
@@ -56,20 +57,20 @@ int main() {
         t->on_event(ev(1.05, 1, 0, true), now + 0.05);            // 50 ms after the first: refr is in its refractory period
         t->on_event(ev(1.30, 1, 0, true), now + 0.30);            // 300 ms later: refr fires again
         Event retract = ev(1.0, 1, 0, false); retract.confidence = 0.0f; t->on_event(retract, now + 0.1);   // retraction: nothing
-        sleep_ms(100); auto S = [&](const char* n) { return count_of(*t, n); };
+        wait_log(*t, 13); sleep_ms(30); auto S = [&](const char* n) { return count_of(*t, n); };
         std::printf("matching: sacc %zu, any %zu, micro %zu, big %zu, blink %zu, refr %zu, off %zu, disabled %zu, amp_prov %zu\n", S("sacc"), S("any"), S("micro"), S("big"), S("blink"), S("refr"), S("off"), S("disabled"), S("amp_prov"));
         CHECK(S("sacc") == 3, "sacc %zu (3 provisional class-1 events)", S("sacc")); CHECK(S("any") == 4, "any %zu (4 provisional events)", S("any")); CHECK(S("micro") == 1, "micro %zu", S("micro")); CHECK(S("big") == 1, "big %zu", S("big"));
         CHECK(S("blink") == 1, "blink %zu (class 2 provisional only)", S("blink")); CHECK(S("refr") == 2, "refr %zu (refractory 100 ms)", S("refr")); CHECK(S("off") == 2, "off %zu (2 final class-1 events)", S("off"));
         CHECK(S("disabled") == 0, "disabled rule fired"); CHECK(S("amp_prov") == 0, "a rule with an amplitude range cannot fire on a provisional event (no amplitude yet)");
         // rule changes while running: enable the disabled rule, remove the others
-        h.enabled = true; t->set_rules({h}); t->on_event(ev(5.0, 1, 0, true), trigger_host_now_s()); sleep_ms(50); CHECK(S("disabled") == 1, "enabled rule did not fire"); CHECK(S("sacc") == 3, "removed rule still fires"); t->stop();
+        h.enabled = true; t->set_rules({h}); t->on_event(ev(5.0, 1, 0, true), trigger_host_now_s()); for (int w = 0; w < 300 && S("disabled") < 1; ++w) sleep_ms(5); sleep_ms(20); CHECK(S("disabled") == 1, "enabled rule did not fire"); CHECK(S("sacc") == 3, "removed rule still fires"); t->stop();
     }
     // 3. offset anchor timing and the late flag
     {
         auto t = make_trigger_engine(); TriggerRule r = rule("off", 1, 20.0, TriggerAnchor::Offset); TriggerRule l = rule("late", 1, 10.0); t->set_rules({r, l}); t->start(); const double now = trigger_host_now_s();
         t->on_event(ev(10.0, 1, 2.0f, false, 0.040), now);                                   // offset 40 ms after the onset arrival, +20 ms delay: requested now + 0.060
         t->on_event(ev(10.0, 1, 0, true), now - 0.050);                                      // the onset arrived 50 ms ago, delay 10 ms: already late -> fires at once, marked
-        sleep_ms(120); auto log = t->log_snapshot(); t->stop(); CHECK(log.size() == 2, "%zu entries", log.size());
+        wait_log(*t, 2); auto log = t->log_snapshot(); t->stop(); CHECK(log.size() == 2, "%zu entries", log.size());
         for (auto& e : log) { if (e.rule == "late") { CHECK(e.late, "late flag missing"); CHECK(e.fired_host_s - now < 0.02, "late trigger fired %.1f ms after the call", (e.fired_host_s - now) * 1000); }
             else { CHECK(!e.late, "offset trigger marked late"); CHECK(std::fabs(e.requested_host_s - (now + 0.060)) < 1e-3, "offset requested %.4f vs %.4f", e.requested_host_s - now, 0.060); CHECK(e.fired_host_s >= e.requested_host_s - 1e-4, "fired before requested"); } }
     }
