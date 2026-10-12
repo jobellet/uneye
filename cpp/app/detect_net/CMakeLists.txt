@@ -1,1 +1,1 @@
-eyelive_add_module(detect_net)
+eyelive_add_module(detect_net uneye_rt)
