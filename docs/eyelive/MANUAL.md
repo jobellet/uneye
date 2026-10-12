@@ -22,7 +22,7 @@ UDP datagrams to the port, little endian. Binary: `uint32 0x31455945 ("EYE1")`, 
 
 ## 4. Watching the stream: the Live tab
 ![Live tab](img/tab_Live.png)
-x and y position (blue, orange), speed (green) and the events as coloured bands; **a saccade is labelled while it is still happening**: 3-6 ms after its start a provisional band (with a thick line on top, and a `*` in the list) appears and its end follows the newest sample, then the final event (exact onset, offset, amplitude) replaces it; the gaze map shows the last 500 ms. Wheel = zoom, drag = pan, double click = jump to the end, *follow* keeps the newest data in view. The right-hand table lists the latest events. The status bar shows the measured rate, memory, CPU and the detection latency.
+x and y position (blue, orange), speed (green) and the events as coloured bands; **the labels come from the detector you chose**: `hmm_accel` and the networks show each event when it is final (about 115 ms after the movement, with exact onset, offset and amplitude), `fast_threshold` shows a band 3-6 ms after the start whose end follows the newest sample while the saccade happens (marked `*` in the list until the final event replaces it). The fast detector always runs beside the chosen one, but only to drive the triggers; the gaze map shows the last 500 ms. Wheel = zoom, drag = pan, double click = jump to the end, *follow* keeps the newest data in view. The right-hand table lists the latest events. The status bar shows the measured rate, memory, CPU and the detection latency.
 
 ## 5. Detectors: the Detection tab
 ![Detection tab](img/tab_Detection.png)

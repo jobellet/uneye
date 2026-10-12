@@ -236,6 +236,9 @@ class Engine final : public IEngine {
             provs_[k].offset = n - 1; provs_[k].t_offset = rec_->t(n - 1); ++k; }
         prune_open();
     }
+    void publish_prov_trigger_only(const Event& e) {
+        { std::lock_guard<std::mutex> l(mu_); ++n_prov_; } sbw_->publish_event(e, n_prov_); trig_->on_event(e, arrival(e.onset));
+    }
     void publish_prov(const Event& e) {
         { std::lock_guard<std::mutex> l(mu_); provs_.push_back(e); prov_open_.push_back(e.onset); if (provs_.size() > 8) provs_.erase(provs_.begin()); ++n_prov_; prune_open(); }
         sbw_->publish_event(e, n_prov_); trig_->on_event(e, arrival(e.onset));
@@ -251,7 +254,7 @@ class Engine final : public IEngine {
                 if (det_prov_ || n - slow_done_ >= slow_hop_ || last) { det_->advance(*rec_, n, fin, prov); slow_done_ = n; }       // the active detector runs every 5 ms (every wake-up when it publishes provisional events itself); the fast detector at every wake-up
                 if (fast_ && active_id_ != "fast_threshold") fast_->advance(*rec_, n, ffin, fprov);
                 for (auto& e : fin) if (e.onset > last_final_off_ || e.cls != 1) publish_final(e);
-                for (auto& e : prov) { measure_latency(n); publish_prov(e); } for (auto& e : fprov) { measure_latency(n); publish_prov(e); } for (auto& e : ffin) close_provisional(e);
+                for (auto& e : prov) { measure_latency(n); publish_prov(e); } for (auto& e : fprov) { measure_latency(n); publish_prov_trigger_only(e); }       // the fast detector runs beside the chosen one for the triggers only: what is displayed and recorded is the chosen detector's output
                 grow_provisionals(n);
                 // blink events from runs of invalid samples
                 for (int64_t i = scanned_; i < n; ++i) { const bool bad = !rec_->valid(i) || (rec_->flags(i) & kFlagBlink); if (bad && blink_start_ < 0) blink_start_ = i; else if (!bad && blink_start_ >= 0) { if (i - blink_start_ >= 3) publish_final(make_blink(blink_start_, i - 1)); blink_start_ = -1; } } scanned_ = n;

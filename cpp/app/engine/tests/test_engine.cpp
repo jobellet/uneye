@@ -159,12 +159,19 @@ int main(int argc, char** argv) {
         CHECK(med(err20) < 0.2, "median +20 ms error %.3f deg", med(err20)); CHECK(err20_sacc.empty() || mean(err20_sacc) < mean(stay20_sacc), "the forecast is not better than staying during movements (%.3f vs %.3f)", mean(err20_sacc), mean(stay20_sacc));
         auto rd = Recorder::open_readonly(c.session_path, &err); StateBlock sb; if (rd && read_state_block(rd->state_block(), &sb)) { std::printf("state block prediction: valid %d at (%.2f, %.2f) +- (%.3f, %.3f)\n", int(sb.pred_valid), double(sb.pred_x), double(sb.pred_y), double(sb.pred_sigma_x), double(sb.pred_sigma_y)); }
     }
-    // 9. live labels: a saccade is labelled while it is still happening (an open provisional event whose end follows the newest sample), with the label-free detector as the active one
+    // 9. live labels come from the CHOSEN detector. fast_threshold chosen: an open provisional label whose end follows the newest sample while the saccade happens. hmm_accel chosen: only its own (final) events are listed, 
+    //    but the provisional events of the fast detector still reach the triggers (rules anchored on the onset)
     {
-        auto e = make_engine(); SessionConfig c = cfg_sim("live.eyelive", 1000, 1.0, "hmm_accel"); std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); int64_t max_grown = 0, seen = 0; std::vector<int64_t> onsets; const auto t0 = std::chrono::steady_clock::now();
+        auto e = make_engine(); SessionConfig c = cfg_sim("live.eyelive", 1000, 1.0, "fast_threshold"); std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); int64_t max_grown = 0, seen = 0; std::vector<int64_t> onsets; const auto t0 = std::chrono::steady_clock::now();
         while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < 9.0) { const int64_t n = e->trace().size(); for (const auto& ev : e->events()) if (ev.provisional) { if (std::find(onsets.begin(), onsets.end(), ev.onset) == onsets.end()) { onsets.push_back(ev.onset); ++seen; } max_grown = std::max(max_grown, ev.offset - ev.onset); if (ev.offset > n) CHECK(false, "a provisional end beyond the recorded data"); } sleep_ms(2); }
-        e->stop(); std::printf("live labels: %lld provisional events seen while recording, the longest label reached %lld samples before the final event replaced it\n", (long long)seen, (long long)max_grown);
+        e->stop(); std::printf("live labels, fast_threshold chosen: %lld provisional events seen while recording, the longest label reached %lld samples before the final event replaced it\n", (long long)seen, (long long)max_grown);
         CHECK(seen >= 3, "only %lld provisional events seen", (long long)seen); CHECK(max_grown >= 8, "the provisional label never grew with the saccade (longest %lld samples)", (long long)max_grown);
+    }
+    {
+        auto e = make_engine(); SessionConfig c = cfg_sim("live2.eyelive", 1000, 1.0, "hmm_accel"); std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); TriggerRule r; r.name = "onset"; r.any_class = true; r.anchor = TriggerAnchor::OnsetProvisional; r.sink = "null"; e->set_trigger_rules({r}); size_t prov_listed = 0, finals_listed = 0; const auto t0 = std::chrono::steady_clock::now();
+        while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < 9.0) { for (const auto& ev : e->events()) (ev.provisional ? prov_listed : finals_listed) += 1; sleep_ms(5); } const auto log = e->trigger_log(); const auto st = e->stats(); e->stop();
+        std::printf("live labels, hmm_accel chosen: provisional entries in the event list %zu, final entries seen %zu; triggers fired on the fast detector's onsets: %zu (%llu provisional events)\n", prov_listed, finals_listed, log.size(), (unsigned long long)st.events_provisional);
+        CHECK(prov_listed == 0, "the fast detector's provisional events must not be listed when another detector is chosen (%zu)", prov_listed); CHECK(finals_listed > 0, "no final event listed"); CHECK(!log.empty(), "the onset rule never fired");
     }
     std::error_code ec; fs::remove_all(fs::temp_directory_path() / "eyelive_engine_test", ec);
     std::printf(fails ? "FAILED\n" : "all engine tests passed\n"); return fails ? 1 : 0;
