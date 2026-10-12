@@ -30,7 +30,15 @@ jobs:
       - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build
       - name: Test all eyelive modules
-        run: ctest --test-dir build -L eyelive --output-on-failure
+        shell: bash
+        run: |
+          set -o pipefail
+          ctest --test-dir build -L eyelive --output-on-failure --timeout 900 2>&1 | tee ctest.log
+      - name: Publish test failures in the run summary (readable without signing in)
+        if: failure()
+        shell: bash
+        run: |
+          { echo "### ${{ matrix.os }}: failing tests"; echo '```'; grep -E "^\s*[0-9]+/[0-9]+ Test .*(Failed|Timeout|Exception)|The following tests FAILED|^\s+[0-9]+ - " ctest.log | head -40; echo '```'; echo "### last lines of the log"; echo '```'; tail -120 ctest.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
   sanitizers:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -43,7 +51,16 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ninja-build python3-numpy
       - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DUNEYE_SANITIZE=${{ matrix.sanitize }}
       - run: cmake --build build
-      - run: ctest --test-dir build -L eyelive --output-on-failure --timeout 900
+      - name: Test
+        shell: bash
+        run: |
+          set -o pipefail
+          ctest --test-dir build -L eyelive --output-on-failure --timeout 900 2>&1 | tee ctest.log
+      - name: Publish test failures in the run summary (readable without signing in)
+        if: failure()
+        shell: bash
+        run: |
+          { echo "### sanitizer ${{ matrix.sanitize }}: failing tests"; echo '```'; grep -E "^\s*[0-9]+/[0-9]+ Test .*(Failed|Timeout|Exception)|The following tests FAILED|^\s+[0-9]+ - |WARNING: ThreadSanitizer|ERROR: AddressSanitizer|SUMMARY:" ctest.log | head -40; echo '```'; echo "### last lines of the log"; echo '```'; tail -150 ctest.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
   gui:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
