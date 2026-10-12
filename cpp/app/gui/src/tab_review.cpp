@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <future>
 #include <memory>
+#include <cstdio>
 #include "imgui.h"
 #include "eyelive/gui/widgets.hpp"
 #include "eyelive/gui_tab.hpp"

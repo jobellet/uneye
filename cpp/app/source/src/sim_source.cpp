@@ -1,4 +1,5 @@
 #include "eyelive/sim_source.hpp"
+#include <algorithm>
 
 namespace eyelive {
 

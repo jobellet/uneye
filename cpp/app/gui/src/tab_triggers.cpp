@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <sstream>
+#include <cstdlib>
 #include "imgui.h"
 #include "eyelive/gui/settings.hpp"
 #include "eyelive/gui/widgets.hpp"

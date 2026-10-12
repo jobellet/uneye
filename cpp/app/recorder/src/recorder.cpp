@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <sstream>
+#include <algorithm>
 #include "os_mmap.hpp"
 
 namespace eyelive {

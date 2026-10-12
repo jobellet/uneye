@@ -14,6 +14,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <algorithm>
+#include <cstdlib>
 #endif
 
 using namespace eyelive;

@@ -18,6 +18,7 @@ struct WsaInit { WsaInit() { WSADATA d; WSAStartup(MAKEWORD(2, 2), &d); } ~WsaIn
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <cstdlib>
 using sock_t = int; static const sock_t kBadSock = -1;
 static void close_sock(sock_t s) { ::close(s); }
 static void set_nonblocking(sock_t s) { const int fl = fcntl(s, F_GETFL, 0); fcntl(s, F_SETFL, fl | O_NONBLOCK); }

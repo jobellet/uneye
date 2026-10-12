@@ -1,6 +1,7 @@
 #include "eyelive/source.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 namespace eyelive {
 

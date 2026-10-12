@@ -4,6 +4,8 @@
 #include <fstream>
 #include <random>
 #include <string>
+#include <algorithm>
+#include <cstdlib>
 #include "eyelive/net_detectors.hpp"
 #include "eyelive/trace.hpp"
 #include "uneye/bitcn.hpp"

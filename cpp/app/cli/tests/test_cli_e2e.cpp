@@ -17,6 +17,7 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <algorithm>
 #endif
 namespace fs = std::filesystem;
 static int fails = 0;

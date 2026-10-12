@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <algorithm>
 #include "eyelive/detector.hpp"
 
 namespace eyelive {

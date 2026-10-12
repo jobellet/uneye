@@ -4,6 +4,7 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <cstdlib>
 #include "imgui.h"
 #include "eyelive/gui/settings.hpp"
 #include "eyelive/gui/tab_acquire.hpp"

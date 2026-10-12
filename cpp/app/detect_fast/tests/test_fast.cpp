@@ -5,6 +5,7 @@
 #include <cassert>
 #include <chrono>
 #include <algorithm>
+#include <cstdlib>
 
 using namespace eyelive;
 

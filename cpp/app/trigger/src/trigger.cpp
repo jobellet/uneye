@@ -8,6 +8,7 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <chrono>
 #include "eyelive/trigger_clock.hpp"
 #include "sinks.hpp"
 

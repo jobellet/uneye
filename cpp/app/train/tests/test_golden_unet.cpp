@@ -4,6 +4,8 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <algorithm>
+#include <cmath>
 #include "eyelive/train/unet.hpp"
 using namespace eyelive::train;
 int main(int, char** argv) {

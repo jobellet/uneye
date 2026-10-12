@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <thread>
+#include <cmath>
 #include "eyelive/train/dataset.hpp"
 #include "eyelive/train/model_io.hpp"
 #include "eyelive/trainer.hpp"

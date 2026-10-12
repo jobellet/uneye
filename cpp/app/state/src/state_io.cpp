@@ -1,4 +1,6 @@
 #include "eyelive/state_io.hpp"
+#include <cstring>
+#include <atomic>
 
 #if defined(__clang__) || defined(__GNUC__)
 #define TSAN_IGNORE __attribute__((no_sanitize("thread")))

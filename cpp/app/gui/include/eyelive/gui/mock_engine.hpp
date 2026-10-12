@@ -3,6 +3,8 @@
 #pragma once
 #include <chrono>
 #include <memory>
+#include <algorithm>
+#include <cmath>
 #include "eyelive/engine.hpp"
 #include "uneye/simulator.hpp"
 

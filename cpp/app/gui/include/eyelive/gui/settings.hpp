@@ -5,6 +5,7 @@
 #include <fstream>
 #include <map>
 #include <string>
+#include <cstdio>
 
 namespace eyelive { namespace gui {
 

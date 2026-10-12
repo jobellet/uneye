@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <algorithm>
 #include "eyelive/engine.hpp"
 #include "eyelive/net_detectors.hpp"
 

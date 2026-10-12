@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cassert>
 #include <cstring>
+#include <atomic>
 
 using namespace eyelive;
 

@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cmath>
 #include <chrono>
+#include <cstdlib>
 
 #include "eyelive/calib.hpp"
 #include "eyelive/trace.hpp"

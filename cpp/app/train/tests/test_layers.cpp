@@ -2,6 +2,8 @@
 #include <cstdio>
 #include <functional>
 #include <random>
+#include <algorithm>
+#include <cmath>
 #include "eyelive/train/unet.hpp"
 using namespace eyelive::train;
 using D = double;

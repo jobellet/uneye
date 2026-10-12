@@ -2,6 +2,9 @@
 // state() / load_state() use the order and layout of the cpp/models/*.bin files (conv: weight, bias; batch norm: gamma, beta, running mean, running var; c0 weights as [o][k][c]).
 #pragma once
 #include "eyelive/train/layers.hpp"
+#include <algorithm>
+#include <cmath>
+#include <random>
 
 namespace eyelive { namespace train {
 

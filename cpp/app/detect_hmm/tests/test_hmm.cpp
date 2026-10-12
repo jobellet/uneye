@@ -6,6 +6,7 @@
 #include <fstream>
 #include <random>
 #include <sstream>
+#include <cstdlib>
 #include "eyelive/hmm_detector.hpp"
 #include "eyelive/trace.hpp"
 using namespace eyelive;

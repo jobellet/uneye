@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <mutex>
 #include <thread>
+#include <map>
 #include "eyelive/fast_detector.hpp"
 #include "eyelive/hmm_detector.hpp"
 #include "eyelive/net_detectors.hpp"

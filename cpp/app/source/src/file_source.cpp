@@ -1,6 +1,7 @@
 #include "file_source.hpp"
 #include <sstream>
 #include <thread>
+#include <chrono>
 
 namespace eyelive {
 
