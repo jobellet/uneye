@@ -24,6 +24,7 @@ class MockEngine final : public IEngine {
         s.deg_per_unit = cfg_.deg_per_unit > 0 ? cfg_.deg_per_unit : 1.0; s.scale_estimated = cfg_.deg_per_unit == 0; s.scale_agreement = 0.83; s.warning = warn_; return s;
     }
     const ITraceView& trace() const override { return view_; }
+    void events_from(uint64_t first, std::vector<Event>& out) const override { const auto all = events(); out.assign(all.begin() + long(std::min<uint64_t>(first, all.size())), all.end()); }
     std::vector<Event> events() const override { std::vector<Event> v; for (const auto& e : events_) if (e.offset < visible()) v.push_back(e); return v; }
     bool forecast_available() const override { return true; }
     void forecast_enable(bool) override {}

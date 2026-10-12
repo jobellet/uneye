@@ -96,9 +96,12 @@ int main(int argc, char** argv) {
     int frames_drawn = 0, extra_frames = 3, active = 0; auto last_render = Clock::now(); const double cpu0 = cpu_seconds(); const auto wall0 = Clock::now(); const int max_frames = args.shot.empty() ? -1 : args.frames; int frame_counter = 0;
     while (!glfwWindowShouldClose(win)) {
         if (args.run_seconds > 0 && std::chrono::duration<double>(Clock::now() - wall0).count() >= args.run_seconds) break;
-        const bool wants_live = !tabs.empty() && active >= 0 && active < int(tabs.size()) && tabs[size_t(active)]->wants_redraw(); const double timeout = wants_live ? 1.0 / 60.0 : 1.0;
-        bool event = false; if (args.shot.empty()) { const auto t0 = Clock::now(); glfwWaitEventsTimeout(timeout); event = std::chrono::duration<double>(Clock::now() - t0).count() < timeout - 0.004; } else glfwPollEvents();
-        const double since = std::chrono::duration<double>(Clock::now() - last_render).count();
+        gui::Settings::instance().tick();
+        const bool wants_live = !tabs.empty() && active >= 0 && active < int(tabs.size()) && tabs[size_t(active)]->wants_redraw(); double since = std::chrono::duration<double>(Clock::now() - last_render).count();
+        // pacing: live = one frame per 1/60 s counted from the previous one (the swap already waits for the display refresh: waiting a full 1/60 s again halved the frame rate); idle = sleep up to 1 s, woken by any input
+        const double timeout = wants_live ? std::max(0.0, 1.0 / 60.0 - since) : 1.0; bool event = false;
+        if (args.shot.empty()) { const auto t0 = Clock::now(); if (timeout > 0) glfwWaitEventsTimeout(timeout); else glfwPollEvents(); event = timeout > 0.006 && std::chrono::duration<double>(Clock::now() - t0).count() < timeout - 0.004; } else glfwPollEvents();
+        since = std::chrono::duration<double>(Clock::now() - last_render).count();
         const bool render = !args.shot.empty() || event || extra_frames > 0 || wants_live || since >= 1.0; if (!render) continue;
         ImGui_ImplOpenGL3_NewFrame(); ImGui_ImplGlfw_NewFrame(); inject(script, frame_counter, io); ImGui::NewFrame(); const ImVec2 disp = io.DisplaySize; const float status_h = ImGui::GetFrameHeight() + 8;
         ImGui::SetNextWindowPos(ImVec2(0, 0)); ImGui::SetNextWindowSize(ImVec2(disp.x, disp.y - status_h));
@@ -115,5 +118,5 @@ int main(int argc, char** argv) {
         glfwSwapBuffers(win);
     }
     const double wall = std::chrono::duration<double>(Clock::now() - wall0).count(), cpu = cpu_seconds() - cpu0; std::printf("frames %d, wall %.2f s, cpu %.2f s (%.1f %% of one core)\n", frames_drawn, wall, cpu, wall > 0 ? 100.0 * cpu / wall : 0.0);
-    engine.reset(); ImGui_ImplOpenGL3_Shutdown(); ImGui_ImplGlfw_Shutdown(); ImGui::DestroyContext(); glfwDestroyWindow(win); glfwTerminate(); return 0;
+    gui::Settings::instance().flush(); engine.reset(); ImGui_ImplOpenGL3_Shutdown(); ImGui_ImplGlfw_Shutdown(); ImGui::DestroyContext(); glfwDestroyWindow(win); glfwTerminate(); return 0;
 }

@@ -1,5 +1,6 @@
 // Drawing helpers shared by the tabs (plain ImGui draw lists, no plotting library): the gaze trace plot with event shading, the gaze map, colours, formatting.
 #pragma once
+#include <algorithm>
 #include <string>
 #include <vector>
 #include "imgui.h"
@@ -13,6 +14,22 @@ ImU32 class_color(int cls, float alpha = 1.0f);                 // 0 fixation (g
 const char* class_name(int cls);
 std::string format_bytes(double bytes);
 std::string format_time(double seconds);                         // mm:ss.s or h:mm:ss
+
+// The events of the session for a viewer: the finals already received are kept, only the new ones and the (few) provisional ones are fetched at each frame. Sorted by onset (the plot searches it).
+class EventCache {
+ public:
+    const std::vector<Event>& get(IEngine& e) {
+        const uint64_t nf = e.stats().events_final; if (nf < nf_ || (nf == 0 && !ev_.empty())) { ev_.clear(); nf_ = 0; }          // a new session starts again from zero
+        ev_.resize(nf_); tail_.clear(); e.events_from(nf_, tail_); bool unsorted = false;
+        for (const auto& x : tail_) { if (!x.provisional && nfinal_in_tail_ok(x)) { if (!ev_.empty() && x.onset < ev_.back().onset) unsorted = true; ev_.push_back(x); ++nf_; } }
+        const size_t nfin = ev_.size(); for (const auto& x : tail_) if (x.provisional) ev_.push_back(x);
+        if (unsorted) std::sort(ev_.begin(), ev_.begin() + long(nfin), [](const Event& a, const Event& b) { return a.onset < b.onset; });
+        return ev_;
+    }
+ private:
+    static bool nfinal_in_tail_ok(const Event&) { return true; }
+    std::vector<Event> ev_, tail_; uint64_t nf_ = 0;
+};
 
 struct TimeView { double t0 = 0, t1 = 5; };                      // visible window of the plot, seconds
 

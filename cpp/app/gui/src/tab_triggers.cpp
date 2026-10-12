@@ -18,10 +18,10 @@ class TriggersTab final : public ITab {
             std::snprintf(r.name, sizeof r.name, "%s", v[0].c_str()); r.cls = std::atoi(v[1].c_str()); r.any = v[2] == "1"; r.amin = float(std::atof(v[3].c_str())); r.amax = float(std::atof(v[4].c_str())); r.anchor = std::atoi(v[5].c_str()); r.delay = float(std::atof(v[6].c_str())); r.refr = float(std::atof(v[7].c_str())); std::snprintf(r.sink, sizeof r.sink, "%s", v[8].c_str()); std::snprintf(r.payload, sizeof r.payload, "%s", v[9].c_str()); r.enabled = v[10] == "1"; rows_.push_back(r); } }
     const char* title() const override { return "Triggers"; }
     int order() const override { return 60; }
-    bool wants_redraw() const override { return true; }
+    bool wants_redraw() const override { return live_; }
     void draw(IEngine& engine) override {
         ImGui::TextWrapped("A rule fires when an event matches its class and amplitude range: 'onset (provisional)' fires 3-6 ms after the movement starts (no amplitude is known yet); 'onset (final)' and 'offset' use the final event. Sinks: udp:127.0.0.1:6000, log:<file>, stdout. Payload placeholders: {t} event time, {amp} amplitude, {cls} class.");
-        bool changed = false; const char* anchors[3] = {"onset (provisional)", "onset (final)", "offset"}; const char* classes[5] = {"fixation", "saccade", "blink", "class 3", "class 4"};
+        live_ = engine.stats().running; bool changed = false; const char* anchors[3] = {"onset (provisional)", "onset (final)", "offset"}; const char* classes[5] = {"fixation", "saccade", "blink", "class 3", "class 4"};
         if (ImGui::BeginTable("rules", 11, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY, ImVec2(0, 230))) {
             for (const char* h : {"on", "name", "any class", "class", "amp min", "amp max", "anchor", "delay ms", "refractory ms", "sink", "payload"}) ImGui::TableSetupColumn(h); ImGui::TableHeadersRow(); int remove = -1;
             for (size_t i = 0; i < rows_.size(); ++i) { Row& r = rows_[i]; ImGui::PushID(int(i)); ImGui::TableNextRow(); ImGui::TableNextColumn(); changed |= ImGui::Checkbox("##on", &r.enabled); ImGui::TableNextColumn(); ImGui::SetNextItemWidth(110); changed |= ImGui::InputText("##name", r.name, sizeof r.name); ImGui::TableNextColumn(); changed |= ImGui::Checkbox("##any", &r.any);
@@ -35,13 +35,13 @@ class TriggersTab final : public ITab {
         if (ImGui::Button("Add rule")) { rows_.push_back(Row()); changed = true; } ImGui::SameLine(); if (ImGui::Button("Add 'every saccade' example")) { Row r; std::snprintf(r.name, sizeof r.name, "saccade_udp"); std::snprintf(r.sink, sizeof r.sink, "udp:127.0.0.1:6000"); std::snprintf(r.payload, sizeof r.payload, "SACCADE {t} {amp}"); rows_.push_back(r); changed = true; }
         ImGui::SameLine(); if (ImGui::Button("Add microsaccade example")) { Row r; std::snprintf(r.name, sizeof r.name, "microsaccade"); r.anchor = 1; r.amax = 1.0f; std::snprintf(r.sink, sizeof r.sink, "udp:127.0.0.1:6000"); std::snprintf(r.payload, sizeof r.payload, "MICRO {t} {amp}"); rows_.push_back(r); changed = true; }
         if (changed || first_) { apply(engine); save(); first_ = false; }
-        ImGui::SeparatorText("Firing log (requested versus actual host time)"); const auto log = engine.trigger_log(); std::vector<double> err; for (const auto& e : log) err.push_back((e.fired_host_s - e.requested_host_s) * 1000.0); std::sort(err.begin(), err.end());
+        ImGui::SeparatorText("Firing log (requested versus actual host time)"); if (!live_ || ImGui::GetTime() - log_ts_ > 0.5) { log_ = engine.trigger_log(); log_ts_ = ImGui::GetTime(); err_.clear(); for (const auto& e : log_) err_.push_back((e.fired_host_s - e.requested_host_s) * 1000.0); std::sort(err_.begin(), err_.end()); } const auto& err = err_;
         if (err.empty()) ImGui::TextDisabled("nothing fired yet"); else ImGui::Text("%zu firings; error median %.3f ms, p95 %.3f ms, max %.3f ms", err.size(), err[err.size() / 2], err[size_t(0.95 * double(err.size() - 1))], err.back());
     }
  private:
     void apply(IEngine& engine) { std::vector<TriggerRule> rules; for (const Row& r : rows_) { TriggerRule t; t.name = r.name; t.cls = uint8_t(r.cls); t.any_class = r.any; t.amp_min_deg = r.amin; t.amp_max_deg = r.amax; t.anchor = r.anchor == 0 ? TriggerAnchor::OnsetProvisional : (r.anchor == 1 ? TriggerAnchor::OnsetFinal : TriggerAnchor::Offset); t.delay_ms = r.delay; t.refractory_ms = r.refr; t.sink = r.sink; t.payload = r.payload; t.enabled = r.enabled; rules.push_back(t); } engine.set_trigger_rules(rules); }
     void save() const { auto& s = gui::Settings::instance(); s.set_number("trg.count", double(rows_.size())); for (size_t i = 0; i < rows_.size(); ++i) { const Row& r = rows_[i]; char b[512]; std::snprintf(b, sizeof b, "%s\t%d\t%d\t%g\t%g\t%d\t%g\t%g\t%s\t%s\t%d", r.name, r.cls, r.any ? 1 : 0, double(r.amin), double(r.amax), r.anchor, double(r.delay), double(r.refr), r.sink, r.payload, r.enabled ? 1 : 0); s.set("trg." + std::to_string(i), b); } }
-    std::vector<Row> rows_; bool first_ = true;
+    std::vector<Row> rows_; bool first_ = true, live_ = false; std::vector<TriggerLogEntry> log_; std::vector<double> err_; double log_ts_ = -1;
 };
 static TabRegistrar reg([] { return std::make_unique<TriggersTab>(); });
 }  // namespace

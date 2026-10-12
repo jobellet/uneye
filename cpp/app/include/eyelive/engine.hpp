@@ -70,6 +70,7 @@ class IEngine {
     virtual void stop() = 0;
     virtual EngineStats stats() const = 0;
     virtual const ITraceView& trace() const = 0;                            // valid between start() and stop(); also after stop() until the next start()
+    virtual void events_from(uint64_t first_final, std::vector<Event>& out) const = 0;      // the final events from index first_final on, then the provisional ones (cheap: a viewer keeps the finals it already has)
     virtual std::vector<Event> events() const = 0;                          // detector events (final, then still-provisional ones), snapshot copy
     // forecast of the future eye position (see ForecastSample); empty / invalid when the stream is not at 1 kHz or the models are missing
     virtual bool forecast_available() const = 0;
