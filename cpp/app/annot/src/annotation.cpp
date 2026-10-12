@@ -364,15 +364,45 @@ const std::vector<std::pair<int64_t, int64_t>>& ExpertLabels::excluded() const {
     return impl_->current.excluded;
 }
 
-void ExpertLabels::mark_reviewed(int64_t from, int64_t to, bool reviewed) {
+void ExpertLabels::mark_reviewed(int64_t from, int64_t to, bool reviewed, bool undoable) {
     if (from > to) return;
-    impl_->save_state();
+    if (undoable) impl_->save_state();
     if (reviewed) {
         impl_->current.reviewed.push_back({from, to});
         impl_->merge_ranges(impl_->current.reviewed);
     } else {
         impl_->remove_range(impl_->current.reviewed, from, to);
     }
+}
+
+const std::vector<std::pair<int64_t, int64_t>>& ExpertLabels::reviewed() const { return impl_->current.reviewed; }
+
+// [from, to] minus the reviewed ranges
+static std::vector<std::pair<int64_t, int64_t>> unreviewed_parts(int64_t from, int64_t to, const std::vector<std::pair<int64_t, int64_t>>& reviewed) {
+    std::vector<std::pair<int64_t, int64_t>> gaps; int64_t pos = from;
+    for (const auto& r : reviewed) { if (r.second < pos) continue; if (r.first > to) break; if (r.first > pos) gaps.push_back({pos, std::min(r.first - 1, to)}); pos = std::max(pos, r.second + 1); if (pos > to) break; }
+    if (pos <= to) gaps.push_back({pos, to});
+    return gaps;
+}
+// replace the automatic events of `list` inside [a, b] by `fresh` (events inside [a, b]); events with origin Expert are kept and block overlapping fresh events
+static void replace_auto_in_gap(std::vector<Event>& list, const std::vector<Event>& fresh, int64_t a, int64_t b, bool keep_expert) {
+    std::vector<Event> out;
+    for (const auto& ev : list) {
+        if (ev.offset < a || ev.onset > b || (keep_expert && ev.origin == EventOrigin::Expert)) { out.push_back(ev); continue; }
+        if (ev.onset < a) { Event e1 = ev; e1.offset = a - 1; out.push_back(e1); }
+        if (ev.offset > b) { Event e2 = ev; e2.onset = b + 1; out.push_back(e2); }
+    }
+    for (const auto& f : fresh) {
+        if (f.onset < a || f.offset > b) continue; bool blocked = false;
+        if (keep_expert) for (const auto& ev : out) if (ev.origin == EventOrigin::Expert && ev.offset >= f.onset && ev.onset <= f.offset) { blocked = true; break; }
+        if (!blocked) out.push_back(f);
+    }
+    std::sort(out.begin(), out.end(), [](const Event& x, const Event& y) { return x.onset < y.onset; }); list = out;
+}
+void ExpertLabels::apply_auto_labels(const std::vector<Event>& events, int64_t from, int64_t to) {
+    if (from > to) return;
+    auto apply = [&](State& st) { for (const auto& g : unreviewed_parts(from, to, st.reviewed)) { replace_auto_in_gap(st.prelabels, events, g.first, g.second, false); replace_auto_in_gap(st.events, events, g.first, g.second, true); } };
+    apply(impl_->current); for (auto& st : impl_->undo_stack) apply(st); for (auto& st : impl_->redo_stack) apply(st);
 }
 
 double ExpertLabels::reviewed_seconds(double rate_hz) const {

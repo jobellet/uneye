@@ -33,6 +33,31 @@ struct EngineStats {
     std::string warning;                // human-readable, empty if none
 };
 
+// Assisted annotation (the owner's workflow): the label-free detector labels the data as it arrives; every correction of the expert marks its neighbourhood as reviewed and, after a quiet delay (default 5 s), a U'n'Eye is trained on
+// "expert labels where reviewed, automatic labels elsewhere"; when it is ready it labels the windows that follow the reviewed ones (and the new data) instead of the label-free detector, and a new model is trained after the next corrections.
+struct AutoLearnConfig {
+    bool enabled = false;
+    double retrain_delay_s = 5.0;         // quiet time after the last correction before a (new) model is trained
+    double chunk_s = 2.0;                 // new data is labelled in blocks of this length (live recording)
+    double adopt_min_f1 = 0.6;            // a trained model labels the following windows only if its validation event F1 is at least this (a model that predicts nothing must not replace the labels); a rejected one is kept and continues learning
+    int n_threads = 0;                    // threads of a training (0 = automatic: one while a session records, all cores otherwise)
+    int max_epochs = 400;                 // hard cap of a training (early stopping normally ends it long before)
+    int expected_epochs = 50;             // only for the progress bar: training goes on while the validation loss still decreases and stops by early stopping
+    bool pretrained_start = false;        // first model starts from the pretrained network of the repository (later ones start from the previous model)
+    int n_classes = 3;
+    double max_seconds_of_data = 50.0;    // most recent labelled data used by a training
+    std::string first_labeler = "hmm_accel";
+};
+struct AutoGeneration {                   // one labeler: generation 0 = the label-free detector, k = the k-th trained model
+    int id = 0; std::string labeler; double reviewed_s = 0; int n_events = 0; double f1 = 0, kappa = 0;   // agreement of ITS labels with your final labels, on the windows it labelled and you reviewed
+    double val_f1 = 0, val_kappa = 0, train_s = 0; int epochs = 0;                                          // from its training (held-out windows)
+};
+struct AutoLearnStatus {
+    bool enabled = false; std::string labeler = "hmm_accel"; int generation = 0; bool labeling = false; bool training = false;
+    int epoch = 0, expected_epochs = 50; double progress = 0, train_loss = 0, val_loss = 0, val_f1 = 0; double retrain_in_s = -1; double labelled_s = 0;
+    std::vector<AutoGeneration> history; std::string message;
+};
+
 class IEngine {
  public:
     virtual ~IEngine() = default;
@@ -55,6 +80,10 @@ class IEngine {
     virtual TrainProgress training_progress() const = 0;
     virtual void cancel_training() = 0;
     virtual bool deploy_trained_model(const std::string& name, std::string* error) = 0;     // saves the model and registers it as detector "user:<name>"
+    // assisted annotation: call autolearn_poll from the thread that owns expert() (the GUI thread, once per frame, or a loop in a program without window); pass true when the expert changed something since the previous call
+    virtual void autolearn_set(const AutoLearnConfig& cfg) = 0;
+    virtual AutoLearnStatus autolearn_poll(bool expert_edited) = 0;
+    virtual bool autolearn_train_now(std::string* error) = 0;
     // triggers
     virtual void set_trigger_rules(const std::vector<TriggerRule>& rules) = 0;
     virtual std::vector<TriggerLogEntry> trigger_log() const = 0;

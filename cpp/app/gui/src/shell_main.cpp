@@ -111,6 +111,7 @@ int main(int argc, char** argv) {
         int fw, fh; glfwGetFramebufferSize(win, &fw, &fh); glViewport(0, 0, fw, fh); glClearColor(0.09f, 0.09f, 0.10f, 1); glClear(GL_COLOR_BUFFER_BIT); ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         ++frames_drawn; ++frame_counter; last_render = Clock::now(); if (extra_frames > 0) --extra_frames; if (ImGui::IsAnyItemActive() || event) extra_frames = std::max(extra_frames, 2);        // one more frame after any interaction: widgets show their new state a frame late
         if (!args.shot.empty() && frame_counter >= max_frames) { if (!write_ppm(args.shot, fw, fh)) { std::fprintf(stderr, "cannot write %s\n", args.shot.c_str()); return 4; } break; }
+        if (!args.shot.empty() && !args.script.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(5));       // scripted runs advance in wall-clock time (training, delays)
         glfwSwapBuffers(win);
     }
     const double wall = std::chrono::duration<double>(Clock::now() - wall0).count(), cpu = cpu_seconds() - cpu0; std::printf("frames %d, wall %.2f s, cpu %.2f s (%.1f %% of one core)\n", frames_drawn, wall, cpu, wall > 0 ? 100.0 * cpu / wall : 0.0);

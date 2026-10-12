@@ -41,6 +41,15 @@ class MockEngine final : public IEngine {
     }
     void cancel_training() override { training_ = false; }
     bool deploy_trained_model(const std::string& name, std::string* error) override { if (name.empty()) { if (error) *error = "give the model a name"; return false; } deployed_.push_back(name); return true; }
+    void autolearn_set(const AutoLearnConfig& c) override { al_ = c; if (c.enabled) al_t0_ = Clock::now(); }
+    AutoLearnStatus autolearn_poll(bool edited) override {
+        AutoLearnStatus st; st.enabled = al_.enabled; st.expected_epochs = al_.expected_epochs; if (!al_.enabled) return st; const double now = std::chrono::duration<double>(Clock::now() - al_t0_).count(); if (edited) { al_edit_ = now; al_dirty_ = true; }
+        const double since = now - al_edit_; const bool training = al_dirty_ && since > al_.retrain_delay_s && since < al_.retrain_delay_s + 12; if (al_dirty_ && since >= al_.retrain_delay_s + 12) { al_dirty_ = false; ++al_gen_; }
+        st.generation = al_gen_; st.labeler = al_gen_ == 0 ? "hmm_accel" : "user:auto_g" + std::to_string(al_gen_); st.training = training; st.labelled_s = double(visible()) / 1000.0; st.val_loss = 0.2; st.val_f1 = 0.9;
+        if (training) { st.epoch = int((since - al_.retrain_delay_s) * 4); st.progress = std::min(0.99, st.epoch / 50.0); st.train_loss = 0.2; } else if (al_dirty_) st.retrain_in_s = std::max(0.0, al_.retrain_delay_s - since);
+        for (int g = 0; g <= al_gen_; ++g) { AutoGeneration a; a.id = g; a.labeler = g == 0 ? "hmm_accel" : "user:auto_g" + std::to_string(g); a.reviewed_s = 4.0 * (g + 1); a.n_events = 10 + 4 * g; a.f1 = 0.78 + 0.05 * g; a.kappa = 0.7 + 0.05 * g; a.val_f1 = 0.85; a.epochs = 40 + g; st.history.push_back(a); } return st;
+    }
+    bool autolearn_train_now(std::string*) override { al_dirty_ = true; al_edit_ = -1e9; return true; }
     void set_trigger_rules(const std::vector<TriggerRule>& rules) override { rules_ = rules; }
     std::vector<TriggerLogEntry> trigger_log() const override {
         std::vector<TriggerLogEntry> v; if (rules_.empty()) return v; const double now = std::chrono::duration<double>(Clock::now().time_since_epoch()).count(); int k = 0;
@@ -62,7 +71,7 @@ class MockEngine final : public IEngine {
         Event b; b.onset = 31000; b.offset = 31119; b.t_onset = 31.0; b.t_offset = 31.119; b.cls = 2; events_.push_back(b); std::sort(events_.begin(), events_.end(), [](const Event& a, const Event& c) { return a.onset < c.onset; }); prelabel("hmm_accel", 0, 60000, nullptr); }
 
     uneye::SimTrace sim_; std::vector<Event> events_; ExpertLabels expert_; View view_; SessionConfig cfg_; bool running_ = false; int64_t frozen_ = -1; Clock::time_point t0_ = Clock::now(), train_t0_ = Clock::now(); bool training_ = false; TrainConfig train_cfg_;
-    std::vector<std::string> deployed_; std::vector<TriggerRule> rules_; std::string warn_;
+    std::vector<std::string> deployed_; std::vector<TriggerRule> rules_; std::string warn_; AutoLearnConfig al_; Clock::time_point al_t0_ = Clock::now(); double al_edit_ = -1e9; bool al_dirty_ = false; int al_gen_ = 0;
 };
 
 }}  // namespace eyelive::gui

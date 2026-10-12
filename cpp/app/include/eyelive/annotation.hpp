@@ -43,7 +43,11 @@ class ExpertLabels {
     // ranges the expert marks as "do not train on" and ranges marked as reviewed (training-set counter)
     void exclude_range(int64_t from, int64_t to, bool excluded);
     const std::vector<std::pair<int64_t, int64_t>>& excluded() const;
-    void mark_reviewed(int64_t from, int64_t to, bool reviewed);
+    void mark_reviewed(int64_t from, int64_t to, bool reviewed, bool undoable = true);   // undoable = false: the range changes without an undo step (used right after an edit, so that one Undo reverts the edit AND its range)
+    const std::vector<std::pair<int64_t, int64_t>>& reviewed() const;
+    // Automatic labels (the current detector or model) for [from, to]: replaces the DETECTOR events and pre-labels inside the parts of [from, to] that are not reviewed; reviewed parts and every expert event are never touched.
+    // Not an undo step: the same replacement is applied to the undo / redo history, so Undo never removes or resurrects automatic labels. `events` must lie inside [from, to].
+    void apply_auto_labels(const std::vector<Event>& events, int64_t from, int64_t to);
     double reviewed_seconds(double rate_hz) const;                // total reviewed length, ranges merged, minus nothing
 
     // per-sample labels for training / display: 0 background, 1.. class, kIgnoreLabel inside excluded ranges and outside reviewed ranges when only_reviewed is true

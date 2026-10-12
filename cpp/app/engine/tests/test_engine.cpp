@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <thread>
 #if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
@@ -123,6 +124,29 @@ int main(int argc, char** argv) {
         CHECK(e->prelabel("user:stub_model", 0, 5000, &err), "the deployed model cannot pre-label: %s", err.c_str());
         CHECK(!e->deploy_trained_model("a/b", &err), "bad model name accepted");
         std::printf("review -> train -> deploy: trainer got %zu traces, %zu samples; 'user:stub_model' registered\n", sp->n_traces, sp->n_samples);
+    }
+    // 7. assisted annotation: the label-free detector labels the data, the expert corrects, a model is trained after the quiet delay and then labels the windows after the reviewed ones
+    {
+        auto e = make_engine(); SessionConfig c = cfg_sim("auto.eyelive", 1000, 0.0, "hmm_accel"); c.source.seed = 3; std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); wait_done(*e, 60000); e->stop(); const int64_t N = e->trace().size();
+        AutoLearnConfig ac; ac.enabled = true; ac.retrain_delay_s = 0.3; ac.chunk_s = 2.0; ac.max_epochs = SANITIZED ? 4 : 25; ac.expected_epochs = 25; ac.max_seconds_of_data = SANITIZED ? 8.0 : 30.0; e->autolearn_set(ac);
+        auto poll_until = [&](const std::function<bool(const AutoLearnStatus&)>& done, double timeout_s, bool edited_first = false) { AutoLearnStatus st; bool edited = edited_first; const auto t0 = std::chrono::steady_clock::now();
+            while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < timeout_s) { st = e->autolearn_poll(edited); edited = false; if (done(st)) return st; sleep_ms(20); } return st; };
+        auto st = poll_until([&](const AutoLearnStatus& s) { return s.labelled_s >= double(N) / 1000.0 - 0.5; }, 120); std::printf("auto: labelled %.1f s with '%s', %zu events\n", st.labelled_s, st.labeler.c_str(), e->expert().events().size());
+        CHECK(st.labeler == "hmm_accel" && st.generation == 0 && e->expert().events().size() > 20, "initial labelling: labeler %s, %zu events", st.labeler.c_str(), e->expert().events().size());
+        CHECK(!e->expert().undo(), "automatic labelling must not appear in the undo history");
+        // the expert deletes the first two events; their neighbourhood is reviewed (silently, like the Review tab does) and the poll is told about the edit
+        const size_t before = e->expert().events().size(); int64_t rev_end = 0; for (int k = 0; k < 2; ++k) { const Event ev = e->expert().events()[0]; rev_end = std::max<int64_t>(rev_end, ev.offset + 500); CHECK(e->expert().remove(0), "remove"); e->expert().mark_reviewed(std::max<int64_t>(0, ev.onset - 500), ev.offset + 500, true, false); }
+        CHECK(e->expert().events().size() == before - 2, "events after two deletions");
+        bool saw_training = false; int max_epoch = 0; double max_progress = 0; st = poll_until([&](const AutoLearnStatus& s) { saw_training |= s.training; max_epoch = std::max(max_epoch, s.epoch); max_progress = std::max(max_progress, s.progress); return s.generation >= 1 && !s.training; }, SANITIZED ? 400 : 240, true);
+        std::printf("auto: after the corrections the labeler is '%s' (generation %d), training seen %d, max epoch %d, progress %.2f, message '%s'\n", st.labeler.c_str(), st.generation, int(saw_training), max_epoch, max_progress, st.message.c_str());
+        CHECK(st.generation == 1 && st.labeler == "user:auto_g1", "no model was trained: generation %d, message '%s'", st.generation, st.message.c_str()); CHECK(saw_training && max_epoch >= 1, "the training progress was never visible");
+        // the next windows (after the reviewed ones) are now labelled by the model; the deleted events stay deleted; the history lists both labelers
+        st = poll_until([&](const AutoLearnStatus& s) { return !s.labeling && s.history.size() >= 2; }, 60); poll_until([&](const AutoLearnStatus& s) { return !s.labeling; }, 60);
+        int by_model = 0, by_hmm = 0, deleted_back = 0; for (const auto& p : e->expert().prelabels()) { by_model += p.model_version == 1 && p.onset > rev_end; by_hmm += p.model_version == 0 && p.onset > rev_end; } for (const auto& ev : e->expert().events()) deleted_back += ev.onset < rev_end - 500 && ev.origin == EventOrigin::Detector && ev.model_version == 1;
+        std::printf("auto: windows after the reviewed ones: %d labelled by the model, %d still by the label-free detector; history:", by_model, by_hmm); for (auto& g : st.history) std::printf(" [%s reviewed %.1f s, F1 %.2f, %d events]", g.labeler.c_str(), g.reviewed_s, g.f1, g.n_events); std::printf("\n");
+        CHECK(by_model > 10 && by_hmm == 0, "windows after the reviewed ones: %d by the model, %d by the detector", by_model, by_hmm); CHECK(deleted_back == 0, "a model re-labelled a reviewed window"); CHECK(double(e->expert().events().size()) >= 0.7 * double(before - 2) && e->expert().events().size() > 15, "events after relabelling: %zu", e->expert().events().size());
+        CHECK(st.history.size() >= 2 && st.history[0].reviewed_s > 0, "history: %zu generations", st.history.size());
+        CHECK(e->expert().undo(), "the expert's last edit can be undone"); 
     }
     std::error_code ec; fs::remove_all(fs::temp_directory_path() / "eyelive_engine_test", ec);
     std::printf(fails ? "FAILED\n" : "all engine tests passed\n"); return fails ? 1 : 0;

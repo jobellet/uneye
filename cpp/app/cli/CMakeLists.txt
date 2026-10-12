@@ -15,3 +15,7 @@ if(CLI_SRC)
     set_tests_properties(eyelive_cli_${tn} PROPERTIES LABELS "eyelive;cli" TIMEOUT 300)
   endforeach()
 endif()
+
+# simulation of the assisted-annotation workflow on a labelled dataset (ground truth plays the expert); not a test: run by hand, see docs/AUTOLEARN_SIM.md
+add_executable(eyelive_autolearn_sim ${CMAKE_CURRENT_SOURCE_DIR}/tools/autolearn_sim.cpp)
+target_link_libraries(eyelive_autolearn_sim PRIVATE eyelive_engine eyelive_detect_net eyelive_annot)

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <filesystem>
+#include <future>
 #include <mutex>
 #include <thread>
 #include <map>
@@ -58,6 +59,7 @@ class Engine final : public IEngine {
         fast_ = DetectorRegistry::instance().create("fast_threshold", nullptr); active_id_ = cfg.detector_id;
         for (auto* d : {det_.get(), fast_.get()}) if (d) { d->reset(info_); d->set_scale(scale_); }
         det_prov_ = det_->info().provisional_latency_ms >= 0; slow_hop_ = std::max<int64_t>(1, int64_t(std::nearbyint(0.005 * rate))); slow_done_ = 0; analysed_ = 0;
+        if (al_job_.valid()) al_job_.wait(); al_job_ = std::future<std::vector<Event>>(); al_committed_ = 0; al_relabel_pending_ = false; al_dirty_ = false; al_training_ = false; al_gen_ = 0; al_labeler_ = al_cfg_.first_labeler; al_spans_.assign(1, {}); al_gen_names_.assign(1, al_cfg_.first_labeler); al_gen_train_.assign(1, AutoGeneration()); al_prev_model_.clear(); al_msg_.clear(); al_history_cache_.clear();
         expert_ = std::make_unique<ExpertLabels>(cfg.n_classes); finals_.clear(); provs_.clear(); n_final_ = n_prov_ = 0; last_final_off_ = -1; blink_start_ = -1; scanned_ = 0; id_counter_ = 0; lat_.clear();
         rate_measured_ = measured; rate_standard_ = standard; gaps_seen_ = gaps; recorder_full_ = false; src_done_ = false; scale_started_ = false; scale_confidence_ = 0; scale_low_ = false; warning_.clear();
         stop_ = false; running_ = true; last_cpu_ = plat::cpu_seconds(); last_cpu_wall_ = Clock::now(); cpu_pct_ = 0;
@@ -123,12 +125,16 @@ class Engine final : public IEngine {
 
     bool start_training(const TrainConfig& cfg_in, std::string* error) override {
         if (!rec_) { if (error) *error = "no recording"; return false; } if (trainer_->running()) { if (error) *error = "training already running"; return false; }
-        sync_expert(); TrainConfig cfg = cfg_in; cfg.deg_per_unit = scale_; if (running_) cfg.n_threads = 1;            // one core while the experiment runs; all cores after the session
-        const int64_t n = rec_->size(); std::vector<uint8_t> lab; expert_->render(0, n, true, lab); std::vector<TrainTrace> traces;
+        sync_expert(); const int64_t n = rec_->size(); std::vector<uint8_t> lab; expert_->render(0, n, true, lab); return start_training_on(cfg_in, lab, n, "no reviewed stretch of at least 0.25 s: mark the reviewed ranges in the Review tab", error);
+    }
+    // trains on the labelled stretches of `lab` (kIgnoreLabel = not used); positions are multiplied by the scale; one core at low priority while acquiring, all cores after the session
+    bool start_training_on(const TrainConfig& cfg_in, const std::vector<uint8_t>& lab, int64_t n, const char* none_msg, std::string* error) {
+        TrainConfig cfg = cfg_in; cfg.deg_per_unit = scale_; if (running_) cfg.n_threads = 1; std::vector<TrainTrace> traces;      // a session that records: one core, whatever was asked
+        n = std::min<int64_t>(n, int64_t(lab.size()));
         for (int64_t i = 0; i < n;) { if (lab[size_t(i)] == kIgnoreLabel) { ++i; continue; } int64_t e = i; while (e + 1 < n && lab[size_t(e + 1)] != kIgnoreLabel) ++e;
             if (e - i + 1 >= int64_t(0.25 * info_.rate_hz)) { TrainTrace t; t.rate_hz = info_.rate_hz; for (int64_t k = i; k <= e; ++k) { t.x.push_back(float(rec_->x(k) * scale_)); t.y.push_back(float(rec_->y(k) * scale_)); t.labels.push_back(lab[size_t(k)]); } traces.push_back(std::move(t)); } i = e + 1; }
-        if (traces.empty()) { if (error) *error = "no reviewed stretch of at least 0.25 s: mark the reviewed ranges in the Review tab"; return false; }
-        progress_ = TrainProgress(); const auto cb = [this](const TrainProgress& p) { std::lock_guard<std::mutex> l(train_mu_); progress_ = p; };
+        if (traces.empty()) { if (error) *error = none_msg; return false; }
+        { std::lock_guard<std::mutex> l(train_mu_); progress_ = TrainProgress(); } const auto cb = [this](const TrainProgress& p) { std::lock_guard<std::mutex> l(train_mu_); progress_ = p; };
         // the trainer's worker thread inherits the priority of the thread that starts it: start it from a helper thread with a lowered priority while acquiring
         const bool low = running_; std::thread h([&, low] { if (low) plat::lower_thread_priority(); trainer_->start(std::move(traces), cfg, cb); }); h.join(); return true;
     }
@@ -140,6 +146,38 @@ class Engine final : public IEngine {
         if (!trainer_->save_model(path, error)) return false;
         const std::string abs = fs::absolute(path).string(); DetectorRegistry::instance().add("user:" + name, [abs](std::string* e) { return make_user_model_detector(abs, e); });
         { std::lock_guard<std::mutex> l(infos_mu_); info_cache_.erase("user:" + name); } return true;
+    }
+    // ================================================================ assisted annotation (AutoLearnConfig in engine.hpp)
+    void autolearn_set(const AutoLearnConfig& c) override {
+        const bool was = al_cfg_.enabled; al_cfg_ = c; if (c.enabled && !was) { al_labeler_ = c.first_labeler; al_gen_ = 0; al_committed_ = 0; al_relabel_pending_ = false; al_dirty_ = false; al_spans_.assign(1, {}); al_history_.clear(); al_prev_model_.clear(); al_msg_.clear(); al_training_ = false; al_trainings_ = 0; al_gen_names_.assign(1, c.first_labeler); al_gen_train_.assign(1, AutoGeneration()); }
+    }
+    bool autolearn_train_now(std::string* error) override {
+        if (!al_cfg_.enabled || !rec_) { if (error) *error = "assisted annotation is off"; return false; } if (al_training_) { if (error) *error = "a model is already training"; return false; }
+        std::string err; const bool ok = al_begin_training(&err); if (!ok && error) *error = err; return ok;
+    }
+    AutoLearnStatus autolearn_poll(bool edited) override {
+        AutoLearnStatus st; st.enabled = al_cfg_.enabled; st.expected_epochs = al_cfg_.expected_epochs; if (!al_cfg_.enabled || !rec_) return st;
+        const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); if (edited) { al_last_edit_ = now; al_dirty_ = true; }
+        const int64_t n = rec_->size(); const double rate = info_.rate_hz > 0 ? info_.rate_hz : 1000.0;
+        // 1. a finished labelling job is applied (on this thread: it owns the expert labels)
+        if (al_job_.valid() && al_job_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) al_apply_job(al_job_.get());
+        // 2. labelling: new data in blocks, or the windows after the reviewed ones when a new model is ready
+        if (!al_job_.valid() && n > 0) {
+            const int64_t guard = running_ ? int64_t(0.3 * rate) : 0, chunk = std::max<int64_t>(10, int64_t(al_cfg_.chunk_s * rate)); int64_t from = al_committed_; bool start = false;
+            if (al_relabel_pending_) { int64_t rev_end = 0; for (const auto& r : expert_->reviewed()) rev_end = std::max(rev_end, r.second + 1); from = std::max(rev_end, int64_t(0)); start = n - guard - from >= 10; if (!start) al_relabel_pending_ = false; }
+            else start = (n - guard - from >= chunk) || (!running_ && n - from >= 10);
+            if (start) al_launch_job(from, n, guard);
+        }
+        // 3. training: after the quiet delay, and the progress of the running one
+        const TrainProgress tp = training_progress();
+        if (al_training_) { if (tp.finished) al_finish_training(tp); }
+        else if (al_dirty_ && now - al_last_edit_ >= al_cfg_.retrain_delay_s && !al_job_.valid()) { std::string err; if (!al_begin_training(&err)) { al_dirty_ = false; al_msg_ = err; } }
+        // 4. status
+        st.labeler = al_labeler_; st.generation = al_gen_; st.labeling = al_job_.valid(); st.training = al_training_; st.labelled_s = double(al_committed_) / rate; st.message = al_msg_;
+        if (al_training_) { st.epoch = tp.epoch; st.train_loss = tp.train_loss; st.val_loss = tp.val_loss; st.val_f1 = tp.val_event_f1; st.progress = std::min(0.99, double(tp.epoch) / std::max(1, al_cfg_.expected_epochs)); }
+        else if (al_dirty_) st.retrain_in_s = std::max(0.0, al_cfg_.retrain_delay_s - (now - al_last_edit_));
+        if (now - al_stats_time_ > 1.5) { al_stats_time_ = now; al_history_cache_ = al_generation_stats(n); } st.history = al_history_cache_;
+        return st;
     }
     void set_trigger_rules(const std::vector<TriggerRule>& rules) override { trig_->set_rules(rules); }
     std::vector<TriggerLogEntry> trigger_log() const override { return trig_->log_snapshot(); }
@@ -231,7 +269,56 @@ class Engine final : public IEngine {
     void apply_scale() { double c; { std::lock_guard<std::mutex> l(mu_); c = pending_scale_; pending_scale_ = 0; } if (c > 0) { scale_ = c; det_->set_scale(c); if (fast_) fast_->set_scale(c); sbw_->init(info_.rate_hz, c, info_.n_classes); } }
     void sync_expert() { if (!rec_ || !expert_) return; const int64_t n = rec_->size(); std::vector<uint8_t> out; expert_->render(0, n, true, out); for (int64_t i = 0; i < n; ++i) if (out[size_t(i)] != rec_->expert(i)) rec_->set_expert(i, out[size_t(i)]); }
 
+    // ---- assisted annotation helpers (all called on the poll thread)
+    void al_launch_job(int64_t from, int64_t n, int64_t guard) {
+        const double rate = info_.rate_hz > 0 ? info_.rate_hz : 1000.0; const int64_t ctx = std::min<int64_t>(from, int64_t(1.0 * rate)), a = from - ctx, to = n - guard; if (to - from < 5) return;
+        SessionInfo si = info_; si.deg_per_unit = scale_; auto part = std::make_shared<VectorTrace>(si); for (int64_t i = a; i < n; ++i) { Sample sm; sm.t = rec_->t(i); sm.x = rec_->x(i); sm.y = rec_->y(i); sm.flags = rec_->flags(i); part->push(sm); }
+        const std::string labeler = al_labeler_; const double sc = scale_; const int gen = al_gen_; al_job_from_ = from; al_job_to_ = to; al_job_gen_ = gen; al_job_relabel_ = al_relabel_pending_;
+        al_job_ = std::async(std::launch::async, [part, labeler, sc, a, from, gen, si]() { std::vector<Event> out; std::string err; auto d = DetectorRegistry::instance().create(labeler, &err); if (!d) return out;
+            d->reset(si); d->set_scale(sc); std::vector<Event> ev; d->detect_all(*part, ev); ev.erase(std::remove_if(ev.begin(), ev.end(), [](const Event& e) { return e.cls == 2; }), ev.end());
+            // blink events (class 2) come from the data, whatever the labeler: runs of >= 3 invalid or blink-flagged samples; a model's own class-2 events are dropped
+            int64_t bs = -1; const int64_t np = part->size(); for (int64_t i = 0; i <= np; ++i) { const bool bad = i < np && (!part->valid(i) || (part->flags(i) & kFlagBlink)); if (bad && bs < 0) bs = i; else if (!bad && bs >= 0) { if (i - bs >= 3) { Event b; b.onset = bs; b.offset = i - 1; b.t_onset = part->t(bs); b.t_offset = part->t(i - 1); b.cls = 2; ev.push_back(b); } bs = -1; } }
+            for (auto& e : ev) { e.onset += a; e.offset += a; e.provisional = false; e.origin = EventOrigin::Detector; e.model_version = uint32_t(gen); if (e.onset >= from) out.push_back(e); }
+            std::sort(out.begin(), out.end(), [](const Event& x, const Event& y) { return x.onset < y.onset; }); return out; });
+    }
+    void al_apply_job(std::vector<Event> ev) {            // events are the detections whose onset lies in [job_from, job_to): the region replaced is [job_from, max(job_to - 1, last offset)]
+        int64_t hi = al_job_to_ - 1; std::vector<Event> keep; for (auto& e : ev) if (e.onset <= hi) { keep.push_back(e); hi = std::max(hi, e.offset); }
+        expert_->apply_auto_labels(keep, al_job_from_, hi); if (int(al_spans_.size()) <= al_job_gen_) al_spans_.resize(size_t(al_job_gen_) + 1); al_spans_[size_t(al_job_gen_)].push_back({al_job_from_, hi});
+        if (al_job_relabel_) al_relabel_pending_ = false; al_committed_ = std::max(al_committed_, hi + 1); al_stats_time_ = -1e9;
+    }
+    bool al_begin_training(std::string* err) {
+        const int64_t n = std::min<int64_t>(rec_->size(), al_committed_); if (n < int64_t(2.0 * info_.rate_hz)) { if (err) *err = "wait for 2 s of labelled data before training"; return false; }
+        std::vector<uint8_t> lab; expert_->render(0, n - 1, false, lab); TrainConfig tc; tc.n_classes = al_cfg_.n_classes; tc.max_seconds_of_data = al_cfg_.max_seconds_of_data; tc.max_epochs = al_cfg_.max_epochs; tc.n_threads = al_cfg_.n_threads; tc.patience = 4; tc.seed = 1 + uint64_t(al_gen_);
+        if (!al_prev_model_.empty()) tc.init_model = al_prev_model_; else if (al_cfg_.pretrained_start) { const std::string d = models_dir(); tc.init_model = (d.empty() ? std::string("models") : d) + "/combined.bin"; }
+        if (!start_training_on(tc, lab, n, "no labelled data to train on", err)) return false; al_training_ = true; al_dirty_ = false; al_train_t0_ = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); al_msg_.clear(); return true;
+    }
+    void al_finish_training(const TrainProgress& tp) {
+        al_training_ = false; if (tp.failed || tp.cancelled) { al_msg_ = tp.failed ? "training failed: " + tp.message : "training cancelled"; return; }
+        const bool adopt = tp.val_event_f1 >= al_cfg_.adopt_min_f1; const std::string name = adopt ? "auto_g" + std::to_string(al_gen_ + 1) : "auto_t" + std::to_string(++al_trainings_); std::string err;
+        if (!deploy_trained_model(name, &err)) { al_msg_ = "cannot keep the model: " + err; return; }
+        namespace fs = std::filesystem; al_prev_model_ = (fs::absolute(fs::path(cfg_.session_path).parent_path() / "models" / ("user_" + name + ".bin"))).string();      // the next training continues from it, adopted or not
+        if (!adopt) { char b[160]; std::snprintf(b, sizeof b, "model not good enough yet (validation F1 %.2f < %.2f): still labelling with %s; it keeps learning from your next corrections", tp.val_event_f1, al_cfg_.adopt_min_f1, al_labeler_.c_str()); al_msg_ = b; return; }
+        al_gen_ += 1; al_labeler_ = "user:" + name; al_relabel_pending_ = true; if (int(al_gen_names_.size()) <= al_gen_) al_gen_names_.resize(size_t(al_gen_) + 1); al_gen_names_[size_t(al_gen_)] = al_labeler_;
+        if (int(al_gen_train_.size()) <= al_gen_) al_gen_train_.resize(size_t(al_gen_) + 1); AutoGeneration g; g.id = al_gen_; g.labeler = al_labeler_; g.val_f1 = tp.val_event_f1; g.val_kappa = tp.val_kappa; g.epochs = tp.epoch; g.train_s = tp.elapsed_s; al_gen_train_[size_t(al_gen_)] = g;
+        if (int(al_spans_.size()) <= al_gen_) al_spans_.resize(size_t(al_gen_) + 1); al_msg_ = "model " + std::to_string(al_gen_) + " ready (" + std::to_string(tp.epoch) + " epochs, validation F1 " + std::to_string(tp.val_event_f1).substr(0, 5) + ")"; al_stats_time_ = -1e9;
+    }
+    // per labeler: its labels against your final labels, on the windows it labelled AND you reviewed (events and samples are mapped onto the concatenation of those windows)
+    std::vector<AutoGeneration> al_generation_stats(int64_t n) const {
+        std::vector<AutoGeneration> out; const double rate = info_.rate_hz > 0 ? info_.rate_hz : 1000.0; const auto& rev = expert_->reviewed(); const auto& pre = expert_->prelabels(); const auto& fin = expert_->events();
+        for (size_t g = 0; g < al_spans_.size(); ++g) {
+            AutoGeneration ag; if (g < al_gen_train_.size()) ag = al_gen_train_[g]; ag.id = int(g); ag.labeler = g < al_gen_names_.size() ? al_gen_names_[g] : std::string();
+            std::vector<std::pair<int64_t, int64_t>> R; for (const auto& sp : al_spans_[g]) for (const auto& r : rev) { const int64_t a = std::max(sp.first, r.first), b = std::min(sp.second, r.second); if (a <= b) R.push_back({a, b}); }
+            std::sort(R.begin(), R.end()); std::vector<int64_t> base; int64_t tot = 0; for (const auto& r : R) { base.push_back(tot); tot += r.second - r.first + 1; }
+            auto remap = [&](const std::vector<Event>& v, bool only_gen) { std::vector<Event> m; for (const auto& e : v) { if (only_gen && e.model_version != uint32_t(g)) continue; for (size_t k = 0; k < R.size(); ++k) if (e.onset >= R[k].first && e.onset <= R[k].second) { Event q = e; q.onset = base[k] + (e.onset - R[k].first); q.offset = std::min(base[k] + (R[k].second - R[k].first), base[k] + (e.offset - R[k].first)); m.push_back(q); break; } } return m; };
+            ag.reviewed_s = double(tot) / rate; if (tot > 0) { const auto P = remap(pre, true), E = remap(fin, false); ag.n_events = int(P.size()); const AgreementStats a = agreement(P, E, tot, 1); ag.f1 = a.event_f1; ag.kappa = a.kappa; }
+            out.push_back(ag);
+        }
+        (void)n; return out;
+    }
+
     // state
+    AutoLearnConfig al_cfg_; std::string al_labeler_ = "hmm_accel", al_prev_model_, al_msg_; int al_gen_ = 0, al_job_gen_ = 0, al_trainings_ = 0; int64_t al_committed_ = 0, al_job_from_ = 0, al_job_to_ = 0; bool al_relabel_pending_ = false, al_job_relabel_ = false, al_dirty_ = false, al_training_ = false;
+    double al_last_edit_ = 0, al_train_t0_ = 0, al_stats_time_ = -1e9; std::future<std::vector<Event>> al_job_; std::vector<std::vector<std::pair<int64_t, int64_t>>> al_spans_; std::vector<std::string> al_gen_names_; std::vector<AutoGeneration> al_gen_train_, al_history_, al_history_cache_;
     std::mutex ana_mu_; std::condition_variable ana_cv_; bool det_prov_ = false; int64_t slow_hop_ = 5, slow_done_ = 0;
     mutable std::mutex mu_, life_mu_, infos_mu_, swap_mu_, swap_slot_mu_, train_mu_; SessionConfig cfg_; SessionInfo info_; std::atomic<double> scale_{1.0}; bool scale_estimated_ = false; double scale_confidence_ = 0; bool scale_low_ = false; double pending_scale_ = 0; std::string warning_;
     std::unique_ptr<Recorder> rec_; VectorTrace empty_; std::unique_ptr<ISource> src_; std::unique_ptr<ITriggerEngine> trig_; std::unique_ptr<StateBlockWriter> sbw_; std::unique_ptr<IDetector> det_, fast_; std::string active_id_;
