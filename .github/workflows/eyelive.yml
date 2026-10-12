@@ -28,7 +28,17 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ninja
       - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-      - run: cmake --build build
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build 2>&1 | tee build.log
+      - name: Publish compiler errors in the run summary (readable without signing in)
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "error" build.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=compile::$l"; done
+          { echo "### ${{ github.job }}: build errors"; echo '```'; grep -E "error|Error|undefined reference|FAILED" build.log | head -40 | cut -c1-400; echo '```'; echo "### last lines"; echo '```'; tail -60 build.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Test all eyelive modules
         shell: bash
         run: |
@@ -38,6 +48,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
+          grep -E "Failed|Timeout|\*\*\*|FAIL" ctest.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=test::$l"; done
           { echo "### ${{ matrix.os }}: failing tests"; echo '```'; grep -E "^\s*[0-9]+/[0-9]+ Test .*(Failed|Timeout|Exception)|The following tests FAILED|^\s+[0-9]+ - " ctest.log | head -40; echo '```'; echo "### last lines of the log"; echo '```'; tail -120 ctest.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
   sanitizers:
     runs-on: ubuntu-24.04
@@ -50,7 +61,17 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y ninja-build python3-numpy
       - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DUNEYE_SANITIZE=${{ matrix.sanitize }}
-      - run: cmake --build build
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build 2>&1 | tee build.log
+      - name: Publish compiler errors in the run summary (readable without signing in)
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "error" build.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=compile::$l"; done
+          { echo "### ${{ github.job }}: build errors"; echo '```'; grep -E "error|Error|undefined reference|FAILED" build.log | head -40 | cut -c1-400; echo '```'; echo "### last lines"; echo '```'; tail -60 build.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Test
         shell: bash
         run: |
@@ -60,6 +81,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
+          grep -E "Failed|Timeout|\*\*\*|FAIL|ThreadSanitizer|AddressSanitizer" ctest.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=test::$l"; done
           { echo "### sanitizer ${{ matrix.sanitize }}: failing tests"; echo '```'; grep -E "^\s*[0-9]+/[0-9]+ Test .*(Failed|Timeout|Exception)|The following tests FAILED|^\s+[0-9]+ - |WARNING: ThreadSanitizer|ERROR: AddressSanitizer|SUMMARY:" ctest.log | head -40; echo '```'; echo "### last lines of the log"; echo '```'; tail -150 ctest.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
   gui:
     runs-on: ubuntu-24.04
@@ -70,7 +92,17 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y ninja-build xorg-dev libgl1-mesa-dev libglu1-mesa-dev libxkbcommon-dev xvfb
       - run: sh cpp/third_party/fetch.sh
       - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DEYELIVE_BUILD_GUI=ON -DGLFW_BUILD_WAYLAND=OFF
-      - run: cmake --build build
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build 2>&1 | tee build.log
+      - name: Publish compiler errors in the run summary (readable without signing in)
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "error" build.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=compile::$l"; done
+          { echo "### ${{ github.job }}: build errors"; echo '```'; grep -E "error|Error|undefined reference|FAILED" build.log | head -40 | cut -c1-400; echo '```'; echo "### last lines"; echo '```'; tail -60 build.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: GUI smoke tests (offscreen frames; the image must not be uniform)
         run: |
           set -e
