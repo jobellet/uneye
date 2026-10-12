@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
     }
     // 8. forecast of the eye position: the gaze engine runs on the stream; its +10 / +20 ms forecasts are compared with what the eye really did and with the trivial "stay where you are" forecast
     {
-        auto e = make_engine(); SessionConfig c = cfg_sim("forecast.eyelive", 1000, 0.0, "hmm_accel"); c.source.seed = 5; std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); wait_done(*e, 60000); e->stop();
+        auto e = make_engine(); e->forecast_enable(true); SessionConfig c = cfg_sim("forecast.eyelive", 1000, 0.0, "hmm_accel"); c.source.seed = 5; std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); wait_done(*e, 60000); e->stop();
         const auto& tr = e->trace(); const int64_t N = tr.size(); std::vector<ForecastSample> fc; const size_t got = e->forecasts(0, N, fc); CHECK(e->forecast_available(), "forecast not available (models missing?)"); CHECK(got > size_t(0.9 * double(N)), "only %zu of %lld samples have a forecast", got, (long long)N);
         std::vector<double> err10, err20, stay20, err20_sacc, stay20_sacc; for (int64_t i = 500; i + 20 < N; ++i) { const auto& f = fc[size_t(i)]; if (!f.valid) continue; const double e20 = std::hypot(f.x20 - tr.x(i + 20), f.y20 - tr.y(i + 20)), e10 = std::hypot(f.x10 - tr.x(i + 10), f.y10 - tr.y(i + 10)), s20 = std::hypot(tr.x(i) - tr.x(i + 20), tr.y(i) - tr.y(i + 20));
             err10.push_back(e10); err20.push_back(e20); stay20.push_back(s20); if (std::hypot(tr.x(i + 20) - tr.x(i), tr.y(i + 20) - tr.y(i)) > 0.5) { err20_sacc.push_back(e20); stay20_sacc.push_back(s20); } }
@@ -158,6 +158,13 @@ int main(int argc, char** argv) {
         std::printf("forecast: %zu samples; median error %.4f deg at +10 ms, %.4f deg at +20 ms (stay-where-you-are: %.4f); during large movements (%zu samples) mean error %.3f deg against %.3f for staying\n", err20.size(), med(err10), med(err20), med(stay20), err20_sacc.size(), mean(err20_sacc), mean(stay20_sacc));
         CHECK(med(err20) < 0.2, "median +20 ms error %.3f deg", med(err20)); CHECK(err20_sacc.empty() || mean(err20_sacc) < mean(stay20_sacc), "the forecast is not better than staying during movements (%.3f vs %.3f)", mean(err20_sacc), mean(stay20_sacc));
         auto rd = Recorder::open_readonly(c.session_path, &err); StateBlock sb; if (rd && read_state_block(rd->state_block(), &sb)) { std::printf("state block prediction: valid %d at (%.2f, %.2f) +- (%.3f, %.3f)\n", int(sb.pred_valid), double(sb.pred_x), double(sb.pred_y), double(sb.pred_sigma_x), double(sb.pred_sigma_y)); }
+    }
+    // 9. live labels: a saccade is labelled while it is still happening (an open provisional event whose end follows the newest sample), with the label-free detector as the active one
+    {
+        auto e = make_engine(); SessionConfig c = cfg_sim("live.eyelive", 1000, 1.0, "hmm_accel"); std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); int64_t max_grown = 0, seen = 0; std::vector<int64_t> onsets; const auto t0 = std::chrono::steady_clock::now();
+        while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < 9.0) { const int64_t n = e->trace().size(); for (const auto& ev : e->events()) if (ev.provisional) { if (std::find(onsets.begin(), onsets.end(), ev.onset) == onsets.end()) { onsets.push_back(ev.onset); ++seen; } max_grown = std::max(max_grown, ev.offset - ev.onset); if (ev.offset > n) CHECK(false, "a provisional end beyond the recorded data"); } sleep_ms(2); }
+        e->stop(); std::printf("live labels: %lld provisional events seen while recording, the longest label reached %lld samples before the final event replaced it\n", (long long)seen, (long long)max_grown);
+        CHECK(seen >= 3, "only %lld provisional events seen", (long long)seen); CHECK(max_grown >= 8, "the provisional label never grew with the saccade (longest %lld samples)", (long long)max_grown);
     }
     std::error_code ec; fs::remove_all(fs::temp_directory_path() / "eyelive_engine_test", ec);
     std::printf(fails ? "FAILED\n" : "all engine tests passed\n"); return fails ? 1 : 0;

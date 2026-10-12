@@ -73,6 +73,7 @@ class IEngine {
     virtual std::vector<Event> events() const = 0;                          // detector events (final, then still-provisional ones), snapshot copy
     // forecast of the future eye position (see ForecastSample); empty / invalid when the stream is not at 1 kHz or the models are missing
     virtual bool forecast_available() const = 0;
+    virtual void forecast_enable(bool on) = 0;                 // the forecast costs CPU: it is computed only while someone asks for it (call every frame while it is displayed; it stops 3 s after the last call)
     virtual size_t forecasts(int64_t from, int64_t to, std::vector<ForecastSample>& out) const = 0;      // one entry for each sample of [from, to) (valid = false when not available)
     // detectors
     virtual std::vector<DetectorInfo> available_detectors() const = 0;

@@ -23,7 +23,7 @@ class ReviewTab final : public ITab {
     void draw(IEngine& engine) override {
         ExpertLabels& ex = engine.expert(); const ITraceView& tr = engine.trace(); const double rate = tr.info().rate_hz > 0 ? tr.info().rate_hz : 1000.0; const int64_t n = tr.size();
         if (redraw_ > 0) --redraw_; poll_job(); const bool busy = job_.valid();
-        if (!auto_inited_ && n > 0) { auto& st = gui::Settings::instance(); auto_cfg_.enabled = st.get_number("auto.enabled", 1) != 0; auto_cfg_.retrain_delay_s = st.get_number("auto.delay", 5.0); auto_cfg_.pretrained_start = st.get_number("auto.pretrained", 0) != 0; auto_cfg_.expected_epochs = int(st.get_number("auto.epochs", 50)); engine.autolearn_set(auto_cfg_); auto_inited_ = true; }
+        if (!auto_inited_ && n > 0) { auto& st = gui::Settings::instance(); auto_cfg_.enabled = st.get_number("auto.enabled", 0) != 0; auto_cfg_.retrain_delay_s = st.get_number("auto.delay", 5.0); auto_cfg_.pretrained_start = st.get_number("auto.pretrained", 0) != 0; auto_cfg_.expected_epochs = int(st.get_number("auto.epochs", 50)); engine.autolearn_set(auto_cfg_); auto_inited_ = true; }
         if (auto_inited_) { const bool was_training = al_.training; al_ = engine.autolearn_poll(edited_); edited_ = false; if (was_training != al_.training || al_.labeling) touch(); }
         if (busy) { ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "pre-labelling..."); ImGui::BeginDisabled(); }
         draw_auto_panel(engine, rate);

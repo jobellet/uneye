@@ -30,7 +30,7 @@ PlotHit draw_traces(const char* id, ImVec2 size, const ITraceView& tr, TimeView&
     const int64_t i0 = std::max<int64_t>(0, int64_t(std::floor(view.t0 * rate))), i1 = std::min<int64_t>(n, int64_t(std::ceil(view.t1 * rate)) + 1);
     // events as bands
     for (size_t k = 0; k < events.size(); ++k) { const Event& e = events[k]; if (e.offset < i0 || e.onset > i1) continue; const float xa = std::max(q0.x, hit.frame.sx(double(e.onset) / rate)), xb = std::min(q1.x, std::max(hit.frame.sx(double(e.offset + 1) / rate), hit.frame.sx(double(e.onset) / rate) + 1.0f));
-        dl->AddRectFilled(ImVec2(xa, q0.y), ImVec2(xb, q1.y), class_color(e.cls, e.provisional ? 0.12f : 0.22f)); if (int(k) == selected) { dl->AddRect(ImVec2(xa, q0.y), ImVec2(xb, q1.y), IM_COL32(255, 255, 255, 220), 0, 0, 1.5f); } }
+        dl->AddRectFilled(ImVec2(xa, q0.y), ImVec2(xb, q1.y), class_color(e.cls, e.provisional ? 0.34f : 0.22f)); if (e.provisional) dl->AddLine(ImVec2(xa, q0.y + 1), ImVec2(xb, q0.y + 1), class_color(e.cls), 3.0f); if (int(k) == selected) { dl->AddRect(ImVec2(xa, q0.y), ImVec2(xb, q1.y), IM_COL32(255, 255, 255, 220), 0, 0, 1.5f); } }
     // y range of the position traces over the visible samples
     float lo = 1e30f, hi = -1e30f; if (i1 > i0) { const int64_t step = std::max<int64_t>(1, (i1 - i0) / 4000); for (int64_t i = i0; i < i1; i += step) { const float x = tr.x(i), y = tr.y(i); if (std::isfinite(x)) { lo = std::min(lo, x); hi = std::max(hi, x); } if (std::isfinite(y)) { lo = std::min(lo, y); hi = std::max(hi, y); } } }
     if (!(hi > lo)) { lo = -1; hi = 1; } const float pad = 0.08f * (hi - lo) + 0.05f; lo -= pad; hi += pad; auto yy = [&](float v) { return a1.y - (v - lo) / (hi - lo) * (a1.y - q0.y); };

@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
     int frames_drawn = 0, extra_frames = 3, active = 0; auto last_render = Clock::now(); const double cpu0 = cpu_seconds(); const auto wall0 = Clock::now(); const int max_frames = args.shot.empty() ? -1 : args.frames; int frame_counter = 0;
     while (!glfwWindowShouldClose(win)) {
         if (args.run_seconds > 0 && std::chrono::duration<double>(Clock::now() - wall0).count() >= args.run_seconds) break;
-        const bool wants_live = !tabs.empty() && active >= 0 && active < int(tabs.size()) && tabs[size_t(active)]->wants_redraw(); const double timeout = wants_live ? 1.0 / 30.0 : 1.0;
+        const bool wants_live = !tabs.empty() && active >= 0 && active < int(tabs.size()) && tabs[size_t(active)]->wants_redraw(); const double timeout = wants_live ? 1.0 / 60.0 : 1.0;
         bool event = false; if (args.shot.empty()) { const auto t0 = Clock::now(); glfwWaitEventsTimeout(timeout); event = std::chrono::duration<double>(Clock::now() - t0).count() < timeout - 0.004; } else glfwPollEvents();
         const double since = std::chrono::duration<double>(Clock::now() - last_render).count();
         const bool render = !args.shot.empty() || event || extra_frames > 0 || wants_live || since >= 1.0; if (!render) continue;

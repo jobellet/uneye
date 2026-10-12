@@ -20,6 +20,7 @@ class PredictTab final : public ITab {
         ImGui::SeparatorText("Forecast of the eye position");
         if (!engine.forecast_available()) { ImGui::TextWrapped("No forecast: it needs a 1 kHz stream and the two causal networks (causal.bin, tcn_l10.bin in the models folder). Start a session with a 1 kHz source (the simulator, a replayed 1 kHz file or a 1 kHz tracker)."); }
         else {
+            engine.forecast_enable(true);
             ImGui::TextWrapped("Magenta (x) and yellow (y): where the eye will be 20 ms after each sample, drawn at that future time. Where the line meets the measurement (blue, orange) the forecast was right; at the right edge it extends 20 ms beyond the last measurement, with its 80 %% interval. During a saccade the forecast follows the movement because the landing tables use the speed profile of saccades; during fixation it stays close to the current position.");
             ImGui::SetNextItemWidth(160); ImGui::SliderFloat("window (s)", &span_, 0.2f, 5.0f, "%.1f"); ImGui::SameLine(); ImGui::Checkbox("+10 ms line", &show10_); ImGui::SameLine(); ImGui::Checkbox("interval", &band_);
             view_.t1 = double(n) / rate + 0.03; view_.t0 = view_.t1 - double(span_);

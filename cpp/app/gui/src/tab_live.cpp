@@ -18,7 +18,7 @@ class LiveTab final : public ITab {
         ImGui::SameLine(); ImGui::TextDisabled("wheel = zoom, drag = pan, double click = jump to the end");
         if (follow_ && n > 0) { view_.t1 = double(n) / rate; view_.t0 = view_.t1 - double(span_); } else span_ = float(view_.t1 - view_.t0);
         const std::vector<Event> events = engine.events(); const float avail_h = ImGui::GetContentRegionAvail().y; const float right_w = 330.0f; const float plot_w = std::max(200.0f, ImGui::GetContentRegionAvail().x - right_w - 12);
-        ImGui::BeginGroup(); gui::PlotStyle ps; ps.show_speed = show_speed_; gui::ForecastOverlay fo; if (show_fc_ && engine.forecast_available()) { const int64_t f0 = std::max<int64_t>(0, int64_t(std::floor(view_.t0 * rate)) - 30), f1 = std::min<int64_t>(n, int64_t(std::ceil(view_.t1 * rate)) + 2); if (f1 > f0) { engine.forecasts(f0, f1, fc_); fo.f = &fc_; fo.first = f0; ps.forecast = &fo; } } gui::PlotHit h = gui::draw_traces("live_plot", ImVec2(plot_w, std::max(160.0f, avail_h - 6)), tr, view_, events, -1, ps); if (h.hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f)) follow_ = false; ImGui::EndGroup();
+        ImGui::BeginGroup(); gui::PlotStyle ps; ps.show_speed = show_speed_; gui::ForecastOverlay fo; if (show_fc_ && engine.forecast_available()) { engine.forecast_enable(true); const int64_t f0 = std::max<int64_t>(0, int64_t(std::floor(view_.t0 * rate)) - 30), f1 = std::min<int64_t>(n, int64_t(std::ceil(view_.t1 * rate)) + 2); if (f1 > f0) { engine.forecasts(f0, f1, fc_); fo.f = &fc_; fo.first = f0; ps.forecast = &fo; } } gui::PlotHit h = gui::draw_traces("live_plot", ImVec2(plot_w, std::max(160.0f, avail_h - 6)), tr, view_, events, -1, ps); if (h.hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f)) follow_ = false; ImGui::EndGroup();
         ImGui::SameLine(); ImGui::BeginGroup(); const int64_t i1 = n, i0 = std::max<int64_t>(0, n - int64_t(map_ms_ * rate / 1000.0)); ImGui::Text("gaze (last %d ms)", map_ms_); gui::draw_gaze_map("gaze_map", ImVec2(right_w, right_w), tr, i0, i1, events);
         ImGui::Spacing(); ImGui::Text("events: %llu final, %llu provisional", (unsigned long long)st.events_final, (unsigned long long)st.events_provisional); ImGui::Text("latency p50 %.1f ms, p95 %.1f ms", st.detect_latency_ms_p50, st.detect_latency_ms_p95);
         if (ImGui::BeginTable("ev", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp, ImVec2(right_w, std::max(100.0f, ImGui::GetContentRegionAvail().y - 4)))) { ImGui::TableSetupColumn("t (s)"); ImGui::TableSetupColumn("class"); ImGui::TableSetupColumn("amp (deg)"); ImGui::TableSetupColumn("ms"); ImGui::TableHeadersRow();
@@ -27,7 +27,7 @@ class LiveTab final : public ITab {
         ImGui::EndGroup();
     }
  private:
-    std::vector<ForecastSample> fc_; bool show_fc_ = true; gui::TimeView view_{0, 5}; bool follow_ = true, show_speed_ = true, live_ = false; float span_ = 5.0f; int map_ms_ = 500;
+    std::vector<ForecastSample> fc_; bool show_fc_ = false; gui::TimeView view_{0, 5}; bool follow_ = true, show_speed_ = true, live_ = false; float span_ = 5.0f; int map_ms_ = 500;
 };
 static TabRegistrar reg([] { return std::make_unique<LiveTab>(); });
 }  // namespace
