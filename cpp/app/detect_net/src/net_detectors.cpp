@@ -191,6 +191,7 @@ std::unique_ptr<IDetector> make_detector_with_engine(EngineFactory factory, cons
 
 void set_models_dir(const std::string& dir) { std::lock_guard<std::mutex> l(g_mu); g_dir = dir; }
 std::string models_dir() { std::lock_guard<std::mutex> l(g_mu); return g_dir; }
+std::string find_model_file(const std::string& name) { return find_model(name); }
 
 std::unique_ptr<IDetector> make_user_model_detector(const std::string& path, std::string* error) {
     const std::string bin = find_model(path); if (bin.empty()) { if (error) *error = "model file not found: " + path; return nullptr; }

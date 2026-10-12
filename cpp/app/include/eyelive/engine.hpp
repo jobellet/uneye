@@ -24,6 +24,10 @@ struct SessionConfig {
     int n_classes = 3;                  // fixation, saccade, blink (blink events come from the invalid-sample runs flagged by the input guard)
 };
 
+// Forecast of the eye position made at every sample by the gaze engine (cpp/include/uneye/gaze_engine.hpp: two causal networks + fixed landing tables, 1 kHz only). Positions are in STREAM units like the trace;
+// the forecast of sample i describes the position of sample i + 10 ms and i + 20 ms. The scales are those of a Laplace distribution: an 80 % interval is +- 1.61 scale.
+struct ForecastSample { float x10 = 0, y10 = 0, x20 = 0, y20 = 0, sx10 = 0, sy10 = 0, sx20 = 0, sy20 = 0; bool valid = false, ballistic = false; };
+
 struct EngineStats {
     bool running = false; double rate_hz_measured = 0; double rate_hz_standard = 0; uint64_t samples = 0, dropped_packets = 0, gaps = 0;
     double recorded_s = 0, capacity_s = 0; uint64_t bytes_allocated = 0;
@@ -67,6 +71,9 @@ class IEngine {
     virtual EngineStats stats() const = 0;
     virtual const ITraceView& trace() const = 0;                            // valid between start() and stop(); also after stop() until the next start()
     virtual std::vector<Event> events() const = 0;                          // detector events (final, then still-provisional ones), snapshot copy
+    // forecast of the future eye position (see ForecastSample); empty / invalid when the stream is not at 1 kHz or the models are missing
+    virtual bool forecast_available() const = 0;
+    virtual size_t forecasts(int64_t from, int64_t to, std::vector<ForecastSample>& out) const = 0;      // one entry for each sample of [from, to) (valid = false when not available)
     // detectors
     virtual std::vector<DetectorInfo> available_detectors() const = 0;
     virtual bool set_detector(const std::string& id, std::string* error) = 0;     // hot swap at a safe moment; the previous events are kept (provenance)

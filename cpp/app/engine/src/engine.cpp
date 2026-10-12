@@ -14,6 +14,8 @@
 #include "eyelive/fast_detector.hpp"
 #include "eyelive/hmm_detector.hpp"
 #include "eyelive/net_detectors.hpp"
+#include "uneye/causal_engine.hpp"
+#include "uneye/gaze_engine.hpp"
 #include "eyelive/recorder.hpp"
 #include "eyelive/state_io.hpp"
 #include "eyelive/trigger_clock.hpp"
@@ -62,6 +64,11 @@ class Engine final : public IEngine {
         if (al_job_.valid()) al_job_.wait(); al_job_ = std::future<std::vector<Event>>(); al_committed_ = 0; al_relabel_pending_ = false; al_dirty_ = false; al_training_ = false; al_gen_ = 0; al_labeler_ = al_cfg_.first_labeler; al_spans_.assign(1, {}); al_gen_names_.assign(1, al_cfg_.first_labeler); al_gen_train_.assign(1, AutoGeneration()); al_prev_model_.clear(); al_msg_.clear(); al_history_cache_.clear();
         expert_ = std::make_unique<ExpertLabels>(cfg.n_classes); finals_.clear(); provs_.clear(); n_final_ = n_prov_ = 0; last_final_off_ = -1; blink_start_ = -1; scanned_ = 0; id_counter_ = 0; lat_.clear();
         rate_measured_ = measured; rate_standard_ = standard; gaps_seen_ = gaps; recorder_full_ = false; src_done_ = false; scale_started_ = false; scale_confidence_ = 0; scale_low_ = false; warning_.clear();
+        { std::lock_guard<std::mutex> fl(fc_mu_); gaze_.reset(); fc_ring_.assign(kForecastRing, ForecastSample()); gaze_n_ = 0; }
+        if (std::fabs(rate - 1000.0) < 50.0) {                            // forecast of the eye position: needs the two causal networks of the gaze engine and a 1 kHz stream
+            const std::string fast = find_model_file("causal.bin"), refine = find_model_file("tcn_l10.bin");
+            if (!fast.empty() && !refine.empty()) try { uneye::gaze::Models m; m.fast = uneye::make_causal_engine(fast); m.refine = uneye::make_causal_engine(refine); m.refine_delay = 10; uneye::gaze::Config gc; gc.fs_hz = rate; std::lock_guard<std::mutex> fl(fc_mu_); gaze_ = std::make_unique<uneye::gaze::GazeEngine>(gc, std::move(m)); } catch (const std::exception&) {}
+        }
         stop_ = false; running_ = true; last_cpu_ = plat::cpu_seconds(); last_cpu_wall_ = Clock::now(); cpu_pct_ = 0;
         trig_->start();
         src_thread_ = std::thread([this, head] { source_loop(head); }); ana_thread_ = std::thread([this] { analysis_loop(); });
@@ -231,6 +238,7 @@ class Engine final : public IEngine {
                 for (auto& e : prov) { measure_latency(n); publish_prov(e); } for (auto& e : fprov) { measure_latency(n); publish_prov(e); }
                 // blink events from runs of invalid samples
                 for (int64_t i = scanned_; i < n; ++i) { const bool bad = !rec_->valid(i) || (rec_->flags(i) & kFlagBlink); if (bad && blink_start_ < 0) blink_start_ = i; else if (!bad && blink_start_ >= 0) { if (i - blink_start_ >= 3) publish_final(make_blink(blink_start_, i - 1)); blink_start_ = -1; } } scanned_ = n;
+                feed_gaze(n);
                 const int64_t i = n - 1; Sample s; s.t = rec_->t(i); s.x = float(rec_->x(i) * scale_); s.y = float(rec_->y(i) * scale_); s.flags = rec_->flags(i); const double sp = i >= 2 ? std::hypot(rec_->x(i) - rec_->x(i - 2), rec_->y(i) - rec_->y(i - 2)) * scale_ * info_.rate_hz / 2.0 : 0.0;
                 sbw_->publish_sample(s, float(sp), rec_->label(i), blink_start_ >= 0 || !provs_empty(), uint64_t(n)); analysed_ = n;
             }
@@ -244,6 +252,26 @@ class Engine final : public IEngine {
     bool provs_empty() const { std::lock_guard<std::mutex> l(mu_); return provs_.empty(); }
     void measure_latency(int64_t n) { const double ms = (trigger_host_now_s() - arrival(n - 1)) * 1000.0; std::lock_guard<std::mutex> l(mu_); lat_.push_back(ms); if (lat_.size() > 1024) lat_.erase(lat_.begin(), lat_.begin() + 512); }
 
+    // ---- forecast of the future eye position: every new sample goes through the gaze engine; the forecast is stored (stream units) in a ring read by the GUI
+    void feed_gaze(int64_t n) {
+        if (!gaze_ || n <= gaze_n_) return; const double scv = scale_.load(); const double sc = scv > 0 ? scv : 1.0; std::vector<ForecastSample> batch; batch.reserve(size_t(n - gaze_n_)); float lx = 0, ly = 0, lsx = 0, lsy = 0; bool have = false;
+        for (int64_t i = gaze_n_; i < n; ++i) {
+            uneye::gaze::Sample gs; gs.t_us = rec_->t(i) * 1e6; const bool ok = rec_->valid(i) && std::isfinite(rec_->x(i)) && std::isfinite(rec_->y(i)); gs.x_deg = ok ? rec_->x(i) * sc : std::nan(""); gs.y_deg = ok ? rec_->y(i) * sc : std::nan(""); uneye::gaze::Output o; gaze_->push(gs, o);
+            ForecastSample f; if (o.forecast.at10.valid && o.forecast.at20.valid) { f.valid = true; f.ballistic = o.forecast.ballistic; f.x10 = float(o.forecast.at10.x / sc); f.y10 = float(o.forecast.at10.y / sc); f.x20 = float(o.forecast.at20.x / sc); f.y20 = float(o.forecast.at20.y / sc);
+                f.sx10 = float(o.forecast.at10.scale_x / sc); f.sy10 = float(o.forecast.at10.scale_y / sc); f.sx20 = float(o.forecast.at20.scale_x / sc); f.sy20 = float(o.forecast.at20.scale_y / sc); lx = f.x20; ly = f.y20; lsx = f.sx20; lsy = f.sy20; have = true; }
+            batch.push_back(f);
+        }
+        { std::lock_guard<std::mutex> l(fc_mu_); for (size_t k = 0; k < batch.size(); ++k) fc_ring_[size_t(gaze_n_ + int64_t(k)) % kForecastRing] = batch[k]; gaze_n_ = n; }
+        if (have && sbw_) sbw_->publish_prediction(float(lx * sc), float(ly * sc), float(lsx * sc), float(lsy * sc), rec_->t(n - 1) + 0.020);       // landing prediction in the state block (degrees like the other fields), valid at t + 20 ms
+    }
+public:
+    bool forecast_available() const override { std::lock_guard<std::mutex> l(fc_mu_); return gaze_ != nullptr; }
+    size_t forecasts(int64_t from, int64_t to, std::vector<ForecastSample>& out) const override {
+        out.assign(size_t(std::max<int64_t>(0, to - from)), ForecastSample()); std::lock_guard<std::mutex> l(fc_mu_); if (!gaze_) return 0; size_t got = 0;
+        for (int64_t i = std::max<int64_t>(from, 0); i < to; ++i) if (i < gaze_n_ && gaze_n_ - i <= int64_t(kForecastRing)) { out[size_t(i - from)] = fc_ring_[size_t(i) % kForecastRing]; got += out[size_t(i - from)].valid; }
+        return got;
+    }
+private:
     // ---- hot swap: the new detector runs on its own thread over the whole recording so far; the analysis thread installs it when it has caught up and drops the events it already published
     void catch_up(std::unique_ptr<IDetector> d, const std::string& id, SessionInfo si) {
         d->reset(si); d->set_scale(si.deg_per_unit); std::vector<Event> f, p; int64_t k = 0;
@@ -319,6 +347,7 @@ class Engine final : public IEngine {
     // state
     AutoLearnConfig al_cfg_; std::string al_labeler_ = "hmm_accel", al_prev_model_, al_msg_; int al_gen_ = 0, al_job_gen_ = 0, al_trainings_ = 0; int64_t al_committed_ = 0, al_job_from_ = 0, al_job_to_ = 0; bool al_relabel_pending_ = false, al_job_relabel_ = false, al_dirty_ = false, al_training_ = false;
     double al_last_edit_ = 0, al_train_t0_ = 0, al_stats_time_ = -1e9; std::future<std::vector<Event>> al_job_; std::vector<std::vector<std::pair<int64_t, int64_t>>> al_spans_; std::vector<std::string> al_gen_names_; std::vector<AutoGeneration> al_gen_train_, al_history_, al_history_cache_;
+    static constexpr size_t kForecastRing = 65536; mutable std::mutex fc_mu_; std::unique_ptr<uneye::gaze::GazeEngine> gaze_; std::vector<ForecastSample> fc_ring_; int64_t gaze_n_ = 0;
     std::mutex ana_mu_; std::condition_variable ana_cv_; bool det_prov_ = false; int64_t slow_hop_ = 5, slow_done_ = 0;
     mutable std::mutex mu_, life_mu_, infos_mu_, swap_mu_, swap_slot_mu_, train_mu_; SessionConfig cfg_; SessionInfo info_; std::atomic<double> scale_{1.0}; bool scale_estimated_ = false; double scale_confidence_ = 0; bool scale_low_ = false; double pending_scale_ = 0; std::string warning_;
     std::unique_ptr<Recorder> rec_; VectorTrace empty_; std::unique_ptr<ISource> src_; std::unique_ptr<ITriggerEngine> trig_; std::unique_ptr<StateBlockWriter> sbw_; std::unique_ptr<IDetector> det_, fast_; std::string active_id_;

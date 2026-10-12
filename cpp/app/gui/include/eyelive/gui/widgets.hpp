@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include "imgui.h"
+#include "eyelive/engine.hpp"
 #include "eyelive/trace.hpp"
 #include "eyelive/types.hpp"
 
@@ -22,7 +23,11 @@ struct PlotFrame {                                               // mapping betw
 };
 struct PlotHit { bool hovered = false; double t = 0; int64_t sample = -1; bool clicked = false; PlotFrame frame; };
 
-struct PlotStyle { bool show_speed = true; bool interactive = true; bool pan = true; float speed_fraction = 0.3f; };
+struct ForecastOverlay {                                  // the forecast line: the forecast made at sample i for i + 20 ms is drawn at time t_i + 20 ms, so it can be compared with the measurement at that time and it extends 20 ms beyond the last measurement
+    const std::vector<ForecastSample>* f = nullptr; int64_t first = 0;   // f[k] is the forecast of sample first + k
+    bool show20 = true, show10 = false, band = true;
+};
+struct PlotStyle { const ForecastOverlay* forecast = nullptr; bool show_speed = true; bool interactive = true; bool pan = true; float speed_fraction = 0.3f; };
 
 // x and y position traces (degrees) with the events as shaded bands, optionally the speed below. `selected` highlights one event of `events` (-1 = none). Wheel = zoom around the cursor, drag = pan (when interactive).
 PlotHit draw_traces(const char* id, ImVec2 size, const ITraceView& tr, TimeView& view, const std::vector<Event>& events, int selected, const PlotStyle& style = PlotStyle());

@@ -51,7 +51,18 @@ PlotHit draw_traces(const char* id, ImVec2 size, const ITraceView& tr, TimeView&
     dl->PushClipRect(ImVec2(q0.x, q0.y), ImVec2(q1.x, q1.y), true); series(0, IM_COL32(90, 180, 255, 255), ImVec2(q0.x, q0.y), a1, lo, hi); series(1, IM_COL32(255, 170, 70, 255), ImVec2(q0.x, q0.y), a1, lo, hi);
     if (style.show_speed) { float sm = 10.0f; if (i1 > i0) { const int64_t step = std::max<int64_t>(1, (i1 - i0) / 4000); for (int64_t i = i0 + 1; i + 1 < i1; i += step) sm = std::max(sm, float(std::hypot(tr.x(i + 1) - tr.x(i - 1), tr.y(i + 1) - tr.y(i - 1)) * rate / 2.0)); } sm = std::min(sm * 1.05f, 1500.0f);
         dl->AddLine(ImVec2(q0.x, s0.y), ImVec2(q1.x, s0.y), IM_COL32(60, 62, 70, 255)); series(2, IM_COL32(120, 220, 140, 255), s0, q1, 0.0f, sm); char b[24]; std::snprintf(b, sizeof b, "%.0f deg/s", sm); dl->AddText(ImVec2(q0.x + 4, s0.y), IM_COL32(120, 220, 140, 200), b); }
-    dl->PopClipRect(); dl->AddText(ImVec2(q1.x - 70, q0.y + 2), IM_COL32(90, 180, 255, 255), "x"); dl->AddText(ImVec2(q1.x - 55, q0.y + 2), IM_COL32(255, 170, 70, 255), "y");
+    if (style.forecast && style.forecast->f && !style.forecast->f->empty()) {         // forecast lines (magenta = x, yellow = y), time-shifted so that each point is drawn where the eye will be
+        const ForecastOverlay& fo = *style.forecast; auto line = [&](bool use20, bool is_x, ImU32 col, float th) {
+            std::vector<ImVec2> pts; const double lead = use20 ? 0.020 : 0.010; pts.reserve(size_t(cols));
+            for (int c = 0; c < cols; ++c) { const double tc = view.t0 + (c + 1) * (view.t1 - view.t0) / cols; const int64_t i = int64_t(std::floor((tc - lead) * rate)) - fo.first; if (i < 0 || i >= int64_t(fo.f->size())) continue; const ForecastSample& f = (*fo.f)[size_t(i)]; if (!f.valid) continue;
+                const float v = use20 ? (is_x ? f.x20 : f.y20) : (is_x ? f.x10 : f.y10); pts.push_back(ImVec2(q0.x + float(c), std::max(q0.y, std::min(a1.y, yy(v))))); }
+            if (pts.size() > 1) dl->AddPolyline(pts.data(), int(pts.size()), col, 0, th); };
+        if (fo.show10) { line(false, true, IM_COL32(255, 120, 255, 150), 1.0f); line(false, false, IM_COL32(255, 235, 120, 150), 1.0f); }
+        if (fo.show20) { line(true, true, IM_COL32(255, 60, 255, 255), 2.0f); line(true, false, IM_COL32(255, 230, 50, 255), 2.0f); }
+        if (fo.band && fo.show20 && n > 0) { const int64_t i = n - 1 - fo.first; if (i >= 0 && i < int64_t(fo.f->size()) && (*fo.f)[size_t(i)].valid) { const ForecastSample& f = (*fo.f)[size_t(i)]; const float xe = hit.frame.sx(double(n - 1) / rate + 0.020);        // the newest forecast with its 80 % interval
+            for (int ax = 0; ax < 2; ++ax) { const float v = ax == 0 ? f.x20 : f.y20, sc = 1.61f * (ax == 0 ? f.sx20 : f.sy20); dl->AddLine(ImVec2(xe, yy(v + sc)), ImVec2(xe, yy(v - sc)), ax == 0 ? IM_COL32(255, 60, 255, 255) : IM_COL32(255, 230, 50, 255), 2.0f); dl->AddCircleFilled(ImVec2(xe, yy(v)), 3.5f, ax == 0 ? IM_COL32(255, 60, 255, 255) : IM_COL32(255, 230, 50, 255)); } } }
+    }
+    dl->PopClipRect(); dl->AddText(ImVec2(q1.x - 70, q0.y + 2), IM_COL32(90, 180, 255, 255), "x"); dl->AddText(ImVec2(q1.x - 55, q0.y + 2), IM_COL32(255, 170, 70, 255), "y"); if (style.forecast && style.forecast->f && style.forecast->show20) { dl->AddText(ImVec2(q1.x - 190, q0.y + 2), IM_COL32(255, 60, 255, 255), "x+20ms"); dl->AddText(ImVec2(q1.x - 125, q0.y + 2), IM_COL32(255, 230, 50, 255), "y+20ms"); }
     // cursor
     if (hov) { const ImVec2 m = ImGui::GetIO().MousePos; if (m.x >= q0.x && m.x <= q1.x) { hit.hovered = true; hit.t = hit.frame.tx(m.x); hit.sample = std::max<int64_t>(0, std::min<int64_t>(n - 1, int64_t(hit.t * rate))); dl->AddLine(ImVec2(m.x, q0.y), ImVec2(m.x, q1.y), IM_COL32(255, 255, 255, 90)); hit.clicked = ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f); } }
     return hit;

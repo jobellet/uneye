@@ -25,6 +25,13 @@ class MockEngine final : public IEngine {
     }
     const ITraceView& trace() const override { return view_; }
     std::vector<Event> events() const override { std::vector<Event> v; for (const auto& e : events_) if (e.offset < visible()) v.push_back(e); return v; }
+    bool forecast_available() const override { return true; }
+    size_t forecasts(int64_t from, int64_t to, std::vector<ForecastSample>& out) const override {        // the future of the simulated trace plus an error that grows during saccades (a stand-in with the right shape, not a prediction)
+        out.assign(size_t(std::max<int64_t>(0, to - from)), ForecastSample()); size_t got = 0; const int64_t vis = visible();
+        for (int64_t i = std::max<int64_t>(from, 0); i < to && i + 20 < int64_t(sim_.x.size()); ++i) { if (i >= vis) break; ForecastSample f; const bool sacc = sim_.label[size_t(i)] != 0; const double e = sacc ? 0.5 : 0.02; const double w = std::sin(double(i) * 0.37);
+            f.valid = true; f.ballistic = sacc; f.x10 = float(sim_.x[size_t(i + 10)] + e * 0.4 * w); f.y10 = float(sim_.y[size_t(i + 10)] - e * 0.4 * w); f.x20 = float(sim_.x[size_t(i + 20)] + e * w); f.y20 = float(sim_.y[size_t(i + 20)] - e * w); f.sx10 = f.sy10 = float(0.3 * e + 0.02); f.sx20 = f.sy20 = float(0.5 * e + 0.03); out[size_t(i - from)] = f; ++got; }
+        return got;
+    }
     std::vector<DetectorInfo> available_detectors() const override {
         std::vector<DetectorInfo> v; auto add = [&](const char* id, const char* name, int c, bool causal, double d, double p) { DetectorInfo i; i.id = id; i.name = name; i.n_classes = c; i.causal = causal; i.decision_delay_ms = d; i.provisional_latency_ms = p; v.push_back(i); };
         add("hmm_accel", "Label-free HMM + acceleration boundaries", 2, false, 115, -1); add("fast_threshold", "Fast threshold (provisional events)", 2, true, 5, 3); add("unet_1+2+3", "U'n'Eye (datasets 1+2+3)", 2, false, 116, -1);

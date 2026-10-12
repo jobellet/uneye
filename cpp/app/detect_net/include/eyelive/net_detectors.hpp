@@ -11,6 +11,7 @@ namespace eyelive {
 
 void set_models_dir(const std::string& dir);                  // process-wide default used by the registered detectors and by make_user_model_detector for relative paths
 std::string models_dir();
+std::string find_model_file(const std::string& name);         // full path of a model file (models directory, $EYELIVE_MODELS, ./models, ...), empty when missing
 
 // A model written by the trainer: <path> = the .bin file, <path without .bin>.json = metadata (classes, window, deg_per_unit). nullptr + message when the file is missing or invalid.
 std::unique_ptr<IDetector> make_user_model_detector(const std::string& path, std::string* error);
