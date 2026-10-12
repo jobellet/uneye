@@ -8,7 +8,7 @@ on:
     paths: ['cpp/app/**', 'cpp/CMakeLists.txt', '.github/workflows/eyelive-release.yml']
 jobs:
   build:
-    if: github.event_name != 'pull_request' || matrix.os == 'windows-2022'
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -19,6 +19,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}      # the Windows build has never been run by the authors: its failure does not block the other platforms
     timeout-minutes: 60
+    env:
+      HAVE_WIN_CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' }}
+      HAVE_MAC_CERT: ${{ secrets.MACOS_CERT_P12_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Version
@@ -52,7 +55,7 @@ jobs:
         if: matrix.name == 'linux'
         run: xvfb-run -a build/app/gui/eyelive --mock --shot /tmp/a.ppm --frames 5
       - name: Sign (Windows, skipped without secret)
-        if: matrix.name == 'windows' && env.WINDOWS_CERT_PFX_BASE64 != ''
+        if: matrix.name == 'windows' && env.HAVE_WIN_CERT == 'true'
         env:
           WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
@@ -61,10 +64,10 @@ jobs:
           [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
           Get-ChildItem -Recurse build -Include eyelive.exe,eyelive_cli.exe | ForEach-Object { signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f cert.pfx /p $env:WINDOWS_CERT_PASSWORD $_.FullName }
       - name: Sign and notarize (macOS, skipped without secrets)
-        if: matrix.name == 'macos' && env.MACOS_CERT_P12_BASE64 != ''
+        if: matrix.name == 'macos' && env.HAVE_MAC_CERT == 'true'
         env:
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-        run: echo "see cpp/app/packaging/SIGNING.md: certificate import, codesign --options runtime, notarytool"
+        run: echo "see cpp/app/packaging/SIGNING.md for the certificate import, codesign --options runtime and notarytool"
       - name: Package (zip, SHA-256, dependency check, sizes)
         shell: bash
         run: python3 cpp/app/packaging/package.py --build-dir build --os ${{ matrix.name }} --version "${{ steps.ver.outputs.version }}" --out dist
@@ -74,6 +77,19 @@ jobs:
           path: |
             dist/*.zip
             dist/*.zip.sha256
+  windows-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-2022
+    continue-on-error: true            # experimental until the first green run
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch Dear ImGui and GLFW
+        shell: bash
+        run: sh cpp/third_party/fetch.sh
+      - run: cmake -S cpp -B build -G "Visual Studio 17 2022" -A x64 -DEYELIVE_PORTABLE=ON -DEYELIVE_BUILD_GUI=ON
+      - run: cmake --build build --config Release --parallel
+      - run: ctest --test-dir build -C Release -L eyelive --output-on-failure --timeout 900
   release:
     if: github.ref_type == 'tag'
     needs: build
