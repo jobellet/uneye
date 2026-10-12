@@ -54,5 +54,12 @@ jobs:
       - run: sh cpp/third_party/fetch.sh
       - run: cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DEYELIVE_BUILD_GUI=ON -DGLFW_BUILD_WAYLAND=OFF
       - run: cmake --build build
-      - name: GUI smoke test (renders frames offscreen, skipped until the shell exists)
-        run: if [ -x build/app/gui/eyelive ]; then xvfb-run -a build/app/gui/eyelive --shot /tmp/shot.ppm --frames 5; else echo "no GUI target yet"; fi
+      - name: GUI smoke tests (offscreen frames; the image must not be uniform)
+        run: |
+          set -e
+          xvfb-run -a build/app/gui/eyelive --mock --shot /tmp/a.ppm --frames 5
+          python3 - <<'PY'
+          d = open('/tmp/a.ppm', 'rb').read(); body = d[d.index(b'255\n') + 4:]; assert len(set(body[i] for i in range(0, len(body), 997))) > 8, 'uniform image'; print('shot ok', len(d), 'bytes')
+          PY
+          xvfb-run -a build/app/gui/eyelive --demo --tab Review --shot /tmp/b.ppm --frames 5
+          ctest --test-dir build -L gui --output-on-failure

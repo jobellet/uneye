@@ -1,5 +1,5 @@
-# Dear ImGui front-end (tasks T12-T17). The shell (T12) owns this file's structure: it builds libraries `imgui` and `glfw` from cpp/third_party and the executable `eyelive` from every gui/src/*.cpp.
-# Tabs are plain .cpp files under gui/src/ that register themselves (eyelive::TabRegistrar); nobody else edits this file.
+# Dear ImGui front-end (tasks T12-T17). All sources under src/ are compiled straight into the executable `eyelive` (not into a static library: the tabs register themselves through static objects, which a linker would drop from an archive).
+# Builds: imgui + glfw from cpp/third_party (sh cpp/third_party/fetch.sh first), the real engine (module `engine`) and the MockEngine used by --mock and by the CI screenshots.
 enable_language(C)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -13,10 +13,25 @@ target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 target_link_libraries(imgui PUBLIC glfw)
 if(APPLE)
   target_link_libraries(imgui PUBLIC "-framework OpenGL")
+elseif(WIN32)
+  target_link_libraries(imgui PUBLIC opengl32)
+else()
+  find_package(OpenGL REQUIRED)
+  target_link_libraries(imgui PUBLIC OpenGL::GL)
 endif()
 file(GLOB GUI_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 if(GUI_SRC)
-  add_library(eyelive_gui_lib STATIC ${GUI_SRC})
-  target_include_directories(eyelive_gui_lib PUBLIC ${EYELIVE_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  target_link_libraries(eyelive_gui_lib PUBLIC imgui eyelive_contracts)
+  add_executable(eyelive ${GUI_SRC})
+  target_include_directories(eyelive PRIVATE ${EYELIVE_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/include)
+  target_link_libraries(eyelive PRIVATE imgui eyelive_contracts eyelive_engine eyelive_recorder eyelive_trigger eyelive_annot eyelive_calib eyelive_detect_net)
+  if(MSVC)
+    target_link_options(eyelive PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
+  endif()
 endif()
+
+# helpers without a window (ctest label gui): sizing text and screen geometry of the Acquire tab
+add_executable(eyelive_gui_test_acquire_text ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_acquire_text.cpp)
+target_include_directories(eyelive_gui_test_acquire_text PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(eyelive_gui_test_acquire_text PRIVATE eyelive_recorder)
+add_test(NAME eyelive_gui_test_acquire_text COMMAND eyelive_gui_test_acquire_text)
+set_tests_properties(eyelive_gui_test_acquire_text PROPERTIES LABELS "eyelive;gui")
