@@ -20,7 +20,8 @@ PlotHit draw_traces(const char* id, ImVec2 size, const ITraceView& tr, TimeView&
     // interaction: wheel zoom around the cursor, drag pan
     if (style.interactive && hov) {
         const ImGuiIO& io = ImGui::GetIO(); if (io.MouseWheel != 0 && q1.x > q0.x) { const double tc = view.t0 + double(io.MousePos.x - q0.x) / double(q1.x - q0.x) * (view.t1 - view.t0); const double f = std::pow(0.85, double(io.MouseWheel)); view.t0 = tc - (tc - view.t0) * f; view.t1 = tc + (view.t1 - tc) * f; }
-        if (style.pan && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f) && q1.x > q0.x) { const double dt = -double(io.MouseDelta.x) / double(q1.x - q0.x) * (view.t1 - view.t0); view.t0 += dt; view.t1 += dt; }
+        if (io.MouseWheelH != 0 && q1.x > q0.x) { const double dt = -double(io.MouseWheelH) * 0.08 * (view.t1 - view.t0); view.t0 += dt; view.t1 += dt; }
+        if (style.pan && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f) && q1.x > q0.x) { const double dt = -double(io.MouseDelta.x) / double(q1.x - q0.x) * (view.t1 - view.t0); view.t0 += dt; view.t1 += dt; }
         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) { const double span = view.t1 - view.t0; view.t1 = double(n) / rate; view.t0 = std::max(0.0, view.t1 - span); }
     }
     const double tmax = std::max(double(n) / rate, 1e-3); if (view.t1 - view.t0 < 0.02) view.t1 = view.t0 + 0.02; if (view.t0 < -0.5 * (view.t1 - view.t0)) { const double s = view.t1 - view.t0; view.t0 = -0.5 * s; view.t1 = view.t0 + s; }
@@ -39,8 +40,10 @@ PlotHit draw_traces(const char* id, ImVec2 size, const ITraceView& tr, TimeView&
     for (double t = std::ceil(view.t0 / tick) * tick; t < view.t1; t += tick) { const float x = hit.frame.sx(t); dl->AddLine(ImVec2(x, q0.y), ImVec2(x, q1.y), IM_COL32(45, 47, 54, 255)); const std::string s = format_time(t); dl->AddText(ImVec2(x + 2, p1.y - 16), IM_COL32(170, 170, 180, 255), s.c_str()); }
     // traces: min / max per pixel column
     const int cols = std::max(1, int(q1.x - q0.x)); auto series = [&](int which, ImU32 col, const ImVec2& r0, const ImVec2& r1, float vlo, float vhi) {
-        if (i1 <= i0) return; std::vector<ImVec2> pts; pts.reserve(size_t(cols) * 2); const double per = double(i1 - i0) / cols;
-        for (int c = 0; c < cols; ++c) { const int64_t a = i0 + int64_t(c * per), b = std::min<int64_t>(i1, std::max<int64_t>(a + 1, i0 + int64_t((c + 1) * per))); float mn = 1e30f, mx = -1e30f;
+        if (n <= 0) return; std::vector<ImVec2> pts; pts.reserve(size_t(cols) * 2); const double dt = (view.t1 - view.t0) / cols;
+        for (int c = 0; c < cols; ++c) {                                    // column c shows the samples whose TIME falls in [t0 + c dt, t0 + (c + 1) dt): exact even when the view starts before 0 or ends after the data
+            const int64_t a = std::max<int64_t>(0, int64_t(std::floor((view.t0 + c * dt) * rate))), b = std::min<int64_t>(n, std::max<int64_t>(a + 1, int64_t(std::floor((view.t0 + (c + 1) * dt) * rate))));
+            if (a >= n || b <= a || (view.t0 + (c + 1) * dt) * rate < 0) continue; float mn = 1e30f, mx = -1e30f;
             for (int64_t i = a; i < b; ++i) { float v; if (which == 0) v = tr.x(i); else if (which == 1) v = tr.y(i); else { const int64_t j0 = std::max<int64_t>(0, i - 1), j1 = std::min<int64_t>(n - 1, i + 1); v = float(std::hypot(tr.x(j1) - tr.x(j0), tr.y(j1) - tr.y(j0)) * rate / double(std::max<int64_t>(1, j1 - j0))); } if (std::isfinite(v)) { mn = std::min(mn, v); mx = std::max(mx, v); } }
             if (mn > mx) continue; const float x = r0.x + float(c); const float ya = r1.y - (mn - vlo) / (vhi - vlo) * (r1.y - r0.y), yb = r1.y - (mx - vlo) / (vhi - vlo) * (r1.y - r0.y); pts.push_back(ImVec2(x, std::max(r0.y, std::min(r1.y, ya)))); pts.push_back(ImVec2(x, std::max(r0.y, std::min(r1.y, yb)))); }
         if (pts.size() > 1) dl->AddPolyline(pts.data(), int(pts.size()), col, 0, 1.2f);
@@ -50,7 +53,7 @@ PlotHit draw_traces(const char* id, ImVec2 size, const ITraceView& tr, TimeView&
         dl->AddLine(ImVec2(q0.x, s0.y), ImVec2(q1.x, s0.y), IM_COL32(60, 62, 70, 255)); series(2, IM_COL32(120, 220, 140, 255), s0, q1, 0.0f, sm); char b[24]; std::snprintf(b, sizeof b, "%.0f deg/s", sm); dl->AddText(ImVec2(q0.x + 4, s0.y), IM_COL32(120, 220, 140, 200), b); }
     dl->PopClipRect(); dl->AddText(ImVec2(q1.x - 70, q0.y + 2), IM_COL32(90, 180, 255, 255), "x"); dl->AddText(ImVec2(q1.x - 55, q0.y + 2), IM_COL32(255, 170, 70, 255), "y");
     // cursor
-    if (hov) { const ImVec2 m = ImGui::GetIO().MousePos; if (m.x >= q0.x && m.x <= q1.x) { hit.hovered = true; hit.t = hit.frame.tx(m.x); hit.sample = std::max<int64_t>(0, std::min<int64_t>(n - 1, int64_t(hit.t * rate))); dl->AddLine(ImVec2(m.x, q0.y), ImVec2(m.x, q1.y), IM_COL32(255, 255, 255, 90)); hit.clicked = ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f); } }
+    if (hov) { const ImVec2 m = ImGui::GetIO().MousePos; if (m.x >= q0.x && m.x <= q1.x) { hit.hovered = true; hit.t = hit.frame.tx(m.x); hit.sample = std::max<int64_t>(0, std::min<int64_t>(n - 1, int64_t(hit.t * rate))); dl->AddLine(ImVec2(m.x, q0.y), ImVec2(m.x, q1.y), IM_COL32(255, 255, 255, 90)); hit.clicked = ImGui::IsMouseReleased(ImGuiMouseButton_Left) && !ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f); } }
     return hit;
 }
 

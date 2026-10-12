@@ -31,7 +31,7 @@ x and y position (blue, orange), speed (green) and the events as coloured bands;
 ## 6. Correcting the labels: the Review tab
 ![Review tab](img/tab_Review.png)
 1. Choose the **pre-labeler** and press *Pre-label all* (or *window*): the detector's events appear as bands and in the list.
-2. Correct: **click** an event to select it; **drag its edges** to move the onset or the offset; in **add mode**, drag across the plot to create an event; **Delete** removes it; keys **1-4** set its class; **S** splits it at the cursor; **M** merges it with the next one; **Z / Y** undo / redo.
+2. Correct: **click** an event (in the plot or in the list) to select it: a white outline appears and a line of buttons shows its time, duration, amplitude and class. **Delete selected** (or the Delete / Backspace key) removes it at once. **Drag its edges** to move the onset or the offset. To **add** an event press **Add event** (or **A**), then **click its start and click its end** (or drag across); **Esc** leaves the add mode. Keys **1-4** or the class buttons change the class, **S** splits at the cursor, **M** merges with the next event, **Z / Y** undo / redo. Wheel = zoom, horizontal scroll or drag = pan.
 3. Press **R** (or *Mark window reviewed*) for every stretch you checked; **X** excludes a stretch you do not want to train on. *Next uncertain* (**]**) jumps to the events the detector was least sure about.
 4. The bar shows the reviewed seconds against the 50 s default target; the agreement line compares the detector with your corrections (event F1 and kappa).
 

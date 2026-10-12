@@ -31,7 +31,7 @@ Position x et y (bleu, orange), vitesse (vert) et événements en bandes coloré
 ## 6. Corriger les étiquettes : onglet Review
 ![Onglet Review](img/tab_Review.png)
 1. Choisissez le **pré-étiqueteur** et cliquez *Pre-label all* (ou *window*) : les événements du détecteur apparaissent en bandes et dans la liste.
-2. Corrigez : **clic** sur un événement pour le sélectionner ; **glissez ses bords** pour déplacer le début ou la fin ; en **mode ajout**, glissez sur le tracé pour créer un événement ; **Suppr** l'enlève ; touches **1-4** changent sa classe ; **S** le coupe au curseur ; **M** le fusionne avec le suivant ; **Z / Y** annuler / rétablir.
+2. Corrigez : **cliquez** un événement (sur le tracé ou dans la liste) pour le sélectionner : un contour blanc apparaît et une ligne de boutons indique son instant, sa durée, son amplitude et sa classe. **Delete selected** (ou la touche Suppr / Retour arrière) le supprime aussitôt. **Glissez ses bords** pour déplacer le début ou la fin. Pour **ajouter** un événement, cliquez **Add event** (ou **A**), puis **cliquez son début et cliquez sa fin** (ou glissez sur le tracé) ; **Échap** quitte le mode ajout. Les touches **1-4** ou les boutons de classe changent la classe, **S** coupe au curseur, **M** fusionne avec le suivant, **Z / Y** annuler / rétablir. Molette = zoom, défilement horizontal ou glisser = déplacer.
 3. Appuyez sur **R** (ou *Mark window reviewed*) pour chaque portion vérifiée ; **X** exclut une portion de l'entraînement. *Next uncertain* (**]**) saute aux événements dont le détecteur était le moins sûr.
 4. La barre compare les secondes revues à la cible de 50 s ; la ligne d'accord compare le détecteur à vos corrections (F1 par événement et kappa).
 

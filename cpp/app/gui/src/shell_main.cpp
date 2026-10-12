@@ -1,5 +1,6 @@
 // EyeLive window (task T12): GLFW + OpenGL 3.2 core + Dear ImGui, a tab bar built from tab_registry(), a status bar, render on demand, and an offscreen --shot mode.
 //   eyelive [--mock] [--demo] [--tab <title>] [--size WxH] [--shot file.ppm [--frames N]] [--settings file] [--run-seconds S]
+//   --script "5:m:400:300,6:d,7:u,9:k:Delete" (with --shot): simulated input at given frames: m:x:y mouse move (window points), d / u mouse down / up, k:Name key press (Delete, Backspace, A, Z, Escape, S, M, R, 1-4)
 //   --mock: synthetic engine; --demo: real engine on a simulated session (60 s recorded as fast as possible, pre-labelled); --run-seconds: exit after S seconds (idle CPU measurement)
 #include <GLFW/glfw3.h>
 #include <algorithm>
@@ -28,10 +29,10 @@
 using namespace eyelive;
 using Clock = std::chrono::steady_clock;
 
-struct Args { bool mock = false, demo = false; std::string shot, tab, settings; int frames = 5, w = 1360, h = 820; double run_seconds = 0; };
+struct Args { bool mock = false, demo = false; std::string shot, tab, settings, script; int frames = 5, w = 1360, h = 820; double run_seconds = 0; };
 static Args parse(int argc, char** argv) {
     Args a; for (int i = 1; i < argc; ++i) { const std::string s = argv[i]; auto next = [&](std::string& out) { if (i + 1 < argc) out = argv[++i]; };
-        if (s == "--mock") a.mock = true; else if (s == "--demo") a.demo = true; else if (s == "--run-seconds" && i + 1 < argc) a.run_seconds = std::atof(argv[++i]); else if (s == "--shot") next(a.shot); else if (s == "--tab") next(a.tab); else if (s == "--settings") next(a.settings);
+        if (s == "--mock") a.mock = true; else if (s == "--demo") a.demo = true; else if (s == "--script") next(a.script); else if (s == "--run-seconds" && i + 1 < argc) a.run_seconds = std::atof(argv[++i]); else if (s == "--shot") next(a.shot); else if (s == "--tab") next(a.tab); else if (s == "--settings") next(a.settings);
         else if (s == "--frames" && i + 1 < argc) a.frames = std::max(1, std::atoi(argv[++i]));
         else if (s == "--size" && i + 1 < argc) { std::sscanf(argv[++i], "%dx%d", &a.w, &a.h); } }
     return a;
@@ -46,6 +47,20 @@ static double cpu_seconds() {
 static bool write_ppm(const std::string& path, int w, int h) {
     std::vector<unsigned char> px(size_t(w) * h * 3); glPixelStorei(GL_PACK_ALIGNMENT, 1); glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, px.data());
     std::ofstream f(path, std::ios::binary); if (!f) return false; f << "P6\n" << w << " " << h << "\n255\n"; for (int y = h - 1; y >= 0; --y) f.write(reinterpret_cast<const char*>(&px[size_t(y) * w * 3]), std::streamsize(w) * 3); return bool(f);
+}
+
+struct ScriptStep { int frame; std::string kind; float x = 0, y = 0; std::string key; };
+static std::vector<ScriptStep> parse_script(const std::string& text) {
+    std::vector<ScriptStep> v; size_t pos = 0; while (pos < text.size()) { size_t e = text.find(',', pos); if (e == std::string::npos) e = text.size(); std::string tok = text.substr(pos, e - pos); pos = e + 1; ScriptStep st; size_t c = tok.find(':'); if (c == std::string::npos) continue; st.frame = std::atoi(tok.substr(0, c).c_str()); std::string rest = tok.substr(c + 1);
+        if (rest[0] == 'm') { st.kind = "m"; std::sscanf(rest.c_str(), "m:%f:%f", &st.x, &st.y); } else if (rest[0] == 'd') st.kind = "d"; else if (rest[0] == 'u') st.kind = "u"; else if (rest.rfind("k:", 0) == 0) { st.kind = "k"; st.key = rest.substr(2); } else continue; v.push_back(st); }
+    return v;
+}
+static ImGuiKey key_from_name(const std::string& k) {
+    if (k == "Delete") return ImGuiKey_Delete; if (k == "Backspace") return ImGuiKey_Backspace; if (k == "Escape") return ImGuiKey_Escape; if (k.size() == 1 && k[0] >= 'A' && k[0] <= 'Z') return ImGuiKey(ImGuiKey_A + (k[0] - 'A')); if (k.size() == 1 && k[0] >= '0' && k[0] <= '9') return ImGuiKey(ImGuiKey_0 + (k[0] - '0')); return ImGuiKey_None;
+}
+static void inject(const std::vector<ScriptStep>& script, int frame, ImGuiIO& io) {
+    for (const auto& st : script) { if (st.frame != frame) continue; if (st.kind == "m") io.AddMousePosEvent(st.x, st.y); else if (st.kind == "d") io.AddMouseButtonEvent(0, true); else if (st.kind == "u") io.AddMouseButtonEvent(0, false); else if (st.kind == "k") { const ImGuiKey k = key_from_name(st.key); io.AddKeyEvent(k, true); } }
+    for (const auto& st : script) if (st.frame == frame - 1 && st.kind == "k") io.AddKeyEvent(key_from_name(st.key), false);       // release the key one frame later
 }
 
 static void draw_status(IEngine& engine, const ImVec2& display) {
@@ -77,6 +92,7 @@ int main(int argc, char** argv) {
     const float ui = retina ? 1.0f : std::max(1.0f, xs); ImGuiStyle& style = ImGui::GetStyle(); style.FontSizeBase = 15.0f; style.FontScaleDpi = ui; style.ScaleAllSizes(ui); style.WindowRounding = 0; style.FrameRounding = 3; style.TabRounding = 3; style.ItemSpacing = ImVec2(8, 6);
     ImGui_ImplGlfw_InitForOpenGL(win, true); ImGui_ImplOpenGL3_Init("#version 150");
     int select_tab = -1; for (size_t i = 0; i < tabs.size(); ++i) if (!args.tab.empty() && args.tab == tabs[i]->title()) select_tab = int(i);
+    const std::vector<ScriptStep> script = parse_script(args.script); io.AddFocusEvent(true);
     int frames_drawn = 0, extra_frames = 3, active = 0; auto last_render = Clock::now(); const double cpu0 = cpu_seconds(); const auto wall0 = Clock::now(); const int max_frames = args.shot.empty() ? -1 : args.frames; int frame_counter = 0;
     while (!glfwWindowShouldClose(win)) {
         if (args.run_seconds > 0 && std::chrono::duration<double>(Clock::now() - wall0).count() >= args.run_seconds) break;
@@ -84,7 +100,7 @@ int main(int argc, char** argv) {
         bool event = false; if (args.shot.empty()) { const auto t0 = Clock::now(); glfwWaitEventsTimeout(timeout); event = std::chrono::duration<double>(Clock::now() - t0).count() < timeout - 0.004; } else glfwPollEvents();
         const double since = std::chrono::duration<double>(Clock::now() - last_render).count();
         const bool render = !args.shot.empty() || event || extra_frames > 0 || wants_live || since >= 1.0; if (!render) continue;
-        ImGui_ImplOpenGL3_NewFrame(); ImGui_ImplGlfw_NewFrame(); ImGui::NewFrame(); const ImVec2 disp = io.DisplaySize; const float status_h = ImGui::GetFrameHeight() + 8;
+        ImGui_ImplOpenGL3_NewFrame(); ImGui_ImplGlfw_NewFrame(); inject(script, frame_counter, io); ImGui::NewFrame(); const ImVec2 disp = io.DisplaySize; const float status_h = ImGui::GetFrameHeight() + 8;
         ImGui::SetNextWindowPos(ImVec2(0, 0)); ImGui::SetNextWindowSize(ImVec2(disp.x, disp.y - status_h));
         ImGui::Begin("EyeLive", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
         if (tabs.empty()) ImGui::TextUnformatted("no tabs"); else if (ImGui::BeginTabBar("tabs")) {
