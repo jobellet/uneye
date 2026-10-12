@@ -94,7 +94,7 @@ class TriggerEngine final : public ITriggerEngine {
             const double now = trigger_host_now_s(), due = pending_.front().due, wait = due - now, spin = spin_s_;
             if (wait > spin + 50e-6) {                                                            // sleep until `spin` before the due time (or until an earlier trigger / stop arrives), then spin; `spin` follows the measured oversleep of the OS timer
                 const double target = now + wait - spin; cv_.wait_for(lk, std::chrono::duration<double>(wait - spin)); const double over = trigger_host_now_s() - target;
-                if (over > 0) spin_s_ = std::min(0.004, std::max(spin_s_ * 0.98, 1.3 * over + 100e-6)); else spin_s_ = std::max(100e-6, spin_s_ * 0.98); continue;
+                if (over > 0) spin_s_ = std::min(0.025, std::max(spin_s_ * 0.98, 1.3 * over + 100e-6)); else spin_s_ = std::max(100e-6, spin_s_ * 0.98); continue;
             }
             if (wait > 0) { lk.unlock(); while (trigger_host_now_s() < due) {} lk.lock(); if (stop_) break; if (pending_.empty() || pending_.front().due > due) continue; }
             std::pop_heap(pending_.begin(), pending_.end(), Later()); Pending p = std::move(pending_.back()); pending_.pop_back(); lk.unlock();
