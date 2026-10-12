@@ -1,1 +1,1 @@
-eyelive_add_module(engine)
+eyelive_add_module(engine eyelive_recorder eyelive_source eyelive_state eyelive_detect_hmm eyelive_detect_fast eyelive_detect_net eyelive_annot eyelive_calib eyelive_train eyelive_trigger uneye_rt)

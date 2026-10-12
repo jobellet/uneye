@@ -50,7 +50,7 @@ void HmmDetector::reset(const SessionInfo& session) {
     const bool ok = select_params(fs_); (void)ok;
     size_t R = 8192; while (R < size_t(8.0 * fs_) + 64) R <<= 1; mask_ = R - 1;
     for (auto* v : {&fx_, &fy_, &vx_, &vy_, &dvx_, &dvy_}) v->assign(R, 0.0); score_.assign(R, 0.f); valid_.assign(R, 1);
-    h_ = (int(0.1 * fs_) | 1) / 2; hop_ = std::max(1, int(std::nearbyint(0.005 * fs_))); margin_s_ = int(std::nearbyint(rf_.margin_ms * fs_ / 1000.0)); lag_s_ = int(std::nearbyint(0.030 * fs_)); keep_s_ = int(0.5 * fs_);
+    h_ = (int(0.1 * fs_) | 1) / 2; hop_ = std::max(1, int(std::nearbyint(0.010 * fs_))); margin_s_ = int(std::nearbyint(rf_.margin_ms * fs_ / 1000.0)); lag_s_ = int(std::nearbyint(0.030 * fs_)); keep_s_ = int(0.5 * fs_);
     n_ = v_end_ = dv_end_ = score_end_ = anchor_ = 0; last_pub_off_ = -1; last_noise_t_ = 0; hop_count_ = 0; noise_ = 0.0; lx_ = ly_ = 0.0; have_valid_ = false;
     sorted_x_.clear(); sorted_y_.clear(); sorted_x_.reserve(2 * h_ + 2); sorted_y_.reserve(2 * h_ + 2); scratch_a_.reserve(size_t(4.0 * fs_) + 16); scratch_b_.reserve(size_t(4.0 * fs_) + 16);
 }

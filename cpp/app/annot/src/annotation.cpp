@@ -106,6 +106,11 @@ struct ExpertLabels::Impl {
 };
 
 ExpertLabels::ExpertLabels(int n_classes) : impl_(new Impl(n_classes)) {}
+ExpertLabels::ExpertLabels(const ExpertLabels& o) : impl_(new Impl(*o.impl_)) {}
+ExpertLabels& ExpertLabels::operator=(const ExpertLabels& o) { if (this != &o) { Impl* n = new Impl(*o.impl_); delete impl_; impl_ = n; } return *this; }
+ExpertLabels::ExpertLabels(ExpertLabels&& o) noexcept : impl_(o.impl_) { o.impl_ = nullptr; }
+ExpertLabels& ExpertLabels::operator=(ExpertLabels&& o) noexcept { if (this != &o) { delete impl_; impl_ = o.impl_; o.impl_ = nullptr; } return *this; }
+ExpertLabels::~ExpertLabels() { delete impl_; }
 
 int ExpertLabels::n_classes() const { return impl_->n_classes; }
 

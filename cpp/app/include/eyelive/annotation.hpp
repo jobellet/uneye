@@ -14,6 +14,11 @@ namespace eyelive {
 class ExpertLabels {
  public:
     explicit ExpertLabels(int n_classes = 3);              // default classes: 0 fixation (background), 1 saccade, 2 blink
+    ExpertLabels(const ExpertLabels& o);                          // deep copies (the state is owned through a pointer): added by the integrator after T07 delivered a leaking, shallow-copy version
+    ExpertLabels& operator=(const ExpertLabels& o);
+    ExpertLabels(ExpertLabels&& o) noexcept;
+    ExpertLabels& operator=(ExpertLabels&& o) noexcept;
+    ~ExpertLabels();
     int n_classes() const;
     void set_n_classes(int n);                                    // 2..kMaxClasses; events of removed classes are deleted
 
