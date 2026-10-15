@@ -21,7 +21,7 @@ from foundation.dino1d import feats2
 from foundation.train_lodo import DEV
 H, SPAN, UVIS = 256, 100, 225          # sequence-model history; U-Net: 225 visible + 100 hidden = 325 samples (multiple of 25)
 PAD = max(H, UVIS) + 14
-CTX = KIN = WEIGHT = False          # set by the command line: --ctx (no rotation augmentation; absolute positions + direction harmonics), --kin (Savitzky-Golay v, a, j along the chord), --weight (tau-weighted loss + auxiliary remaining-duration head)
+CTX = KIN = WEIGHT = TGT = False          # set by the command line: --ctx (no rotation augmentation; absolute positions + direction harmonics), --kin (Savitzky-Golay v, a, j along the chord), --weight (tau-weighted loss + auxiliary remaining-duration head)
 NIN = 7
 import scipy.signal as _sg
 _SG = [np.asarray(_sg.savgol_coeffs(9, 3, deriv=k, use='dot', pos=8), np.float64) for k in (1, 2, 3)]
@@ -74,6 +74,9 @@ def seq_input(sp, b, L=H):
         W = swv(Pe, 9, axis=1)                                                  # (B, L, 2, 9)
         proj = lambda c: np.einsum("blcw,w,bc->bl", W, c, u)
         parts += [proj(_SG[0])[..., None], proj(_SG[1])[..., None] * 5.0, proj(_SG[2])[..., None] * 25.0]
+    if TGT:                                                                     # the known target of the saccade, relative to the start position (GazeBase RAN), rotated like the rest
+        tv = rotate(sp.TV[b["i"]], b); Lw = len(k)
+        parts += [(tv / 10.0)[:, None, :].repeat(Lw, 1), (np.linalg.norm(tv, axis=1) / 10.0)[:, None, None].repeat(Lw, 1)]
     x = np.concatenate(parts, 2)
     return torch.as_tensor(x, dtype=torch.float32, device=DEV)
 
