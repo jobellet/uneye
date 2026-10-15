@@ -18,12 +18,12 @@ Parameters tuned on the train split of GazeBase RAN (foundation/landing_candidat
 
 **Measured** (GazeBase RAN, 8 000 saccades of 33 held-out participants, distractors drawn from the same screen distribution, mean landing error in degrees over the first 60 ms):
 
-| candidates (1 true) | tables alone | selector | true chosen | network trained for it (GRU) |
-|---|---|---|---|---|
-| 1 | 5.24 | 1.88 | 100 % | 1.35 |
-| 2 | 5.24 | 2.38 | 91.8 % | 1.93 |
-| 4 | 5.24 | 3.01 | 80.1 % | 2.42 |
-| 8 | 5.24 | 3.69 | 65.4 % | 2.82 |
+| candidates (1 true) | tables alone | selector, landing = candidate | + amplitude rule (shipped) | true chosen | network trained for it (GRU) |
+|---|---|---|---|---|---|
+| 1 | 5.24 | 1.88 | – | 100 % | 1.35 |
+| 2 | 5.24 | 2.38 | 2.09 | 91.8 % | 1.93 |
+| 4 | 5.24 | 3.01 | 2.68 | 80.1 % | 2.42 |
+| 8 | 5.24 | 3.69 | 3.29 | 65.4 % | 2.82 |
 
-The engine's shipped tables are worse on GazeBase (large saccades) than the tables refit on the same data (3.89). The selector picks the right candidate as often as the network but lands exactly on the candidate, which loses the network's amplitude correction (about 0.5 deg).
+The engine's shipped tables are worse on GazeBase (large saccades) than the tables refit on the same data (3.89). The selector picks the right candidate as often as the network. The shipped amplitude rule (`landing_from_candidate`: landing = tables + w * (p0 + 0.95 * (candidate - p0) - tables), w = 1 before 30 ms, 0.65 for 30-45 ms, 0.43 after) recovers about half of the gap to the network at no cost (a handful of multiplications per sample).
 Test in the engine: `cpp/app/engine/tests/test_engine.cpp` (8b, simulated saccades) and `test_candidates.cpp` (selector, peaks).

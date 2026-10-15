@@ -20,6 +20,13 @@ struct CandidateParams {
 };
 struct CandidateChoice { int index = -1; double confidence = 0; };
 
+// Landing point from the chosen candidate: eyes land at about 0.95 of the target vector (GazeBase RAN); late in the saccade (>= 30 ms) the tables' own estimate becomes reliable again and is mixed in.
+// weight toward the candidate: 1 below 30 ms after the onset, 0.65 for 30-45 ms, 0.43 after (least squares on the train split). Positions in any common unit.
+inline void landing_from_candidate(double p0x, double p0y, double cx, double cy, double tabx, double taby, double ms_since_onset, double& outx, double& outy) {
+    const double gx = p0x + 0.95 * (cx - p0x), gy = p0y + 0.95 * (cy - p0y), w = ms_since_onset < 30.0 ? 1.0 : (ms_since_onset < 45.0 ? 0.65 : 0.43);
+    outx = tabx + w * (gx - tabx); outy = taby + w * (gy - taby);
+}
+
 // positions in degrees. p0 = position before the onset, cur = current position, remaining = amplitude still to come predicted by the tables (>= 0).
 inline CandidateChoice pick_candidate(double p0x, double p0y, double curx, double cury, double remaining, const Candidate* c, size_t n, double unit_to_deg, const CandidateParams& prm = CandidateParams()) {
     CandidateChoice out; if (n == 0) return out;

@@ -281,7 +281,7 @@ class Engine final : public IEngine {
         if (on < 1 || on > i) return;
         const double p0x = rec_->x(on - 1) * sc, p0y = rec_->y(on - 1) * sc, cx = rec_->x(i) * sc, cy = rec_->y(i) * sc;
         const double rem = std::hypot(o.forecast.landing.x - cx, o.forecast.landing.y - cy);
-        CandidateChoice ch; { std::lock_guard<std::mutex> l(cand_mu_); ch = pick_candidate(p0x, p0y, cx, cy, rem, cands_.data(), cands_.size(), sc, CandidateParams()); if (ch.index >= 0) { f.lx = cands_[size_t(ch.index)].x; f.ly = cands_[size_t(ch.index)].y; } }
+        CandidateChoice ch; { std::lock_guard<std::mutex> l(cand_mu_); ch = pick_candidate(p0x, p0y, cx, cy, rem, cands_.data(), cands_.size(), sc, CandidateParams()); if (ch.index >= 0) { const double ms = (rec_->t(i) - rec_->t(on)) * 1000.0; double lx = 0, ly = 0; landing_from_candidate(rec_->x(on - 1), rec_->y(on - 1), cands_[size_t(ch.index)].x, cands_[size_t(ch.index)].y, f.lx, f.ly, ms, lx, ly); f.lx = float(lx); f.ly = float(ly); } }
         if (ch.index >= 0) { f.candidate = ch.index; f.candidate_confidence = float(ch.confidence); }
     }
     void candidates_set(const std::vector<Candidate>& c) override { { std::lock_guard<std::mutex> l(cand_mu_); cands_ = c; } cands_any_.store(!c.empty(), std::memory_order_release);

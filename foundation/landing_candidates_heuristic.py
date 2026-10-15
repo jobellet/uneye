@@ -51,3 +51,38 @@ for K in (1, 2, 4, 8):
     pred, k, conf = select(te, K, *best[1]); rows.append((f"candidates K={K}", np.linalg.norm(pred - te["land"], axis=1), float(np.mean(k == 0)) if K > 1 else None))
 for name, e, acc in rows:
     print(f"{name:22s}" + "".join(f"{e[(te['tau'] >= lo) & (te['tau'] < hi)].mean():7.2f}" for lo, hi in bins) + f"  {e.mean():.2f}   " + (f"{acc * 100:.1f} %" if acc is not None else ""))
+
+# ---- cheap amplitude correction on top of the chosen candidate: landing = p0 + g * c_k (one gain), then a blend with the table landing per tau bin (weights fit by least squares on the train split)
+def chosen(D, K):
+    pred, k, conf = select(D, K, *best[1]); C = D["C"][np.arange(len(k)), k]; return k, C
+Ks = (2, 4, 8)
+rows_tr = []; 
+for K in Ks:
+    k, C = chosen(tr, K); ok = (k == 0)                                    # gain fit on correctly chosen candidates only
+    rows_tr.append((C[ok], (tr["land"] - tr["p0"])[ok]))
+num = sum((c * l).sum() for c, l in rows_tr); den = sum((c * c).sum() for c, _ in rows_tr); g = num / den
+print(f"gain g (landing = p0 + g * candidate, true candidates): {g:.3f}")
+edges = [3, 6, 10, 15, 20, 30, 45, 61]
+wts = []
+for lo, hi in zip(edges[:-1], edges[1:]):
+    A, B = [], []
+    for K in Ks:
+        k, C = chosen(tr, K); m = (tr["tau"] >= lo) & (tr["tau"] < hi)
+        cand = tr["p0"] + g * C; tab = tr["cur"] + tr["r0"][:, None] * tr["u"]
+        A.append(np.c_[(cand - tab)[m].ravel()]); B.append((tr["land"] - tab)[m].ravel())
+    a = np.vstack(A); b = np.concatenate(B); wts.append(float((a[:, 0] * b).sum() / max((a[:, 0] ** 2).sum(), 1e-9)))   # land - tab ~ w * (cand - tab)
+print("blend weights toward the candidate by tau bin", edges, np.round(wts, 2))
+print(f"{'':22s}" + "".join(f"{lo:>2d}-{hi:<4d}" for lo, hi in bins) + "  all")
+for K in (2, 4, 8):
+    k, C = chosen(te, K); cand = te["p0"] + g * C; tab = te["cur"] + te["r0"][:, None] * te["u"]
+    w = np.array([wts[np.searchsorted(edges, t, side="right") - 1] if 3 <= t < 61 else 0.0 for t in te["tau"]])
+    fused = tab + w[:, None] * (cand - tab); plain = te["p0"] + C
+    for name, pred in ((f"plain K={K}", plain), (f"gain K={K}", cand), (f"gain+blend K={K}", fused)):
+        e = np.linalg.norm(pred - te["land"], axis=1); print(f"{name:22s}" + "".join(f"{e[(te['tau'] >= lo) & (te['tau'] < hi)].mean():7.2f}" for lo, hi in bins) + f"  {e.mean():.2f}")
+
+# ---- the rule shipped in C++ (candidates.hpp): g = 0.95; weight toward the candidate 1.0 below 30 ms after the onset, 0.65 for 30-45 ms, 0.43 after
+print("\nshipped rule: landing = tables + w(tau) * (p0 + 0.95 * c_k - tables), w = 1 (< 30 ms), 0.65 (30-45), 0.43 (>= 45)")
+for K in (2, 4, 8):
+    k, C = chosen(te, K); cand = te["p0"] + 0.95 * C; tab = te["cur"] + te["r0"][:, None] * te["u"]
+    w = np.where(te["tau"] < 30, 1.0, np.where(te["tau"] < 45, 0.65, 0.43)); pred = tab + w[:, None] * (cand - tab); e = np.linalg.norm(pred - te["land"], axis=1)
+    print(f"{'shipped K=' + str(K):22s}" + "".join(f"{e[(te['tau'] >= lo) & (te['tau'] < hi)].mean():7.2f}" for lo, hi in bins) + f"  {e.mean():.2f}")
