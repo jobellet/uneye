@@ -27,3 +27,19 @@ Parameters tuned on the train split of GazeBase RAN (foundation/landing_candidat
 
 The engine's shipped tables are worse on GazeBase (large saccades) than the tables refit on the same data (3.89). The selector picks the right candidate as often as the network. The shipped amplitude rule (`landing_from_candidate`: landing = tables + w * (p0 + 0.95 * (candidate - p0) - tables), w = 1 before 30 ms, 0.65 for 30-45 ms, 0.43 after) recovers about half of the gap to the network at no cost (a handful of multiplications per sample).
 Test in the engine: `cpp/app/engine/tests/test_engine.cpp` (8b, simulated saccades) and `test_candidates.cpp` (selector, peaks).
+
+## Dynamic saliency from timestamped frames (PQFT)
+
+`eyelive::SaliencyPQFT` (cpp/app/engine/include/eyelive/saliency.hpp, header-only, no dependency): push frames (gray or RGB8, any size, with their time in seconds); `map()` is a 64 x 64 saliency map (maximum 1) that `peaks_from_map` turns into weighted candidates.
+
+```cpp
+eyelive::SaliencyPQFT sal;                                   // 64 x 64, blur 3 px, no centre prior (SaliencyPQFT(64, 3.0, 0.3) adds a centre prior)
+sal.push(rgb, width, height, 3, t_seconds);                  // at the video rate (25-60 Hz), not at the gaze rate
+auto c = eyelive::peaks_from_map(sal.map().data(), 64, 64, x_left, y_top, x_right, y_bottom, 8, 0.4);   // gaze units; y_top = value of the first row
+engine->candidates_set(c);
+```
+
+Method: phase spectrum of the quaternion Fourier transform (Guo, Ma & Zhang, CVPR 2008) of (motion, red-green, blue-yellow, intensity). The motion channel is the absolute difference with the previous frame, scaled so that 33 ms is the reference interval (so 60 Hz and 24 Hz videos give comparable maps); a gap above 0.5 s starts a new stream.
+Cost: 0.7 ms per 640 x 480 RGB frame on the development machine (most of it is the resampling to 64 x 64), i.e. 2 % of one core at 30 Hz. Tests: `cpp/app/engine/tests/test_saliency.cpp` (static pop-out, motion pop-out, timestamps, speed, link with the candidates).
+
+**Not measured:** whether saliency weights improve the landing estimate on real videos. Plan (needs a video database with gaze at 1 kHz, e.g. DIEM; not downloaded): for each saccade, candidates = saliency peaks of the frame shown at the onset; compare with the real landing point (tables alone, flat candidate list, weighted by saliency).
