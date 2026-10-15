@@ -20,7 +20,11 @@ from foundation import data as FD, unet_ssl as U
 from foundation.dino1d import feats2
 from foundation.train_lodo import DEV
 H, SPAN, UVIS = 256, 100, 225          # sequence-model history; U-Net: 225 visible + 100 hidden = 325 samples (multiple of 25)
-PAD = max(H, UVIS) + 2
+PAD = max(H, UVIS) + 14
+CTX = KIN = WEIGHT = False          # set by the command line: --ctx (no rotation augmentation; absolute positions + direction harmonics), --kin (Savitzky-Golay v, a, j along the chord), --weight (tau-weighted loss + auxiliary remaining-duration head)
+NIN = 7
+import scipy.signal as _sg
+_SG = [np.asarray(_sg.savgol_coeffs(9, 3, deriv=k, use='dot', pos=8), np.float64) for k in (1, 2, 3)]
 
 def rows_of(S, trials=None):
     pos = S.pos.astype(np.float64); lab = S.lab; R = []
@@ -41,8 +45,8 @@ class Split:
     def batch(self, idx, rng=None):
         i, on, off, t = self.R[idx].T; tp, onp, offp = t + PAD, on + PAD, off + PAD
         land = self.P[i, offp]; cur = self.P[i, tp]; p0 = self.P[i, onp - 1]; y = land - cur
-        rot = np.zeros(len(idx)) if rng is None else rng.uniform(0, 2 * np.pi, len(idx)); mir = np.ones(len(idx)) if rng is None else rng.choice([-1.0, 1.0], len(idx))
-        return dict(i=i, tp=tp, onp=onp, y=y, p0=p0, cur=cur, rot=rot, mir=mir)
+        aug = rng is not None and not CTX; rot = rng.uniform(0, 2 * np.pi, len(idx)) if aug else np.zeros(len(idx)); mir = rng.choice([-1.0, 1.0], len(idx)) if aug else np.ones(len(idx))
+        return dict(i=i, tp=tp, onp=onp, y=y, p0=p0, cur=cur, rot=rot, mir=mir, tau=(t - on).astype(float), dur=((off - t) / 50.0).astype(float))
 
 def rotate(v, b):                       # v (B, ..., 2)
     c, s = np.cos(b["rot"]), np.sin(b["rot"]); sh = (-1,) + (1,) * (v.ndim - 2)
@@ -57,7 +61,20 @@ def seq_input(sp, b, L=H):
     ins = (idx >= b["onp"][:, None]).astype(float); disp = np.where(ins[..., None] > 0, P - b["p0"][:, None], 0.0); disp = np.nan_to_num(disp)
     tau = np.where(ins > 0, (idx - b["onp"][:, None]) / 50.0, 0.0)
     v, disp = rotate(v, b), rotate(disp, b)
-    x = np.concatenate([v, valid[..., None], disp / 10.0, ins[..., None], tau[..., None]], 2)
+    parts = [v, valid[..., None], disp / 10.0, ins[..., None], tau[..., None]]
+    if CTX or KIN:
+        chord = b["cur"] - b["p0"]; dn = np.maximum(np.linalg.norm(chord, axis=1), 1e-6); u = chord / dn[:, None]; th = np.arctan2(chord[:, 1], chord[:, 0])
+    if CTX:
+        ab = np.nan_to_num(P) / 10.0; Lw = len(k)
+        har = np.stack([np.cos(th), np.sin(th), np.cos(2 * th), np.sin(2 * th)], 1)[:, None, :].repeat(Lw, 1)
+        parts += [ab, np.nan_to_num(b["p0"])[:, None, :].repeat(Lw, 1) / 10.0, har]
+    if KIN:
+        ext = np.arange(-L + 1 - 8, 1); Pe = np.nan_to_num(sp.P[b["i"][:, None], b["tp"][:, None] + ext[None]])      # (B, L + 8, 2)
+        from numpy.lib.stride_tricks import sliding_window_view as swv
+        W = swv(Pe, 9, axis=1)                                                  # (B, L, 2, 9)
+        proj = lambda c: np.einsum("blcw,w,bc->bl", W, c, u)
+        parts += [proj(_SG[0])[..., None], proj(_SG[1])[..., None] * 5.0, proj(_SG[2])[..., None] * 25.0]
+    x = np.concatenate(parts, 2)
     return torch.as_tensor(x, dtype=torch.float32, device=DEV)
 
 def unet_input(sp, b):
@@ -72,25 +89,26 @@ def unet_input(sp, b):
     return torch.as_tensor(x, dtype=torch.float32, device=DEV), torch.as_tensor(sg[:, 0, :], dtype=torch.float32, device=DEV)
 
 class TCN(nn.Module):
-    def __init__(self, c=64, nin=7):
+    def __init__(self, c=64, nin=None):
+        nin = nin or NIN
         super().__init__(); self.inp = nn.Conv1d(nin, c, 1); self.ds = [1, 2, 4, 8, 16, 32, 64]
-        self.convs = nn.ModuleList(nn.Conv1d(c, c, 3, dilation=d) for d in self.ds); self.norms = nn.ModuleList(nn.GroupNorm(8, c) for _ in self.ds); self.out = nn.Linear(c, 2)
+        self.convs = nn.ModuleList(nn.Conv1d(c, c, 3, dilation=d) for d in self.ds); self.norms = nn.ModuleList(nn.GroupNorm(8, c) for _ in self.ds); self.out = nn.Linear(c, 3)
     def forward(self, x):
         h = self.inp(x.transpose(1, 2))
         for d, cv, nm in zip(self.ds, self.convs, self.norms): h = h + F.gelu(nm(cv(F.pad(h, (2 * d, 0)))))
         return self.out(h[:, :, -1])
 class GRU(nn.Module):
-    def __init__(self, c=96, nin=7, L=128):
-        super().__init__(); self.L = L; self.g = nn.GRU(nin, c, 2, batch_first=True); self.out = nn.Linear(c, 2)
+    def __init__(self, c=96, nin=None, L=128):
+        nin = nin or NIN; super().__init__(); self.L = L; self.g = nn.GRU(nin, c, 2, batch_first=True); self.out = nn.Linear(c, 3)
     def forward(self, x): o, _ = self.g(x[:, -self.L:]); return self.out(o[:, -1])
 class Transf(nn.Module):
-    def __init__(self, d=64, nin=7, L=128):
-        super().__init__(); self.L = L; self.emb = nn.Linear(nin, d); self.pos = nn.Parameter(torch.zeros(1, L, d))
-        self.enc = nn.TransformerEncoder(nn.TransformerEncoderLayer(d, 4, 4 * d, 0.0, batch_first=True, norm_first=True), 3); self.out = nn.Linear(d, 2)
+    def __init__(self, d=64, nin=None, L=128):
+        nin = nin or NIN; super().__init__(); self.L = L; self.emb = nn.Linear(nin, d); self.pos = nn.Parameter(torch.zeros(1, L, d))
+        self.enc = nn.TransformerEncoder(nn.TransformerEncoderLayer(d, 4, 4 * d, 0.0, batch_first=True, norm_first=True), 3); self.out = nn.Linear(d, 3)
     def forward(self, x): h = self.enc(self.emb(x[:, -self.L:]) + self.pos); return self.out(h[:, -1])
 class MLP(nn.Module):
-    def __init__(self, nin=7, L=64):
-        super().__init__(); self.L = L; self.f = nn.Sequential(nn.Flatten(), nn.Linear(nin * L, 256), nn.GELU(), nn.Linear(256, 256), nn.GELU(), nn.Linear(256, 2))
+    def __init__(self, nin=None, L=64):
+        nin = nin or NIN; super().__init__(); self.L = L; self.f = nn.Sequential(nn.Flatten(), nn.Linear(nin * L, 256), nn.GELU(), nn.Linear(256, 256), nn.GELU(), nn.Linear(256, 3))
     def forward(self, x): return self.f(x[:, -self.L:])
 class UNetLand(nn.Module):                                                   # WUNet with a 4th input channel; landing = integral of the predicted velocity over the hidden span
     def __init__(self, pre):
@@ -105,10 +123,12 @@ class UNetLand(nn.Module):                                                   # W
 def make(name):
     return {"tcn": TCN, "gru": GRU, "transformer": Transf, "mlp": MLP}[name]().to(DEV) if name in ("tcn", "gru", "transformer", "mlp") else UNetLand(name == "unet_pre").to(DEV)
 
+def pred(*a): pass
 def predict(net, name, sp, idx, rng=None):
     b = sp.batch(idx, rng); y = rotate(b["y"], b)
     if name.startswith("unet"): x, sg = unet_input(sp, b); out = net(x, sg)
     else: out = net(seq_input(sp, b))
+    pred.aux = (torch.as_tensor(b["dur"], dtype=torch.float32, device=DEV), torch.as_tensor(b["tau"], dtype=torch.float32, device=DEV))
     return out, torch.as_tensor(y, dtype=torch.float32, device=DEV)
 
 def train(name, tr, va, steps, seed=0):
@@ -118,7 +138,11 @@ def train(name, tr, va, steps, seed=0):
     for it in range(1, steps + 1):
         for g in opt.param_groups: g["lr"] = lr * min(1.0, it / 200)
         net.train(); out, y = predict(net, name, tr, rng.randint(0, len(tr.R), bs), rng)
-        loss = (out - y).norm(dim=1).mean(); opt.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0); opt.step()
+        if WEIGHT and out.shape[1] == 3:
+            dur, tau = pred.aux; w = torch.where(tau < 3, 0.4 * torch.ones_like(tau), torch.where(tau <= 20, torch.ones_like(tau), 0.2 * torch.exp(-(tau - 20) / 15)))
+            loss = ((out[:, :2] - y).norm(dim=1) * w).sum() / w.sum() + 0.3 * ((out[:, 2] - dur).abs() * w).sum() / w.sum()
+        else: loss = (out[:, :2] - y).norm(dim=1).mean()
+        opt.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0); opt.step()
         if it % 250 == 0:
             vl = evaluate(net, name, va, vidx).mean()
             if vl < best - 1e-4: best, bad, state = vl, 0, {k: v.detach().clone() for k, v in net.state_dict().items()}
@@ -131,7 +155,7 @@ def evaluate(net, name, sp, idx=None):
     net.eval(); idx = np.arange(len(sp.R)) if idx is None else idx; errs = []
     with torch.no_grad():
         for s in range(0, len(idx), 512):
-            out, y = predict(net, name, sp, idx[s:s + 512]); errs.append((out - y).norm(dim=1).cpu().numpy())
+            out, y = predict(net, name, sp, idx[s:s + 512]); errs.append((out[:, :2] - y).norm(dim=1).cpu().numpy())
     return np.concatenate(errs)
 
 def linear_tables(tr, te):
@@ -149,7 +173,9 @@ def linear_tables(tr, te):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("--models", default="tcn,gru,transformer,mlp,unet_pre,unet_scratch"); ap.add_argument("--more", action="store_true"); ap.add_argument("--steps", type=int, default=6000)
-    a = ap.parse_args(); tag = "_more" if a.more else ""
+    ap.add_argument("--ctx", action="store_true"); ap.add_argument("--kin", action="store_true"); ap.add_argument("--weight", action="store_true"); ap.add_argument("--tag", default="")
+    a = ap.parse_args(); tag = ("_more" if a.more else "") + a.tag
+    CTX, KIN, WEIGHT = a.ctx, a.kin, a.weight; NIN = 7 + (8 if CTX else 0) + (3 if KIN else 0)
     A = FD.load("andersson", "train"); perm = np.random.RandomState(0).permutation(len(A.pos)); nv = len(A.pos) // 10
     tr, va, te = Split(A, perm[nv:]), Split(A, perm[:nv]), Split(FD.load("andersson", "test"))
     if a.more:
