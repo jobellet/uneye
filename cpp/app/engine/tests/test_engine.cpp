@@ -159,6 +159,26 @@ int main(int argc, char** argv) {
         CHECK(med(err20) < 0.2, "median +20 ms error %.3f deg", med(err20)); CHECK(err20_sacc.empty() || mean(err20_sacc) < mean(stay20_sacc), "the forecast is not better than staying during movements (%.3f vs %.3f)", mean(err20_sacc), mean(stay20_sacc));
         auto rd = Recorder::open_readonly(c.session_path, &err); StateBlock sb; if (rd && read_state_block(rd->state_block(), &sb)) { std::printf("state block prediction: valid %d at (%.2f, %.2f) +- (%.3f, %.3f)\n", int(sb.pred_valid), double(sb.pred_x), double(sb.pred_y), double(sb.pred_sigma_x), double(sb.pred_sigma_y)); }
     }
+    // 8b. candidate targets: for every detected saccade, 4 candidates (its real landing point and 3 landing points of other saccades); the landing estimate between 10 and 20 ms after the onset must pick the real one
+    //     more often than not and be closer to the real landing point than the estimate of the tables alone
+    {
+        auto e = make_engine(); SessionConfig c = cfg_sim("cand.eyelive", 1000, 0.0, "hmm_accel"); c.source.seed = 5; std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str());
+        for (int w = 0; w < 6000 && e->stats().samples < 40000; ++w) sleep_ms(10); e->stop(); const auto& tr = e->trace(); const int64_t N = tr.size(); const auto ev = e->events();
+        std::vector<Event> sac; for (const auto& x : ev) if (x.cls == 1 && !x.provisional && x.amplitude_deg > 2.0 && x.onset > 700 && x.offset + 30 < N && x.offset - x.onset > 25) sac.push_back(x);
+        std::vector<double> e_tab, e_cand; int chosen = 0, tot = 0; std::vector<ForecastSample> fc;
+        for (size_t k = 0; k < sac.size() && k < 60; ++k) {
+            const Event& s = sac[k]; const double lx = tr.x(s.offset), ly = tr.y(s.offset);
+            for (int pass = 0; pass < 2; ++pass) {
+                std::vector<Candidate> cs; if (pass == 1) { Candidate t; t.x = float(lx); t.y = float(ly); cs.push_back(t); for (int j = 1; j <= 3; ++j) { const Event& o = sac[(k + size_t(j) * 7) % sac.size()]; Candidate d; d.x = float(tr.x(o.offset)); d.y = float(tr.y(o.offset)); cs.push_back(d); } }
+                e->candidates_set(cs); e->forecast_enable(true); fc.clear(); e->forecasts(s.onset + 10, s.onset + 21, fc);
+                for (const auto& f : fc) { if (!f.landing) continue; const double er = std::hypot(f.lx - lx, f.ly - ly); if (pass == 0) e_tab.push_back(er); else { e_cand.push_back(er); ++tot; chosen += f.candidate == 0; } }
+            }
+        }
+        e->candidates_set({});
+        auto mean = [](const std::vector<double>& v) { double s = 0; for (double x : v) s += x; return v.empty() ? 0.0 : s / double(v.size()); };
+        std::printf("candidates: %zu saccades, true candidate chosen %.1f %% of %d estimates, landing error %.3f deg against %.3f with the tables alone\n", sac.size(), tot ? 100.0 * chosen / tot : 0.0, tot, mean(e_cand), mean(e_tab));
+        CHECK(tot > 50, "too few landing estimates (%d)", tot); CHECK(chosen > tot / 2, "the true candidate was chosen only %d of %d times", chosen, tot); CHECK(mean(e_cand) < mean(e_tab), "candidates did not improve the landing estimate (%.3f vs %.3f)", mean(e_cand), mean(e_tab));
+    }
     // 9. live labels come from the CHOSEN detector. fast_threshold chosen: an open provisional label whose end follows the newest sample while the saccade happens. hmm_accel chosen: only its own (final) events are listed, 
     //    but the provisional events of the fast detector still reach the triggers (rules anchored on the onset)
     {

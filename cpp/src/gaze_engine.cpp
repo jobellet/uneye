@@ -414,6 +414,7 @@ struct GazeEngine::Impl {
         const double infl = tau_ms < 10.0 ? kBallisticInflationEarly : kBallisticInflationLate;
         for (int h = 0; h < 2; ++h) *iv[h] = Interval{cur.x + r[h + 1] * ux, cur.y + r[h + 1] * uy, std::fabs(ux) * kLandScale[h + 1][bi] * infl + 0.003, std::fabs(uy) * kLandScale[h + 1][bi] * infl + 0.003, true};
         out.forecast.ballistic = true;
+        out.forecast.landing = Interval{cur.x + r[0] * ux, cur.y + r[0] * uy, 0.0, 0.0, true};
         predicted_amplitude = static_cast<float>(d + r[0]);
     }
     float predicted_amplitude = 0;

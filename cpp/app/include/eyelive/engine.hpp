@@ -26,7 +26,10 @@ struct SessionConfig {
 
 // Forecast of the eye position made at every sample by the gaze engine (cpp/include/uneye/gaze_engine.hpp: two causal networks + fixed landing tables, 1 kHz only). Positions are in STREAM units like the trace;
 // the forecast of sample i describes the position of sample i + 10 ms and i + 20 ms. The scales are those of a Laplace distribution: an 80 % interval is +- 1.61 scale.
-struct ForecastSample { float x10 = 0, y10 = 0, x20 = 0, y20 = 0, sx10 = 0, sy10 = 0, sx20 = 0, sy20 = 0; bool valid = false, ballistic = false; };
+struct ForecastSample { float x10 = 0, y10 = 0, x20 = 0, y20 = 0, sx10 = 0, sy10 = 0, sx20 = 0, sy20 = 0; bool valid = false, ballistic = false;
+                       float lx = 0, ly = 0; bool landing = false;          // estimated end point of the ongoing saccade (stream units): the tables' estimate, or the chosen candidate when candidates are set
+                       int candidate = -1; float candidate_confidence = 0; };   // index in the candidate list given to candidates_set (-1: none chosen)
+struct Candidate { float x = 0, y = 0, weight = 1; };                      // a possible target (stream units, same frame as the gaze); weight = prior (saliency, relevance), > 0
 
 struct EngineStats {
     bool running = false; double rate_hz_measured = 0; double rate_hz_standard = 0; uint64_t samples = 0, dropped_packets = 0, gaps = 0;
@@ -75,6 +78,7 @@ class IEngine {
     // forecast of the future eye position (see ForecastSample); empty / invalid when the stream is not at 1 kHz or the models are missing
     virtual bool forecast_available() const = 0;
     virtual void forecast_enable(bool on) = 0;                 // the forecast costs CPU: it is computed only while someone asks for it (call every frame while it is displayed; it stops 3 s after the last call)
+    virtual void candidates_set(const std::vector<Candidate>& c) = 0;      // possible targets of the next saccades (empty = none): the landing estimate then picks the most plausible one; can be called at any time
     virtual size_t forecasts(int64_t from, int64_t to, std::vector<ForecastSample>& out) const = 0;      // one entry for each sample of [from, to) (valid = false when not available)
     // detectors
     virtual std::vector<DetectorInfo> available_detectors() const = 0;

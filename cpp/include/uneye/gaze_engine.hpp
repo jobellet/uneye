@@ -78,7 +78,7 @@ struct Sample {                          // one raw sample from the eye tracker
 };
 
 struct Interval { double x = 0, y = 0, scale_x = 0, scale_y = 0; bool valid = false; };   // Laplace(location, scale): 80 % interval = +- 1.61 scale
-struct Forecast { Interval at10, at20; bool ballistic = false; };                        // ballistic: from the saccade tables, else 'stay + noise'
+struct Forecast { Interval at10, at20; bool ballistic = false; Interval landing; };       // landing: estimated end point of the ongoing saccade (valid when ballistic; scales not estimated)                        // ballistic: from the saccade tables, else 'stay + noise'
 
 struct Output {                          // returned by every push()
     int64_t index = -1;                  // sample (bin) number
