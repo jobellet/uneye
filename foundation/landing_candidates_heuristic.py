@@ -86,3 +86,35 @@ for K in (2, 4, 8):
     k, C = chosen(te, K); cand = te["p0"] + 0.95 * C; tab = te["cur"] + te["r0"][:, None] * te["u"]
     w = np.where(te["tau"] < 30, 1.0, np.where(te["tau"] < 45, 0.65, 0.43)); pred = tab + w[:, None] * (cand - tab); e = np.linalg.norm(pred - te["land"], axis=1)
     print(f"{'shipped K=' + str(K):22s}" + "".join(f"{e[(te['tau'] >= lo) & (te['tau'] < hi)].mean():7.2f}" for lo, hi in bins) + f"  {e.mean():.2f}")
+
+# ---- gate: keep the tables' landing when the chosen candidate's landing is farther from it than max(abs, rel * A), A = d + r0
+print("\ngate (abs, rel): GazeBase RAN, mean error over tau 3-60 ms, K = 2 / 4 / 8  (no gate first)")
+msk = te["tau"] >= 3
+for absg, rel in ((None, None), (0.5, 0.3), (0.5, 0.5), (1.0, 0.5), (1.0, 0.8), (1.0, 1.2), (2.0, 1.5)):
+    out = []
+    for K in (2, 4, 8):
+        k, C = chosen(te, K); cand = te["p0"] + 0.95 * C; tab = te["cur"] + te["r0"][:, None] * te["u"]
+        w = np.where(te["tau"] < 30, 1.0, np.where(te["tau"] < 45, 0.65, 0.43)); est = tab + w[:, None] * (cand - tab)
+        if absg is not None:
+            A = np.maximum(te["d"] + te["r0"], 0.3); use = np.linalg.norm(est - tab, axis=1) <= np.maximum(absg, rel * A); est = np.where(use[:, None], est, tab)
+        out.append(np.linalg.norm(est - te["land"], axis=1)[msk].mean())
+    print(f"  gate {absg} {rel}: " + " / ".join(f"{v:.2f}" for v in out))
+
+# ---- precision-weighted blend: w = s_t^2 / (s_t^2 + s_c^2), s_t = rel(tau) * A (the tables' uncertainty grows with the amplitude), rel(tau) = r0 exp(-tau / tau0) + r1, s_c = candidate position noise (deg)
+def prec_w(tau, A, r0, tau0, r1, sc):
+    st = (r0 * np.exp(-tau / tau0) + r1) * A; return st ** 2 / (st ** 2 + sc ** 2)
+import json
+print("\nprecision-weighted blend (grid on the RAN train split)")
+best2 = None
+for r0, tau0, r1, sc in itertools.product((0.3, 0.5, 0.8), (10, 20), (0.05, 0.1, 0.2), (1.2, 1.7, 2.2)):
+    e = []
+    for K in (2, 4, 8):
+        k, C = chosen(tr, K); cand = tr["p0"] + 0.95 * C; tab = tr["cur"] + tr["r0"][:, None] * tr["u"]; A = np.maximum(tr["d"] + tr["r0"], 0.3)
+        w = prec_w(tr["tau"], A, r0, tau0, r1, sc); est = tab + w[:, None] * (cand - tab); e.append(np.linalg.norm(est - tr["land"], axis=1)[m_tr].mean())
+    if best2 is None or np.mean(e) < best2[0]: best2 = (np.mean(e), (r0, tau0, r1, sc))
+print("best (r0, tau0, r1, s_c):", best2[1], " train error", round(best2[0], 3))
+json.dump({"r0": best2[1][0], "tau0": best2[1][1], "r1": best2[1][2], "sc": best2[1][3]}, open(os.path.join(ROOT, "foundation", "runs", "candidate_blend.json"), "w"))
+for K in (2, 4, 8):
+    k, C = chosen(te, K); cand = te["p0"] + 0.95 * C; tab = te["cur"] + te["r0"][:, None] * te["u"]; A = np.maximum(te["d"] + te["r0"], 0.3)
+    w = prec_w(te["tau"], A, *best2[1]); est = tab + w[:, None] * (cand - tab); e = np.linalg.norm(est - te["land"], axis=1)
+    print(f"{'precision K=' + str(K):22s}" + "".join(f"{e[(te['tau'] >= lo) & (te['tau'] < hi)].mean():7.2f}" for lo, hi in bins) + f"  {e.mean():.2f}")

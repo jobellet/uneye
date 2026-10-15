@@ -43,3 +43,23 @@ Method: phase spectrum of the quaternion Fourier transform (Guo, Ma & Zhang, CVP
 Cost: 0.7 ms per 640 x 480 RGB frame on the development machine (most of it is the resampling to 64 x 64), i.e. 2 % of one core at 30 Hz. Tests: `cpp/app/engine/tests/test_saliency.cpp` (static pop-out, motion pop-out, timestamps, speed, link with the candidates).
 
 **Not measured:** whether saliency weights improve the landing estimate on real videos. Plan (needs a video database with gaze at 1 kHz, e.g. DIEM; not downloaded): for each saccade, candidates = saliency peaks of the frame shown at the onset; compare with the real landing point (tables alone, flat candidate list, weighted by saliency).
+
+## Reading (GazeBase TEX, one poem page, 1 kHz): what works and what does not
+
+Saccades are small to the right (median +3.7 deg) and large to the left (median -10.2 deg, return sweeps); the tables alone are already good at 20 ms (2.07 deg) because the saccades are short.
+Test on 42 000 saccades of held-out participants (foundation/landing_tex_saliency.py, landing_tex_prior.py), error in degrees at 10 / 20 ms after the onset:
+
+| estimate | 10 ms | 20 ms |
+|---|---|---|
+| tables alone | 4.09 | **2.07** |
+| PQFT saliency peaks of the page (N = 16), forced choice | 5.84 | 8.15 |
+| word centres (all words of the page), flat weights | 3.92 | 3.88 |
+| word centres + prior on the saccade vector (2-D histogram of the train participants) | 3.34 | 3.46 |
+| same, weight w toward the candidate = 0.75 (0.5) | **3.30** (3.41) | - |
+| same, w = 0.25 | 3.66 | 2.22 |
+
+* A saliency map of a text page does not find words (8 % of the landings within 1 deg of a peak, 77 % for word centres); forced choice among such candidates is worse than the tables.
+* With word candidates and a prior the first 10-15 ms improve by about 18 %; later the tables are better (the candidate loses the precision of the eye position). **Use `candidates_set(c, use_until_ms)` with about 12 ms for reading.**
+* The prior depends on the position before the saccade: the application re-weights the candidates at each fixation (`weight` = prior of the vector candidate - current fixation) and calls `candidates_set` again.
+* A precision-weighted blend (weight from the tables' uncertainty proportional to the amplitude, candidate noise in degrees) was tried and was worse than the time-based rule on GazeBase RAN (2.64 / 3.05 / 3.57 deg for 2 / 4 / 8 candidates against 2.09 / 2.68 / 3.29). Not kept.
+* A gate that refuses a candidate far from the tables' landing keeps the tables' error on reading (4.01 / 2.02 deg) but removes the gain on RAN (2.0 -> 3.9+ deg), because the tables are poor for large saccades there. Not kept; the engine always chooses unless `min_confidence` is set.

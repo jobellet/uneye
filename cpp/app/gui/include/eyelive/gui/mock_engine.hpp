@@ -28,7 +28,7 @@ class MockEngine final : public IEngine {
     std::vector<Event> events() const override { std::vector<Event> v; for (const auto& e : events_) if (e.offset < visible()) v.push_back(e); return v; }
     bool forecast_available() const override { return true; }
     void forecast_enable(bool) override {}
-    void candidates_set(const std::vector<Candidate>& c) override { candidates_ = c; }
+    void candidates_set(const std::vector<Candidate>& c, double = 1e9) override { candidates_ = c; }
     std::vector<Candidate> candidates_;
     size_t forecasts(int64_t from, int64_t to, std::vector<ForecastSample>& out) const override {        // the future of the simulated trace plus an error that grows during saccades (a stand-in with the right shape, not a prediction)
         out.assign(size_t(std::max<int64_t>(0, to - from)), ForecastSample()); size_t got = 0; const int64_t vis = visible();

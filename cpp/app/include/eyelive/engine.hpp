@@ -78,7 +78,7 @@ class IEngine {
     // forecast of the future eye position (see ForecastSample); empty / invalid when the stream is not at 1 kHz or the models are missing
     virtual bool forecast_available() const = 0;
     virtual void forecast_enable(bool on) = 0;                 // the forecast costs CPU: it is computed only while someone asks for it (call every frame while it is displayed; it stops 3 s after the last call)
-    virtual void candidates_set(const std::vector<Candidate>& c) = 0;      // possible targets of the next saccades (empty = none): the landing estimate then picks the most plausible one; can be called at any time
+    virtual void candidates_set(const std::vector<Candidate>& c, double use_until_ms = 1e9) = 0;   // possible targets of the next saccades (empty = none): the landing estimate then picks the most plausible one; can be called at any time (e.g. at every fixation, with weights from a prior on the saccade vector). Later than use_until_ms after the onset the tables' estimate is kept (reading: ~ 12 ms)
     virtual size_t forecasts(int64_t from, int64_t to, std::vector<ForecastSample>& out) const = 0;      // one entry for each sample of [from, to) (valid = false when not available)
     // detectors
     virtual std::vector<DetectorInfo> available_detectors() const = 0;

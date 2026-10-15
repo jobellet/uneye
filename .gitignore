@@ -35,3 +35,5 @@ data/lab/
 
 build/
 data/GazeBase/
+data/EyeTrackUAV2/
+foundation/runs/landing_tex_saliency.csv
