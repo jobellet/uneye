@@ -21,7 +21,8 @@ from foundation.dino1d import feats2
 from foundation.train_lodo import DEV
 H, SPAN, UVIS = 256, 100, 225          # sequence-model history; U-Net: 225 visible + 100 hidden = 325 samples (multiple of 25)
 PAD = max(H, UVIS) + 14
-CTX = KIN = WEIGHT = TGT = False          # set by the command line: --ctx (no rotation augmentation; absolute positions + direction harmonics), --kin (Savitzky-Golay v, a, j along the chord), --weight (tau-weighted loss + auxiliary remaining-duration head)
+CTX = KIN = WEIGHT = TGT = False
+CAND = 0            # number of candidate-target slots (GazeBase RAN with distractors); sp.CAND (n, CAND, 2) = candidate positions relative to the start, true target first; b['K'] valid slots per row          # set by the command line: --ctx (no rotation augmentation; absolute positions + direction harmonics), --kin (Savitzky-Golay v, a, j along the chord), --weight (tau-weighted loss + auxiliary remaining-duration head)
 NIN = 7
 import scipy.signal as _sg
 _SG = [np.asarray(_sg.savgol_coeffs(9, 3, deriv=k, use='dot', pos=8), np.float64) for k in (1, 2, 3)]
@@ -46,7 +47,8 @@ class Split:
         i, on, off, t = self.R[idx].T; tp, onp, offp = t + PAD, on + PAD, off + PAD
         land = self.P[i, offp]; cur = self.P[i, tp]; p0 = self.P[i, onp - 1]; y = land - cur
         aug = rng is not None and not CTX; rot = rng.uniform(0, 2 * np.pi, len(idx)) if aug else np.zeros(len(idx)); mir = rng.choice([-1.0, 1.0], len(idx)) if aug else np.ones(len(idx))
-        return dict(i=i, tp=tp, onp=onp, y=y, p0=p0, cur=cur, rot=rot, mir=mir, tau=(t - on).astype(float), dur=((off - t) / 50.0).astype(float))
+        K = rng.choice([1, 2, 4, 8], len(idx)) if (rng is not None and CAND) else np.full(len(idx), getattr(self, 'KFIX', 1))
+        return dict(i=i, tp=tp, onp=onp, y=y, p0=p0, cur=cur, rot=rot, mir=mir, tau=(t - on).astype(float), dur=((off - t) / 50.0).astype(float), K=K)
 
 def rotate(v, b):                       # v (B, ..., 2)
     c, s = np.cos(b["rot"]), np.sin(b["rot"]); sh = (-1,) + (1,) * (v.ndim - 2)
@@ -77,6 +79,12 @@ def seq_input(sp, b, L=H):
     if TGT:                                                                     # the known target of the saccade, relative to the start position (GazeBase RAN), rotated like the rest
         tv = rotate(sp.TV[b["i"]], b); Lw = len(k)
         parts += [(tv / 10.0)[:, None, :].repeat(Lw, 1), (np.linalg.norm(tv, axis=1) / 10.0)[:, None, None].repeat(Lw, 1)]
+    if CAND:                                                                     # candidate targets, each a (cx, cy, |c|, cos to the current chord, valid); the K valid ones sorted by that cosine
+        C = rotate(sp.CAND[b["i"]][:, :CAND], b); Lw = len(k); chord = b["cur"] - b["p0"]; ch = rotate(chord[:, None, :], b)[:, 0]; chn = np.maximum(np.linalg.norm(ch, axis=1), 1e-6)
+        valid = np.arange(CAND)[None, :] < b["K"][:, None]; nc = np.maximum(np.linalg.norm(C, axis=2), 1e-6); cs = (C * ch[:, None, :]).sum(2) / (nc * chn[:, None])
+        order = np.argsort(np.where(valid, -cs, 9.0), axis=1); take = lambda a: np.take_along_axis(a, order, 1)
+        cf = np.stack([take(C[..., 0]) / 10.0, take(C[..., 1]) / 10.0, take(nc) / 10.0, take(cs), take(valid.astype(float))], 2) * take(valid.astype(float))[..., None]   # (B, CAND, 5)
+        parts += [cf.reshape(len(cf), 1, -1).repeat(Lw, 1)]
     x = np.concatenate(parts, 2)
     return torch.as_tensor(x, dtype=torch.float32, device=DEV)
 
