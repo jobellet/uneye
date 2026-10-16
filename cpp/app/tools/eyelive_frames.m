@@ -1,5 +1,5 @@
-% EyeLive frame mailbox writer for Psychtoolbox / MATLAB / Octave (NOT TESTED: written from the file format only; the C++ and Python writers are tested).
-% Layout: cpp/app/engine/include/eyelive/frame_mailbox.hpp.
+% EyeLive frame mailbox writer for Psychtoolbox on MATLAB or Octave. NOT YET RUN: written from the file format (cpp/app/engine/include/eyelive/frame_mailbox.hpp); the C++ and Python writers are tested.
+% Octave has no memmapfile: there the file is written with fopen / fseek / fwrite / fflush (the engine's memory map sees the page cache); MATLAB uses memmapfile.
 %
 %   fw = eyelive_frames('open', '/tmp/stim.frames', 64, 64, 3, [xl yt xr yb]);   % gaze units of the frame edges (left, top, right, bottom)
 %   img = imresize(Screen('GetImage', smallWin, [], 'backBuffer'), [64 64]);       % e.g. a 64 x 64 off-screen copy of the stimulus (uint8, h x w x 3)
@@ -8,35 +8,46 @@
 %   eyelive_frames('close', fw);
 function fw = eyelive_frames(cmd, fw, varargin)
   slots = 3; HEADER = 256; MAXC = 64; SLOTH = 32;
+  isoct = exist('OCTAVE_VERSION', 'builtin') ~= 0;
   switch cmd
     case 'open'
       path = fw; w = varargin{1}; h = varargin{2}; c = varargin{3}; rect = varargin{4};
       slotbytes = SLOTH + w*h*c; total = HEADER + 16*MAXC + slotbytes*slots;
-      f = fopen(path, 'w'); fwrite(f, zeros(total, 1, 'uint8'), 'uint8'); fclose(f);
-      fmt = {'uint8', [8 1], 'magic'; 'uint32', [1 1], 'version'; 'uint32', [1 1], 'header'; 'uint32', [1 1], 'w'; 'uint32', [1 1], 'h'; 'uint32', [1 1], 'c'; 'uint32', [1 1], 'slots'; ...
-             'uint32', [1 1], 'slothdr'; 'uint32', [1 1], 'maxc'; 'uint64', [1 1], 'count'; 'double', [4 1], 'rect'; 'uint64', [1 1], 'cseq'; 'uint32', [1 1], 'cn'; 'uint32', [1 1], 'pad'; ...
-             'double', [1 1], 'cuntil'; 'uint8', [152 1], 'reserved'; 'single', [4 MAXC], 'cand'};
-      for k = 1:slots
-        fmt = [fmt; {'uint64', [1 1], sprintf('seq%d', k); 'double', [1 1], sprintf('t%d', k); 'uint64', [1 1], sprintf('no%d', k); 'uint32', [1 2], sprintf('fl%d', k); 'uint8', [c w h], sprintf('px%d', k)}]; %#ok<AGROW>
+      f = fopen(path, 'w', 'ieee-le'); fwrite(f, zeros(total, 1, 'uint8'), 'uint8'); fclose(f);
+      fw = struct('isoct', isoct, 'n', uint64(0), 'slots', slots, 'w', w, 'h', h, 'c', c, 'slotbytes', slotbytes, 'fid', -1, 'm', []);
+      if isoct
+        fw.fid = fopen(path, 'r+', 'ieee-le');
+      else
+        fw.m = memmapfile(path, 'Format', {'uint8', [total 1], 'raw'}, 'Writable', true);
       end
-      m = memmapfile(path, 'Format', fmt, 'Writable', true);
-      m.Data.magic = uint8('EYLFRM01')'; m.Data.version = uint32(1); m.Data.header = uint32(HEADER); m.Data.w = uint32(w); m.Data.h = uint32(h); m.Data.c = uint32(c); m.Data.slots = uint32(slots);
-      m.Data.slothdr = uint32(SLOTH); m.Data.maxc = uint32(MAXC); m.Data.rect = double(rect(:));
-      fw = struct('m', m, 'n', uint64(0), 'slots', slots, 'w', w, 'h', h, 'c', c);
+      put(fw, 0, uint8('EYLFRM01')'); put(fw, 8, uint32([1 HEADER w h c slots SLOTH MAXC])); put(fw, 48, double(rect(:))'); flush_(fw);
     case 'frame'
-      img = varargin{1}; t = varargin{2}; fw.n = fw.n + 1; k = double(mod(fw.n - 1, fw.slots)) + 1;
-      sq = sprintf('seq%d', k); seq = fw.m.Data.(sq);
-      fw.m.Data.(sq) = seq + 1;                                           % odd: being written
-      fw.m.Data.(sprintf('t%d', k)) = double(t); fw.m.Data.(sprintf('no%d', k)) = fw.n;
-      fw.m.Data.(sprintf('px%d', k)) = permute(uint8(img), [3 2 1]);       % h x w x c (column-major) -> c x w x h = row-major interleaved
-      fw.m.Data.(sq) = seq + 2;                                            % even: done
-      fw.m.Data.count = fw.n;                                              % published last
+      img = varargin{1}; t = varargin{2}; fw.n = fw.n + 1; k = double(mod(fw.n - 1, fw.slots));
+      off = HEADER + 16*MAXC + fw.slotbytes * k; seq = get64(fw, off);
+      put(fw, off, uint64(seq + 1)); flush_(fw);                                                       % odd: being written
+      put(fw, off + 8, double(t)); put(fw, off + 16, uint64(fw.n)); put(fw, off + 24, uint32([0 0]));
+      put(fw, off + SLOTH, reshape(permute(uint8(img), [3 2 1]), 1, []));                              % h x w x c (column-major) -> c x w x h = row-major interleaved
+      flush_(fw); put(fw, off, uint64(seq + 2)); flush_(fw);                                           % even: done
+      put(fw, 40, uint64(fw.n)); flush_(fw);                                                           % published last
     case 'candidates'
-      cand = varargin{1}; until = 1e9; if numel(varargin) > 1, until = varargin{2}; end
-      seq = fw.m.Data.cseq; fw.m.Data.cseq = seq + 1; n = min(size(cand, 1), 64); fw.m.Data.cn = uint32(n); fw.m.Data.cuntil = double(until);
+      cand = varargin{1}; until_ms = 1e9; if numel(varargin) > 1, until_ms = varargin{2}; end
+      seq = get64(fw, 80); put(fw, 80, uint64(seq + 1)); flush_(fw); n = min(size(cand, 1), 64); put(fw, 88, uint32(n)); put(fw, 96, double(until_ms));
       blk = zeros(4, 64, 'single'); if n > 0, blk(1:2, 1:n) = single(cand(1:n, 1:2)'); if size(cand, 2) >= 3, blk(3, 1:n) = single(cand(1:n, 3)'); else, blk(3, 1:n) = 1; end, end
-      fw.m.Data.cand = blk; fw.m.Data.cseq = seq + 2;
+      put(fw, HEADER, reshape(blk, 1, [])); flush_(fw); put(fw, 80, uint64(seq + 2)); flush_(fw);
     case 'close'
+      if fw.isoct, fclose(fw.fid); end
       clear fw;
   end
+end
+
+function put(fw, off, v)                       % write the array v at byte offset off (little endian, native class of v)
+  if fw.isoct, fseek(fw.fid, off, 'bof'); fwrite(fw.fid, v, class(v));
+  else, bytes = typecast(v(:)', 'uint8'); fw.m.Data.raw(off + 1:off + numel(bytes)) = bytes; end
+end
+function s = get64(fw, off)
+  if fw.isoct, fseek(fw.fid, off, 'bof'); s = fread(fw.fid, 1, 'uint64=>uint64');
+  else, s = typecast(fw.m.Data.raw(off + 1:off + 8), 'uint64'); end
+end
+function flush_(fw)
+  if fw.isoct, fflush(fw.fid); end
 end

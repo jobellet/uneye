@@ -17,7 +17,7 @@ Explicit candidates written by the script have priority over the saliency peaks;
 **Writers** (all write the same file; only the C++ and Python ones are tested)
 * C++: `eyelive::FrameMailboxWriter` (frame_mailbox.hpp).
 * Python, standard library only: `cpp/app/tools/eyelive_frames.py` (`FrameWriter`); PsychoPy example: `cpp/app/tools/psychopy_feed_demo.py` (run with PsychoPy 2026.2.4 on macOS arm64, see below).
-* MATLAB / Octave / Psychtoolbox: `cpp/app/tools/eyelive_frames.m` (NOT TESTED; MATLAB is not available here).
+* Octave / MATLAB / Psychtoolbox: `cpp/app/tools/eyelive_frames.m`. The Octave branch (fopen / fseek / fwrite / fflush, Octave has no memmapfile) was run with Octave 10.3.0 (conda-forge via micromamba, macOS arm64): 60 frames and 3 explicit candidates read back by the engine with the exact values. The MATLAB branch (memmapfile) is NOT tested (MATLAB is not available here). Psychtoolbox itself was not installed: for Octave on Apple Silicon it needs Octave 11 from Homebrew, and the protocol does not need `Screen`.
 
 **Tests** (`cpp/app/engine/tests/test_mailbox.cpp`, test 8c of `test_engine.cpp`): round trip; ring wrap-around; a writer running flat out against a reader (714 000 frames read, 0 torn); bad files; the Python writer read by the C++ reader; the engine turning a frame into saliency candidates and explicit candidates taking priority.
 
@@ -31,3 +31,8 @@ Explicit candidates written by the script have priority over the saliency peaks;
 4 saliency peaks computed from the first frame (first peak at (14.7, 11.0) deg for a square centred at (11.3, 8.4): within 4 deg, the map is 64 x 64 over 40 x 30 deg), then at frame 60 the explicit candidates of the script (2) replaced them (`explicit=1`).
 Installing PsychoPy where there is no compiler: `uv pip install psychopy` fails (it builds `psychtoolbox`); use `--no-deps` and add `pyglet==1.5.27 pyserial pyobjc-framework-Cocoa pyobjc-framework-Quartz python-bidi arabic-reshaper freetype-py json-tricks i18next` (plus numpy / pandas / scipy / pillow / pyyaml / requests as asked by the import errors). `units='deg'` needs a `monitors.Monitor` with width, distance and `setSizePix`.
 The timing of the flip (`t_writer_s`) is stored in the file but not yet matched to the gaze clock.
+
+## Run with Octave (2026-10-16)
+`oct_demo`-style script: `fw = eyelive_frames('open', '/tmp/stim_oct.frames', 64, 64, 3, [-20 15 20 -15]); ... fw = eyelive_frames('frame', fw, img, t); fw = eyelive_frames('candidates', fw, [10 5 1; -8 -2 0.5; 3 3 1], 12);`
+Engine side `eyelive_feed_probe /tmp/stim_oct.frames 8 --saliency`: the saliency peaks of the red square come out identical to those of the Python / PsychoPy writer ((14.7, 11.0), (14.7, 5.9), (7.8, 11.0)), proving that the pixel layout (`permute(img, [3 2 1])`) is right; then the 3 explicit candidates replace them (`explicit=1`).
+Octave pitfall found: `until` is a reserved word (do ... until), so the argument is named `until_ms`.
