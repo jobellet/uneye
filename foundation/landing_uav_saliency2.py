@@ -11,7 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.ins
 from foundation.landing_tex_saliency import pick, rule, COEF
 from foundation.landing_uav_saliency import SEQS, f2deg, peaks
 from foundation.saliency_models import Model
-MODELS = ["pqft", "sr", "itti", "itti_dyn", "motion", "center"]
+MODELS = sys.argv[1].split(",") if len(sys.argv) > 1 else ["pqft", "sr", "itti", "itti_dyn", "motion", "center"]; SUFFIX = sys.argv[2] if len(sys.argv) > 2 else ""
 GX, GY = np.meshgrid((np.arange(32) + 0.5) * 1280 / 32, (np.arange(18) + 0.5) * 720 / 18); GRID = np.stack(f2deg(GX.ravel(), GY.ravel()), 1)
 def sample(m, fx, fy):   # map value at frame pixel (fx, fy)
     h, w = m.shape; return m[min(max(int(fy / 720 * h), 0), h - 1), min(max(int(fx / 1280 * w), 0), w - 1)]
@@ -65,4 +65,4 @@ for mname in MODELS:
     out["models"][mname] = {"ms_per_frame": round(1000 * tmap, 1), "NSS": float(np.mean(nss)), "peak_within_1deg": float(np.mean(c1)), "peak_within_2deg": float(np.mean(c2)),
                             "peaks_error": {str(t): float(np.mean(ep[t])) for t in (10, 20)}, "weighted_grid_error": {str(t): float(np.mean(eg[t])) for t in (10, 20)}}
     print(mname, json.dumps(out["models"][mname]), flush=True)
-json.dump(out, open(os.path.join(ROOT, "foundation", "runs", "landing_uav_saliency2.json"), "w"), indent=1)
+json.dump(out, open(os.path.join(ROOT, "foundation", "runs", f"landing_uav_saliency2{SUFFIX}.json"), "w"), indent=1)

@@ -12,7 +12,12 @@ from foundation.saliency_models import Model
 seq = sys.argv[1] if len(sys.argv) > 1 else "Basketball"; subj = int(sys.argv[2]) if len(sys.argv) > 2 else 10
 files = sorted(glob.glob(os.path.join(ROOT, "data", "DTB70", seq, "img", "*.jpg"))); a = np.loadtxt(os.path.join(ROOT, "data", "EyeTrackUAV2", "RAW_FV", seq, f"DTB70_{seq}_subj_{subj}_FV_OrigRes_DomEye.csv"), delimiter=",")
 fr, x, y = a[:, 0].astype(int), a[:, 11], a[:, 12]; ok = np.isfinite(x) & (x > 0) & (y > 0)
-if len(sys.argv) > 3: f0 = int(sys.argv[3])
+if len(sys.argv) > 3 and sys.argv[3] == "cam":                  # the 1 s window with the largest camera motion
+    from foundation.saliency_models import global_motion
+    from scipy.ndimage import zoom
+    g = lambda f: zoom(np.asarray(Image.open(f).convert("L"), float) / 255, (180 / 720, 320 / 1280), order=1); mv = np.array([0.0] + [np.hypot(*(global_motion(g(files[k - 1]), g(files[k]))[:, 2] * 4)) for k in range(1, len(files))])
+    f0 = int(max(range(5, len(files) - 40), key=lambda s0: mv[s0:s0 + 30].mean())) + 1; print("camera window from frame", f0, "mean translation", round(float(mv[f0 - 1:f0 + 29].mean()), 1), "px / frame")
+elif len(sys.argv) > 3: f0 = int(sys.argv[3])
 else:                                                          # the 1 s window (30 frames) with the largest total eye displacement
     best = (-1, 40)
     for s in range(40, len(files) - 70, 5):
@@ -20,18 +25,18 @@ else:                                                          # the 1 s window 
         if path > best[0]: best = (path, s)
     f0 = best[1]
 idx = [f0, f0 + 7, f0 + 15, f0 + 22, f0 + 30]; edges = idx + [idx[-1] + 8]       # frame k ... frame k+1 ; the last frame is followed by 0.25 s
-names = ["pqft", "sr", "itti", "itti_dyn", "motion", "center"]; titles = {"pqft": "PQFT (engine)", "sr": "spectral residual", "itti": "Itti-Koch 1998", "itti_dyn": "Itti dynamic", "motion": "frame difference", "center": "centre bias"}
+names = sys.argv[4].split(",") if len(sys.argv) > 4 else ["pqft", "sr", "itti", "itti_dyn", "motion", "center"]; titles = {"motion_c": "frame diff. + camera comp.", "pqft_c": "PQFT + camera comp.", "itti_dyn_c": "Itti dyn. + camera comp.", "pqft": "PQFT (engine)", "sr": "spectral residual", "itti": "Itti-Koch 1998", "itti_dyn": "Itti dynamic", "motion": "frame difference", "center": "centre bias"}
 maps = {n: [] for n in names}
 for n in names:
     mod = Model(n)
     for k in idx:
         mod(np.asarray(Image.open(files[k - 2]).convert("RGB")))              # previous frame (for the dynamic channels)
         maps[n].append(mod(np.asarray(Image.open(files[k - 1]).convert("RGB"))))
-fig, ax = plt.subplots(7, 5, figsize=(20, 16.6), gridspec_kw=dict(wspace=0.015, hspace=0.015))
+fig, ax = plt.subplots(len(names) + 1, 5, figsize=(20, 2.4 * (len(names) + 1)), gridspec_kw=dict(wspace=0.015, hspace=0.015))
 med = []
 for c, k in enumerate(idx):
     img = np.asarray(Image.open(files[k - 1]).convert("RGB")); m = ok & (fr >= edges[c]) & (fr < edges[c + 1]); mx, my = np.median(x[m]), np.median(y[m]); med.append((mx, my))
-    for r in range(7):
+    for r in range(len(names) + 1):
         A = ax[r, c]; A.set_xticks([]); A.set_yticks([])
         if r == 0: A.imshow(img); A.plot(x[m], y[m], ".", color="yellow", ms=2, alpha=.7)
         else:
@@ -40,4 +45,4 @@ for c, k in enumerate(idx):
         if c == 0: A.set_ylabel("frames + gaze" if r == 0 else titles[names[r - 1]], fontsize=13)
     ax[0, c].set_title(f"frame {k} (t = {(k - f0) / 30:.2f} s)\nmedian of the next {(edges[c + 1] - edges[c]) / 30 * 1000:.0f} ms", fontsize=11)
 fig.suptitle(f"DTB70 '{seq}', EyeTrackUAV2 subject {subj} (free viewing): yellow = gaze samples until the next frame, circle = their median; rows 2-7 = saliency maps (jet, 0-1) of the same frames", fontsize=14, y=0.93)
-os.makedirs(os.path.join(ROOT, "docs", "figs_saliency"), exist_ok=True); out = os.path.join(ROOT, "docs", "figs_saliency", f"uav_saliency_{seq}_subj{subj}.png"); fig.savefig(out, dpi=75, bbox_inches="tight"); print(out, "window from frame", f0, "medians", np.round(med, 0).tolist())
+os.makedirs(os.path.join(ROOT, "docs", "figs_saliency"), exist_ok=True); out = os.path.join(ROOT, "docs", "figs_saliency", f"uav_saliency_{seq}_subj{subj}{'_cam' if len(sys.argv) > 4 else ''}.png"); fig.savefig(out, dpi=75, bbox_inches="tight"); print(out, "window from frame", f0, "medians", np.round(med, 0).tolist())

@@ -1,0 +1,29 @@
+{
+ "n": 4824,
+ "translation_px_terciles": [
+  0.31588476831969226,
+  1.3500793971749745
+ ],
+ "all": {
+  "plain": 0.2854824428279577,
+  "compensated": 0.3258762758572822
+ },
+ "small camera motion": {
+  "n": 1608,
+  "mean_translation_px": 0.16827426307234025,
+  "plain": 0.34673197204778033,
+  "compensated": 0.4078435844525279
+ },
+ "medium": {
+  "n": 1608,
+  "mean_translation_px": 0.6579381196408604,
+  "plain": 0.1674380885786151,
+  "compensated": 0.2599192848911173
+ },
+ "large": {
+  "n": 1608,
+  "mean_translation_px": 10.926323922459432,
+  "plain": 0.3422772678574776,
+  "compensated": 0.3098659582282011
+ }
+}
