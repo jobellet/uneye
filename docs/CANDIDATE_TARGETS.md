@@ -105,3 +105,17 @@ NSS = saliency at the landing point in standard deviations of the map (0 = chanc
 Same 4 826 saccades (runs/landing_uav_saliency2_comp.json): NSS motion 0.28 -> 0.33, PQFT 0.73 -> 0.72, Itti dynamic 0.65 -> 0.62; landing error with the 16 peaks or with a weighted grid unchanged (about 5.0-5.6 and 2.3-2.4 deg, tables alone 1.67 / 0.90).
 NSS of the frame-difference map split by the size of the camera motion at the onset frame (foundation/uav_camera_motion_nss.py): small (mean 0.17 px / frame) 0.35 -> 0.41; medium (0.7 px) 0.17 -> 0.26; **large (10.9 px) 0.34 -> 0.31**. In most of the frames the camera hardly moves (terciles 0.3 and 1.4 px at full resolution),
 and where it moves a lot the compensated map is not better at predicting the landing point. The figure docs/figs_saliency/uav_saliency_Soccer1_subj10_cam.png shows the 1 s window with the largest camera motion (16.7 px per frame): the compensation removes part of the response of the building edges and keeps the players, where the subject looks, but it is a single example.
+
+### PQFT saliency x Gaussian centred on the pre-saccadic eye position (foundation/landing_uav_proximity.py, runs/landing_uav_proximity.json)
+
+Weight of each point of a dense 32 x 18 candidate grid = saliency^g * exp(-|c - p0|^2 / (2 s^2)), p0 = eye position before the saccade; s (1-12 deg or infinite) tuned on the even-numbered saccades, errors in degrees (10 / 20 ms) on the odd ones (2 413 saccades).
+Tables alone 1.67 / 0.90.
+
+| use of the weights | g = 0 (proximity only) | g = 1 (saliency x proximity) | g = 2 |
+|---|---|---|---|
+| prior of the engine's selector (direction / amplitude consistency) | 2.19 / 2.19 (s = infinite) | 2.18 / 2.28 (s = 8 deg) | 2.25 / 2.30 (s = 5 deg) |
+| arg-max of the weighted map alone | 4.12 / 4.96 (s = 3 deg) | 4.15 / 5.03 (s = 1 deg) | 4.17 / 5.05 (s = 1 deg) |
+
+* The proximity Gaussian improves the saliency map used alone (2.43 / 2.57 -> 2.29 / 2.15 on the train half for g = 1, s = 8 deg instead of infinite) but never beats a flat grid (2.27 / 2.15), and nothing beats the tables.
+* With the saliency, the tuned width is 8 deg, comparable with the saccade amplitudes in these videos; with proximity alone the best width is infinite: once the kinematics have given the direction and part of the amplitude, a prior around the starting point adds nothing.
+* The arg-max of the weighted map without kinematics is much worse (4.1 / 5.0 deg): the map locates a possible target, not the next fixation.
