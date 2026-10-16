@@ -20,6 +20,7 @@
 #endif
 #include "eyelive/engine.hpp"
 #include "eyelive/engine_hooks.hpp"
+#include "eyelive/frame_mailbox.hpp"
 #include "eyelive/net_detectors.hpp"
 #include "eyelive/recorder.hpp"
 #include "eyelive/sim_source.hpp"
@@ -178,6 +179,20 @@ int main(int argc, char** argv) {
         auto mean = [](const std::vector<double>& v) { double s = 0; for (double x : v) s += x; return v.empty() ? 0.0 : s / double(v.size()); };
         std::printf("candidates: %zu saccades, true candidate chosen %.1f %% of %d estimates, landing error %.3f deg against %.3f with the tables alone\n", sac.size(), tot ? 100.0 * chosen / tot : 0.0, tot, mean(e_cand), mean(e_tab));
         CHECK(tot > 50, "too few landing estimates (%d)", tot); CHECK(chosen > tot / 2, "the true candidate was chosen only %d of %d times", chosen, tot); CHECK(mean(e_cand) < mean(e_tab), "candidates did not improve the landing estimate (%.3f vs %.3f)", mean(e_cand), mean(e_tab));
+    }
+    // 8c. stimulus feed: a script shares a frame (saliency peaks become the candidates) and then explicit candidates (priority) through the mailbox
+    {
+        const std::string fp = (fs::temp_directory_path() / "eyelive_feed_test.frames").string(); FrameMailboxWriter w; std::string err; CHECK(w.create(fp, 64, 64, 3, 3, -20, 15, 20, -15, &err), "mailbox create: %s", err.c_str());
+        auto e = make_engine(); StimulusFeedConfig fc; fc.path = fp; fc.saliency = true; CHECK(e->stimulus_feed_open(fc, &err), "feed open: %s", err.c_str());
+        std::vector<uint8_t> px(64 * 64 * 3, 110); for (int y = 8; y < 20; ++y) for (int x = 44; x < 56; ++x) { px[(size_t(y) * 64 + size_t(x)) * 3] = 230; px[(size_t(y) * 64 + size_t(x)) * 3 + 1] = 40; px[(size_t(y) * 64 + size_t(x)) * 3 + 2] = 40; }
+        for (size_t i = 0; i < px.size(); i += 5) px[i] = uint8_t(px[i] + int((i * 2654435761u >> 11) % 9) - 4); w.push_frame(px.data(), 1.0);
+        for (int k = 0; k < 400 && e->candidates().empty(); ++k) sleep_ms(5); auto c = e->candidates(); auto st = e->stimulus_feed_status();
+        CHECK(!c.empty() && st.frames >= 1 && st.open, "no saliency candidates from the frame (%zu, frames %llu)", c.size(), (unsigned long long)st.frames);
+        if (!c.empty()) { const double ex = -20 + 40.0 * 50 / 64, ey = 15 - 30.0 * 14 / 64; CHECK(std::hypot(c[0].x - ex, c[0].y - ey) < 8.0, "first candidate (%.1f, %.1f), square near (%.1f, %.1f)", c[0].x, c[0].y, ex, ey); }
+        w.set_candidates({{1.f, 2.f, 1.f}, {3.f, 4.f, 2.f}, {-5.f, 6.f, 1.f}}, 15.0); for (int k = 0; k < 400 && e->candidates().size() != 3; ++k) sleep_ms(5); c = e->candidates(); st = e->stimulus_feed_status();
+        CHECK(c.size() == 3 && c[1].x == 3.f && st.explicit_candidates, "explicit candidates not used (%zu)", c.size()); w.push_frame(px.data(), 2.0); sleep_ms(100); CHECK(e->candidates().size() == 3, "a new frame replaced the explicit candidates");
+        std::printf("stimulus feed: %llu frames, %llu candidate updates, last frame age %.3f s\n", (unsigned long long)st.frames, (unsigned long long)st.candidate_updates, st.last_frame_age_s);
+        e->stimulus_feed_close(); CHECK(!e->stimulus_feed_status().open, "feed still open"); std::string e2; CHECK(!e->stimulus_feed_open(StimulusFeedConfig{(fs::temp_directory_path() / "nothing_here.frames").string()}, &e2) && !e2.empty(), "missing file accepted"); fs::remove(fp);
     }
     // 9. live labels come from the CHOSEN detector. fast_threshold chosen: an open provisional label whose end follows the newest sample while the saccade happens. hmm_accel chosen: only its own (final) events are listed, 
     //    but the provisional events of the fast detector still reach the triggers (rules anchored on the onset)

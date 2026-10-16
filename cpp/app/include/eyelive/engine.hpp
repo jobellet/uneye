@@ -65,6 +65,11 @@ struct AutoLearnStatus {
     std::vector<AutoGeneration> history; std::string message;
 };
 
+// Stimulus feed: a script shares frames and / or candidate targets through a memory-mapped file (cpp/app/engine/include/eyelive/frame_mailbox.hpp, writers in cpp/app/tools).
+// Explicit candidates written by the script have priority; otherwise, with saliency = true, the PQFT saliency peaks of the newest frame become the candidates.
+struct StimulusFeedConfig { std::string path; bool saliency = false; int max_peaks = 16; double rel_threshold = 0.3; double use_until_ms = 1e9; };
+struct StimulusFeedStatus { bool open = false; uint64_t frames = 0, candidate_updates = 0; int candidates = 0; bool explicit_candidates = false; double last_frame_age_s = -1; int width = 0, height = 0; std::string error; };
+
 class IEngine {
  public:
     virtual ~IEngine() = default;
@@ -79,6 +84,10 @@ class IEngine {
     virtual bool forecast_available() const = 0;
     virtual void forecast_enable(bool on) = 0;                 // the forecast costs CPU: it is computed only while someone asks for it (call every frame while it is displayed; it stops 3 s after the last call)
     virtual void candidates_set(const std::vector<Candidate>& c, double use_until_ms = 1e9) = 0;   // possible targets of the next saccades (empty = none): the landing estimate then picks the most plausible one; can be called at any time (e.g. at every fixation, with weights from a prior on the saccade vector). Later than use_until_ms after the onset the tables' estimate is kept (reading: ~ 12 ms)
+    virtual std::vector<Candidate> candidates() const = 0;                 // the list currently used
+    virtual bool stimulus_feed_open(const StimulusFeedConfig& cfg, std::string* error) = 0;   // polls the mailbox file every 5 ms in its own thread (independent of start / stop)
+    virtual void stimulus_feed_close() = 0;
+    virtual StimulusFeedStatus stimulus_feed_status() const = 0;
     virtual size_t forecasts(int64_t from, int64_t to, std::vector<ForecastSample>& out) const = 0;      // one entry for each sample of [from, to) (valid = false when not available)
     // detectors
     virtual std::vector<DetectorInfo> available_detectors() const = 0;

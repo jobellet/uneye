@@ -1,5 +1,7 @@
 // IEngine (task T18): source thread -> recorder (the queue) -> analysis thread (detectors, events, state block, triggers); rate measurement, preallocation, blink events, scale selection, hot swap, prelabel, training glue.
 #include "eyelive/candidates.hpp"
+#include "eyelive/frame_mailbox.hpp"
+#include "eyelive/saliency.hpp"
 #include "eyelive/engine.hpp"
 #include "eyelive/engine_hooks.hpp"
 #include <algorithm>
@@ -39,7 +41,7 @@ void register_detectors() {                      // referencing the classes also
 class Engine final : public IEngine {
  public:
     explicit Engine(std::unique_ptr<ITrainer> trainer = nullptr) { register_detectors(); expert_ = std::make_unique<ExpertLabels>(3); trig_ = make_trigger_engine(); trainer_ = trainer ? std::move(trainer) : make_trainer(); }
-    ~Engine() override { stop(); cancel_training(); }
+    ~Engine() override { stimulus_feed_close(); stop(); cancel_training(); }
 
     bool start(const SessionConfig& cfg, std::string* error) override {
         stop(); std::lock_guard<std::mutex> life(life_mu_);
@@ -285,6 +287,29 @@ class Engine final : public IEngine {
         CandidateChoice ch; { std::lock_guard<std::mutex> l(cand_mu_); ch = pick_candidate(p0x, p0y, cx, cy, rem, cands_.data(), cands_.size(), sc, CandidateParams()); if (ch.index >= 0) { const double ms = (rec_->t(i) - rec_->t(on)) * 1000.0; double lx = 0, ly = 0; landing_from_candidate(rec_->x(on - 1), rec_->y(on - 1), cands_[size_t(ch.index)].x, cands_[size_t(ch.index)].y, f.lx, f.ly, ms, lx, ly); f.lx = float(lx); f.ly = float(ly); } }
         if (ch.index >= 0) { f.candidate = ch.index; f.candidate_confidence = float(ch.confidence); }
     }
+    std::vector<Candidate> candidates() const override { std::lock_guard<std::mutex> l(cand_mu_); return cands_; }
+    // ---- stimulus feed: polls the mailbox, explicit candidates first, else the saliency peaks of the newest frame
+    bool stimulus_feed_open(const StimulusFeedConfig& cfg, std::string* error) override {
+        stimulus_feed_close(); auto r = std::make_unique<FrameMailboxReader>(); if (!r->open(cfg.path, error)) return false;
+        { std::lock_guard<std::mutex> l(feed_mu_); feed_st_ = StimulusFeedStatus(); feed_st_.open = true; feed_st_.width = int(r->width()); feed_st_.height = int(r->height()); }
+        feed_run_ = true; feed_thread_ = std::thread([this, cfg, rd = std::move(r)] { feed_loop(cfg, *rd); }); return true;
+    }
+    void stimulus_feed_close() override { feed_run_ = false; if (feed_thread_.joinable()) feed_thread_.join(); std::lock_guard<std::mutex> l(feed_mu_); feed_st_.open = false; }
+    StimulusFeedStatus stimulus_feed_status() const override { std::lock_guard<std::mutex> l(feed_mu_); StimulusFeedStatus s = feed_st_; if (s.open && last_frame_t_ > 0) s.last_frame_age_s = std::chrono::duration<double>(Clock::now().time_since_epoch()).count() - last_frame_t_; return s; }
+    void feed_loop(const StimulusFeedConfig& cfg, FrameMailboxReader& rd) {
+        SaliencyPQFT sal(64, 3.0, 0.0); MailboxFrame f; MailboxCandidates mc; uint64_t last_no = 0, last_seq = 0; bool have_explicit = false;
+        while (feed_run_) {
+            bool changed = false;
+            if (rd.read_candidates(last_seq, mc)) { last_seq = mc.seq; have_explicit = !mc.list.empty(); if (have_explicit) { candidates_set(mc.list, mc.until_ms); changed = true; } else changed = true; }
+            if (rd.read_frame(last_no, f)) {
+                last_no = f.frame_no; last_frame_t_ = std::chrono::duration<double>(Clock::now().time_since_epoch()).count(); { std::lock_guard<std::mutex> l(feed_mu_); ++feed_st_.frames; }
+                if (cfg.saliency && !have_explicit) { sal.push(f.pixels.data(), int(f.width), int(f.height), int(f.channels), f.t_writer_s); candidates_set(peaks_from_map(sal.map().data(), sal.size(), sal.size(), f.gx0, f.gy0, f.gx1, f.gy1, cfg.max_peaks, cfg.rel_threshold), cfg.use_until_ms); changed = true; }
+            }
+            { std::lock_guard<std::mutex> l(feed_mu_); if (changed) ++feed_st_.candidate_updates; feed_st_.explicit_candidates = have_explicit; }
+            { std::lock_guard<std::mutex> l(cand_mu_); std::lock_guard<std::mutex> l2(feed_mu_); feed_st_.candidates = int(cands_.size()); }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
     double cand_until_snapshot() const { std::lock_guard<std::mutex> l(cand_mu_); return cand_until_ms_; }
     void candidates_set(const std::vector<Candidate>& c, double use_until_ms = 1e9) override { { std::lock_guard<std::mutex> l(cand_mu_); cands_ = c; cand_until_ms_ = use_until_ms; } cands_any_.store(!c.empty(), std::memory_order_release);
         if (!running_) { std::lock_guard<std::mutex> l(fc_mu_); gaze_n_ = 0; fc_from_ = INT64_MAX; } }       // a finished session: forecasts already computed are stale (while recording, only the new samples use the new list)
@@ -393,6 +418,7 @@ private:
     // state
     AutoLearnConfig al_cfg_; std::string al_labeler_ = "hmm_accel", al_prev_model_, al_msg_; int al_gen_ = 0, al_job_gen_ = 0, al_trainings_ = 0; int64_t al_committed_ = 0, al_job_from_ = 0, al_job_to_ = 0; bool al_relabel_pending_ = false, al_job_relabel_ = false, al_dirty_ = false, al_training_ = false;
     double al_last_edit_ = 0, al_train_t0_ = 0, al_stats_time_ = -1e9; std::future<std::vector<Event>> al_job_; std::vector<std::vector<std::pair<int64_t, int64_t>>> al_spans_; std::vector<std::string> al_gen_names_; std::vector<AutoGeneration> al_gen_train_, al_history_, al_history_cache_;
+    std::thread feed_thread_; std::atomic<bool> feed_run_{false}; mutable std::mutex feed_mu_; StimulusFeedStatus feed_st_; std::atomic<double> last_frame_t_{0};
     mutable std::mutex cand_mu_; std::vector<Candidate> cands_; double cand_until_ms_ = 1e9; std::atomic<bool> cands_any_{false};
     static constexpr size_t kForecastRing = 65536; mutable std::mutex fc_mu_; mutable std::unique_ptr<uneye::gaze::GazeEngine> gaze_; mutable std::vector<ForecastSample> fc_ring_; mutable int64_t gaze_n_ = 0, fc_from_ = 0; std::atomic<double> fc_until_{0.0}; bool gaze_stale_ = true;
     std::mutex ana_mu_; std::condition_variable ana_cv_; bool det_prov_ = false; int64_t slow_hop_ = 5, slow_done_ = 0;
