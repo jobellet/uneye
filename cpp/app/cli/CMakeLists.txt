@@ -12,7 +12,7 @@ if(CLI_SRC)
     add_executable(eyelive_cli_${tn} ${t})
     target_link_libraries(eyelive_cli_${tn} PRIVATE eyelive_contracts Threads::Threads)
     add_test(NAME eyelive_cli_${tn} COMMAND eyelive_cli_${tn} $<TARGET_FILE:eyelive_cli> ${CMAKE_SOURCE_DIR})
-    set_tests_properties(eyelive_cli_${tn} PROPERTIES LABELS "eyelive;cli" TIMEOUT 300)
+    set_tests_properties(eyelive_cli_${tn} PROPERTIES LABELS "eyelive;cli" TIMEOUT 1500)   # (ThreadSanitizer builds are 10-20x slower)
   endforeach()
 endif()
 
