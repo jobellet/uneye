@@ -1,0 +1,118 @@
+{
+ "train": 2429,
+ "test": 2397,
+ "tables": {
+  "10": 1.79026697463063,
+  "20": 0.9658216782483233
+ },
+ "results": [
+  {
+   "mode": "kin",
+   "saliency_gamma": 0,
+   "prior_exponent": 0.5,
+   "error": {
+    "10": 2.5701895889211896,
+    "20": 2.5419438719820993
+   }
+  },
+  {
+   "mode": "kin",
+   "saliency_gamma": 0,
+   "prior_exponent": 1.0,
+   "error": {
+    "10": 2.6675846215872854,
+    "20": 2.6894925742091567
+   }
+  },
+  {
+   "mode": "kin",
+   "saliency_gamma": 0,
+   "prior_exponent": 2.0,
+   "error": {
+    "10": 2.7316634911323447,
+    "20": 2.845690376774501
+   }
+  },
+  {
+   "mode": "kin",
+   "saliency_gamma": 1,
+   "prior_exponent": 0.5,
+   "error": {
+    "10": 2.461760396959012,
+    "20": 2.3253405075629
+   }
+  },
+  {
+   "mode": "kin",
+   "saliency_gamma": 1,
+   "prior_exponent": 1.0,
+   "error": {
+    "10": 2.5885340783244586,
+    "20": 2.524654370057596
+   }
+  },
+  {
+   "mode": "kin",
+   "saliency_gamma": 1,
+   "prior_exponent": 2.0,
+   "error": {
+    "10": 2.7155331817016934,
+    "20": 2.8093084724990787
+   }
+  },
+  {
+   "mode": "argmax",
+   "saliency_gamma": 0,
+   "prior_exponent": 0.5,
+   "error": {
+    "10": 4.399772978184694,
+    "20": 5.173087537478236
+   }
+  },
+  {
+   "mode": "argmax",
+   "saliency_gamma": 0,
+   "prior_exponent": 1.0,
+   "error": {
+    "10": 4.399772978184694,
+    "20": 5.173087537478236
+   }
+  },
+  {
+   "mode": "argmax",
+   "saliency_gamma": 0,
+   "prior_exponent": 2.0,
+   "error": {
+    "10": 4.399772978184694,
+    "20": 5.173087537478236
+   }
+  },
+  {
+   "mode": "argmax",
+   "saliency_gamma": 1,
+   "prior_exponent": 0.5,
+   "error": {
+    "10": 4.674504261017626,
+    "20": 5.51444669919214
+   }
+  },
+  {
+   "mode": "argmax",
+   "saliency_gamma": 1,
+   "prior_exponent": 1.0,
+   "error": {
+    "10": 4.458423027481836,
+    "20": 5.309011927550218
+   }
+  },
+  {
+   "mode": "argmax",
+   "saliency_gamma": 1,
+   "prior_exponent": 2.0,
+   "error": {
+    "10": 4.384260996444443,
+    "20": 5.24773346522656
+   }
+  }
+ ]
+}

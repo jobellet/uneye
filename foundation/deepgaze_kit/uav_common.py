@@ -1,5 +1,5 @@
 """Shared pieces of the UAV tests: saccade detection on EyeTrackUAV2 (same rules as foundation/landing_uav_saliency.py) and the frame <-> degrees geometry."""
-import glob, os, sys
+import glob, os, re, sys
 import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))); sys.path.insert(0, ROOT)
 from foundation.landing_tex_saliency import COEF, pick, rule
@@ -11,7 +11,7 @@ def peaks(m, N=16, rel=0.3, rad=2):
     from scipy.ndimage import maximum_filter
     mx = maximum_filter(m, size=2 * rad + 1); ys, xs = np.where((m == mx) & (m >= rel * m.max())); o = np.argsort(-m[ys, xs])[:N]; return xs[o], ys[o]
 def deg2f(xd, yd): return np.tan(np.radians(xd)) * D / MMX + 960 - 320, 540 - np.tan(np.radians(yd)) * D / MMY - 180
-def detect_saccades():
+def detect_saccades(with_subject=False):
     """list of (seq index, onset frame index (0-based), p0 deg, landing deg, {tau: (cur, remaining by the tables, tables' landing)})"""
     sacc = []
     for si, seq in enumerate(SEQS):
@@ -31,5 +31,6 @@ def detect_saccades():
                     cur = p[t]; d = np.linalg.norm(cur - p0)
                     if d < 0.02: continue
                     u = (cur - p0) / d; v = sp1[t - 2:t + 1].mean(); vmax = sp1[on:t + 1].max(); rem = max(float(COEF[min(tau // 2, 29)] @ np.array([d, v, vmax])), 0.0); feats[tau] = (cur, rem, cur + rem * u)
-                sacc.append((si, min(max(fr[on] - 1, 0), nf - 1), p0, land, feats))
+                row = (si, min(max(fr[on] - 1, 0), nf - 1), p0, land, feats)
+                sacc.append(row + (int(re.search(r"subj_(\d+)", fn).group(1)),) if with_subject else row)
     return sacc

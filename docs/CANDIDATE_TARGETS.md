@@ -119,3 +119,18 @@ Tables alone 1.67 / 0.90.
 * The proximity Gaussian improves the saliency map used alone (2.43 / 2.57 -> 2.29 / 2.15 on the train half for g = 1, s = 8 deg instead of infinite) but never beats a flat grid (2.27 / 2.15), and nothing beats the tables.
 * With the saliency, the tuned width is 8 deg, comparable with the saccade amplitudes in these videos; with proximity alone the best width is infinite: once the kinematics have given the direction and part of the amplitude, a prior around the starting point adds nothing.
 * The arg-max of the weighted map without kinematics is much worse (4.1 / 5.0 deg): the map locates a possible target, not the next fixation.
+
+### Learned prior on the saccade vector instead of the Gaussian (foundation/landing_uav_prior.py, runs/landing_uav_prior.json)
+
+P(dx, dy) = smoothed 2-D histogram (1 deg bins) of the landing vectors of the train participants (even subject numbers, 2 429 saccades; median amplitude 2.9 deg, 49 % rightwards, 79 % horizontally dominant), weight of each point of the 32 x 18 grid = P(c - p0)^a (x PQFT saliency for g = 1), test participants (odd, 2 397 saccades).
+Errors (deg) at 10 / 20 ms; tables alone 1.79 / 0.97; flat grid 2.40 / 2.30.
+
+| weights | a = 0.5 | a = 1 | a = 2 |
+|---|---|---|---|
+| prior only, engine's selector | 2.57 / 2.54 | 2.67 / 2.69 | 2.73 / 2.85 |
+| prior x saliency, engine's selector | 2.46 / 2.33 | 2.59 / 2.52 | 2.72 / 2.81 |
+| prior only, arg-max (no kinematics) | 4.40 / 5.17 | same | same |
+| prior x saliency, arg-max | 4.67 / 5.51 | 4.46 / 5.31 | 4.38 / 5.25 |
+
+The learned vector prior is worse than a flat grid (the sharper, the worse): it favours the typical small horizontal saccades while the kinematics at 10-20 ms already carry the direction and a part of the amplitude, and the two sources disagree on the larger or oblique saccades.
+Without kinematics (arg-max) the prior alone gives 4.4 / 5.2 deg: the starting position and the statistics of the vectors say little about the next landing point in free viewing of these videos.
