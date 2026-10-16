@@ -145,9 +145,10 @@ def predict(net, name, sp, idx, rng=None):
     pred.aux = (torch.as_tensor(b["dur"], dtype=torch.float32, device=DEV), torch.as_tensor(b["tau"], dtype=torch.float32, device=DEV))
     return out, torch.as_tensor(y, dtype=torch.float32, device=DEV)
 
-def train(name, tr, va, steps, seed=0):
+def train(name, tr, va, steps, seed=0, init=None, lr=None):
     torch.manual_seed(seed); rng = np.random.RandomState(seed); net = make(name); bs = 128 if name.startswith("unet") else 256
-    lr = 3e-4 if name == "unet_pre" else 1e-3; opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-2)
+    if init is not None: net.load_state_dict(init)
+    lr = lr or (3e-4 if name == "unet_pre" else 1e-3); opt = torch.optim.AdamW(net.parameters(), lr=lr, weight_decay=1e-2)
     best, bad, state, t0 = 1e9, 0, None, time.time(); vidx = np.random.RandomState(1).choice(len(va.R), min(3000, len(va.R)), replace=False)
     for it in range(1, steps + 1):
         for g in opt.param_groups: g["lr"] = lr * min(1.0, it / 200)

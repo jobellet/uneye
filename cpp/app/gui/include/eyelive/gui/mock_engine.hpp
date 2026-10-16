@@ -30,6 +30,8 @@ class MockEngine final : public IEngine {
     void forecast_enable(bool) override {}
     void candidates_set(const std::vector<Candidate>& c, double = 1e9) override { candidates_ = c; }
     std::vector<Candidate> candidates_;
+    bool landing_model_load(const std::string&, std::string* error) override { if (error) *error = "not available in the mock engine"; return false; }
+    bool landing_model_loaded() const override { return false; }
     std::vector<Candidate> candidates() const override { return candidates_; }
     bool stimulus_feed_open(const StimulusFeedConfig&, std::string* error) override { if (error) *error = "not available in the mock engine"; return false; }
     void stimulus_feed_close() override {}

@@ -145,7 +145,8 @@ int main(int argc, char** argv) {
         st = poll_until([&](const AutoLearnStatus& s) { return !s.labeling && s.history.size() >= 2; }, 180); poll_until([&](const AutoLearnStatus& s) { return !s.labeling; }, 120);
         int by_model = 0, by_hmm = 0, deleted_back = 0; for (const auto& p : e->expert().prelabels()) { by_model += p.model_version == 1 && p.onset > rev_end; by_hmm += p.model_version == 0 && p.onset > rev_end; } for (const auto& ev : e->expert().events()) deleted_back += ev.onset < rev_end - 500 && ev.origin == EventOrigin::Detector && ev.model_version == 1;
         std::printf("auto: windows after the reviewed ones: %d labelled by the model, %d still by the label-free detector; history:", by_model, by_hmm); for (auto& g : st.history) std::printf(" [%s reviewed %.1f s, F1 %.2f, %d events]", g.labeler.c_str(), g.reviewed_s, g.f1, g.n_events); std::printf("\n");
-        CHECK(by_model > 10 && by_hmm == 0, "windows after the reviewed ones: %d by the model, %d by the detector", by_model, by_hmm); CHECK(deleted_back == 0, "a model re-labelled a reviewed window"); CHECK(e->expert().events().size() > 10, "events after relabelling: %zu", e->expert().events().size());
+        if (!SANITIZED) { CHECK(by_model > 10 && by_hmm == 0, "windows after the reviewed ones: %d by the model, %d by the detector", by_model, by_hmm); CHECK(e->expert().events().size() > 10, "events after relabelling: %zu", e->expert().events().size()); }   // (a sanitizer build trains a toy model: only the safety checks apply)
+        CHECK(deleted_back == 0, "a model re-labelled a reviewed window");
         CHECK(st.history.size() >= 2 && st.history[0].reviewed_s > 0, "history: %zu generations", st.history.size());
         CHECK(e->expert().undo(), "the expert's last edit can be undone"); 
     }
@@ -179,6 +180,16 @@ int main(int argc, char** argv) {
         auto mean = [](const std::vector<double>& v) { double s = 0; for (double x : v) s += x; return v.empty() ? 0.0 : s / double(v.size()); };
         std::printf("candidates: %zu saccades, true candidate chosen %.1f %% of %d estimates, landing error %.3f deg against %.3f with the tables alone\n", sac.size(), tot ? 100.0 * chosen / tot : 0.0, tot, mean(e_cand), mean(e_tab));
         CHECK(tot > 50, "too few landing estimates (%d)", tot); CHECK(chosen > tot / 2, "the true candidate was chosen only %d of %d times", chosen, tot); CHECK(mean(e_cand) < mean(e_tab), "candidates did not improve the landing estimate (%.3f vs %.3f)", mean(e_cand), mean(e_tab));
+    }
+    // 8d. landing network: loaded into the engine, the landing estimate of an ongoing saccade comes from it (flag landing_net), the engine keeps running when the file is bad, and unloading goes back to the tables
+    {
+        auto e = make_engine(); std::string err; CHECK(!e->landing_model_load(root + "/models/nothing_here.bin", &err) && !err.empty(), "missing network accepted"); CHECK(!e->landing_model_loaded(), "loaded after a failure");
+        CHECK(e->landing_model_load(root + "/models/landing_mlp_gazebase.bin", &err), "load: %s", err.c_str()); CHECK(e->landing_model_loaded(), "not loaded");
+        e->forecast_enable(true); SessionConfig c = cfg_sim("landnet.eyelive", 1000, 0.0, "hmm_accel"); c.source.seed = 5; CHECK(e->start(c, &err), "start: %s", err.c_str());
+        for (int w = 0; w < 6000 && e->stats().samples < 40000; ++w) { e->forecast_enable(true); sleep_ms(10); } e->stop(); const int64_t N = e->trace().size(); std::vector<ForecastSample> fc; e->forecasts(0, N, fc);
+        size_t with_net = 0, with_landing = 0; for (const auto& f : fc) { with_landing += f.landing; with_net += f.landing_net; }
+        std::printf("landing network in the engine: %zu samples with a landing estimate, %zu of them from the network\n", with_landing, with_net); CHECK(with_landing > 200 && with_net >= with_landing * 95 / 100, "network used for %zu of %zu estimates", with_net, with_landing);
+        CHECK(e->landing_model_load("", &err) && !e->landing_model_loaded(), "unload"); fc.clear(); e->forecasts(0, N, fc); size_t net_after = 0; for (const auto& f : fc) net_after += f.landing_net; CHECK(net_after == 0, "network still used after unloading (%zu)", net_after);
     }
     // 8c. stimulus feed: a script shares a frame (saliency peaks become the candidates) and then explicit candidates (priority) through the mailbox
     {

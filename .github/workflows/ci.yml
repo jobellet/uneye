@@ -19,4 +19,11 @@ jobs:
       - name: Build
         run: cmake --build build -j4
       - name: Test
-        run: cd build && ctest --output-on-failure --timeout 900
+        shell: bash
+        run: |
+          cd build
+          set +e
+          ctest --output-on-failure --timeout 900 2>&1 | tee ../ctest.log
+          rc=${PIPESTATUS[0]}
+          grep -E "Failed|Timeout|\*\*\*|FAIL|^auto:|The following tests|tests passed" ../ctest.log | head -16 | cut -c1-400 | while IFS= read -r l; do echo "::error title=test::$l"; done
+          exit $rc

@@ -1,6 +1,7 @@
 // IEngine (task T18): source thread -> recorder (the queue) -> analysis thread (detectors, events, state block, triggers); rate measurement, preallocation, blink events, scale selection, hot swap, prelabel, training glue.
 #include "eyelive/candidates.hpp"
 #include "eyelive/frame_mailbox.hpp"
+#include "eyelive/landing_net.hpp"
 #include "eyelive/saliency.hpp"
 #include "eyelive/engine.hpp"
 #include "eyelive/engine_hooks.hpp"
@@ -276,6 +277,21 @@ class Engine final : public IEngine {
     bool provs_empty() const { std::lock_guard<std::mutex> l(mu_); return provs_.empty(); }
     void measure_latency(int64_t n) { const double ms = (trigger_host_now_s() - arrival(n - 1)) * 1000.0; std::lock_guard<std::mutex> l(mu_); lat_.push_back(ms); if (lat_.size() > 1024) lat_.erase(lat_.begin(), lat_.begin() + 512); }
 
+    // landing network (optional): replaces the tables' landing point; (predict() uses scratch buffers: every caller holds fc_mu_)
+    void apply_landing_net(const uneye::gaze::Output& o, int64_t i, double sc, ForecastSample& f) const {
+        auto net = std::atomic_load(&net_); if (!net || o.event_onset < 0) return;
+        const int64_t on = i - (o.index - o.event_onset); if (on < 1 || on > i) return;
+        auto pos = [&](int64_t k, double* x, double* y) { if (k < 0 || k >= rec_->size() || !rec_->valid(k) || !std::isfinite(rec_->x(k)) || !std::isfinite(rec_->y(k))) return false; *x = rec_->x(k) * sc; *y = rec_->y(k) * sc; return true; };
+        double dx = 0, dy = 0; if (!net->predict(pos, i, on, &dx, &dy)) return;
+        f.lx = float((rec_->x(i) * sc + dx) / sc); f.ly = float((rec_->y(i) * sc + dy) / sc); f.landing_net = true;
+    }
+    bool landing_model_load(const std::string& path, std::string* error) override {
+        if (path.empty()) std::atomic_store(&net_, std::shared_ptr<const LandingNet>());
+        else { auto n = std::make_shared<LandingNet>(); if (!n->load(path, error)) return false; std::atomic_store(&net_, std::shared_ptr<const LandingNet>(n)); }
+        if (!running_) { std::lock_guard<std::mutex> l(fc_mu_); gaze_n_ = 0; fc_from_ = INT64_MAX; }          // a finished session: forecasts already computed are stale
+        return true;
+    }
+    bool landing_model_loaded() const override { return bool(std::atomic_load(&net_)); }
     // candidate targets: the landing estimate becomes the chosen candidate (positions in the stream frame, converted to degrees with sc)
     void apply_candidates(const uneye::gaze::Output& o, int64_t i, double sc, ForecastSample& f) const {
         if (!cands_any_.load(std::memory_order_acquire) || o.event_onset < 0) return;
@@ -283,7 +299,7 @@ class Engine final : public IEngine {
         if (on < 1 || on > i) return;
         if ((rec_->t(i) - rec_->t(on)) * 1000.0 > cand_until_snapshot()) return;
         const double p0x = rec_->x(on - 1) * sc, p0y = rec_->y(on - 1) * sc, cx = rec_->x(i) * sc, cy = rec_->y(i) * sc;
-        const double rem = std::hypot(o.forecast.landing.x - cx, o.forecast.landing.y - cy);
+        const double rem = std::hypot(double(f.lx) * sc - cx, double(f.ly) * sc - cy);
         CandidateChoice ch; { std::lock_guard<std::mutex> l(cand_mu_); ch = pick_candidate(p0x, p0y, cx, cy, rem, cands_.data(), cands_.size(), sc, CandidateParams()); if (ch.index >= 0) { const double ms = (rec_->t(i) - rec_->t(on)) * 1000.0; double lx = 0, ly = 0; landing_from_candidate(rec_->x(on - 1), rec_->y(on - 1), cands_[size_t(ch.index)].x, cands_[size_t(ch.index)].y, f.lx, f.ly, ms, lx, ly); f.lx = float(lx); f.ly = float(ly); } }
         if (ch.index >= 0) { f.candidate = ch.index; f.candidate_confidence = float(ch.confidence); }
     }
@@ -318,7 +334,7 @@ class Engine final : public IEngine {
         uneye::gaze::Sample gs; gs.t_us = rec_->t(i) * 1e6; const bool ok = rec_->valid(i) && std::isfinite(rec_->x(i)) && std::isfinite(rec_->y(i)); gs.x_deg = ok ? rec_->x(i) * sc : std::nan(""); gs.y_deg = ok ? rec_->y(i) * sc : std::nan(""); uneye::gaze::Output o; gaze_->push(gs, o);
         ForecastSample f; if (o.forecast.at10.valid && o.forecast.at20.valid) { f.valid = true; f.ballistic = o.forecast.ballistic; f.x10 = float(o.forecast.at10.x / sc); f.y10 = float(o.forecast.at10.y / sc); f.x20 = float(o.forecast.at20.x / sc); f.y20 = float(o.forecast.at20.y / sc);
             f.sx10 = float(o.forecast.at10.scale_x / sc); f.sy10 = float(o.forecast.at10.scale_y / sc); f.sx20 = float(o.forecast.at20.scale_x / sc); f.sy20 = float(o.forecast.at20.scale_y / sc);
-            if (o.forecast.landing.valid) { f.landing = true; f.lx = float(o.forecast.landing.x / sc); f.ly = float(o.forecast.landing.y / sc); apply_candidates(o, i, sc, f); } }
+            if (o.forecast.landing.valid) { f.landing = true; f.lx = float(o.forecast.landing.x / sc); f.ly = float(o.forecast.landing.y / sc); apply_landing_net(o, i, sc, f); apply_candidates(o, i, sc, f); } }
         return f;
     }
     // ---- forecast of the future eye position: every new sample goes through the gaze engine; the forecast is stored (stream units) in a ring read by the GUI
@@ -419,6 +435,7 @@ private:
     AutoLearnConfig al_cfg_; std::string al_labeler_ = "hmm_accel", al_prev_model_, al_msg_; int al_gen_ = 0, al_job_gen_ = 0, al_trainings_ = 0; int64_t al_committed_ = 0, al_job_from_ = 0, al_job_to_ = 0; bool al_relabel_pending_ = false, al_job_relabel_ = false, al_dirty_ = false, al_training_ = false;
     double al_last_edit_ = 0, al_train_t0_ = 0, al_stats_time_ = -1e9; std::future<std::vector<Event>> al_job_; std::vector<std::vector<std::pair<int64_t, int64_t>>> al_spans_; std::vector<std::string> al_gen_names_; std::vector<AutoGeneration> al_gen_train_, al_history_, al_history_cache_;
     std::thread feed_thread_; std::atomic<bool> feed_run_{false}; mutable std::mutex feed_mu_; StimulusFeedStatus feed_st_; std::atomic<double> last_frame_t_{0};
+    std::shared_ptr<const LandingNet> net_;
     mutable std::mutex cand_mu_; std::vector<Candidate> cands_; double cand_until_ms_ = 1e9; std::atomic<bool> cands_any_{false};
     static constexpr size_t kForecastRing = 65536; mutable std::mutex fc_mu_; mutable std::unique_ptr<uneye::gaze::GazeEngine> gaze_; mutable std::vector<ForecastSample> fc_ring_; mutable int64_t gaze_n_ = 0, fc_from_ = 0; std::atomic<double> fc_until_{0.0}; bool gaze_stale_ = true;
     std::mutex ana_mu_; std::condition_variable ana_cv_; bool det_prov_ = false; int64_t slow_hop_ = 5, slow_done_ = 0;

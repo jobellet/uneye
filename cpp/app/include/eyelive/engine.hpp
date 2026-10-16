@@ -28,7 +28,8 @@ struct SessionConfig {
 // the forecast of sample i describes the position of sample i + 10 ms and i + 20 ms. The scales are those of a Laplace distribution: an 80 % interval is +- 1.61 scale.
 struct ForecastSample { float x10 = 0, y10 = 0, x20 = 0, y20 = 0, sx10 = 0, sy10 = 0, sx20 = 0, sy20 = 0; bool valid = false, ballistic = false;
                        float lx = 0, ly = 0; bool landing = false;          // estimated end point of the ongoing saccade (stream units): the tables' estimate, or the chosen candidate when candidates are set
-                       int candidate = -1; float candidate_confidence = 0; };   // index in the candidate list given to candidates_set (-1: none chosen)
+                       int candidate = -1; float candidate_confidence = 0;
+                       bool landing_net = false; };                          // the landing estimate (lx, ly) comes from the landing network (landing_model_load) instead of the tables   // index in the candidate list given to candidates_set (-1: none chosen)
 struct Candidate { float x = 0, y = 0, weight = 1; };                      // a possible target (stream units, same frame as the gaze); weight = prior (saliency, relevance), > 0
 
 struct EngineStats {
@@ -84,6 +85,8 @@ class IEngine {
     virtual bool forecast_available() const = 0;
     virtual void forecast_enable(bool on) = 0;                 // the forecast costs CPU: it is computed only while someone asks for it (call every frame while it is displayed; it stops 3 s after the last call)
     virtual void candidates_set(const std::vector<Candidate>& c, double use_until_ms = 1e9) = 0;   // possible targets of the next saccades (empty = none): the landing estimate then picks the most plausible one; can be called at any time (e.g. at every fixation, with weights from a prior on the saccade vector). Later than use_until_ms after the onset the tables' estimate is kept (reading: ~ 12 ms)
+    virtual bool landing_model_load(const std::string& path, std::string* error) = 0;   // optional network for the landing estimate (cpp/models/landing_mlp_ctx.bin, eyelive/landing_net.hpp); "" unloads. Takes effect for the samples processed after the call
+    virtual bool landing_model_loaded() const = 0;
     virtual std::vector<Candidate> candidates() const = 0;                 // the list currently used
     virtual bool stimulus_feed_open(const StimulusFeedConfig& cfg, std::string* error) = 0;   // polls the mailbox file every 5 ms in its own thread (independent of start / stop)
     virtual void stimulus_feed_close() = 0;
