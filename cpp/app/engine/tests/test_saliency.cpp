@@ -1,7 +1,18 @@
 // PQFT saliency: static pop-out, motion pop-out, timestamps, speed, and the link with the candidate peaks.
+#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#define SANITIZED 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#define SANITIZED 1
+#endif
+#endif
+#ifndef SANITIZED
+#define SANITIZED 0
+#endif
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 #include "eyelive/candidates.hpp"
 #include "eyelive/saliency.hpp"
@@ -29,7 +40,7 @@ int main() {
     // 4. speed: 64 x 64 map from a 640 x 480 RGB frame
     { SaliencyPQFT q(64); std::vector<uint8_t> big(640 * 480 * 3, 128); for (size_t i = 0; i < big.size(); i += 7) big[i] = uint8_t(i * 31); const auto t0 = std::chrono::steady_clock::now(); const int R = 200;
       for (int r = 0; r < R; ++r) q.push(big.data(), 640, 480, 3, r / 30.0); const double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count() / R;
-      std::printf("saliency: %.0f us per 640x480 RGB frame (64x64 map)\n", us); CHECK(us < 5000, "too slow: %.0f us", us); }
+      std::printf("saliency: %.0f us per 640x480 RGB frame (64x64 map)\n", us); const double limit = SANITIZED ? 100000.0 : (std::getenv("CI") ? 20000.0 : 5000.0); CHECK(us < limit, "too slow: %.0f us (limit %.0f)", us, limit); }
     // 5. peaks -> candidates in gaze units (a screen of 40 x 30 deg centred on 0): the first candidate lies on the square
     { auto f = frame(230, 50, true); SaliencyPQFT t(64); t.push(f.data(), 320, 240, 3, 0.0); auto c = peaks_from_map(t.map().data(), 64, 64, -20, 15, 20, -15, 8, 0.4);
       CHECK(!c.empty(), "no candidate"); if (!c.empty()) { const double ex = -20 + 40.0 * 246 / 320, ey = 15 - 30.0 * 66 / 240; CHECK(std::hypot(c[0].x - ex, c[0].y - ey) < 5.0, "first candidate (%.1f, %.1f), expected near (%.1f, %.1f)", c[0].x, c[0].y, ex, ey); } }

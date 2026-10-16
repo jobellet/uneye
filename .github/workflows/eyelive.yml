@@ -48,7 +48,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          grep -E "Failed|Timeout|\*\*\*|FAIL" ctest.log | head -8 | cut -c1-300 | while IFS= read -r l; do echo "::error title=test::$l"; done
+          grep -E "Failed|Timeout|\*\*\*|FAIL|^auto:" ctest.log | head -14 | cut -c1-400 | while IFS= read -r l; do echo "::error title=test::$l"; done
           { echo "### ${{ matrix.os }}: failing tests"; echo '```'; grep -E "^\s*[0-9]+/[0-9]+ Test .*(Failed|Timeout|Exception)|The following tests FAILED|^\s+[0-9]+ - " ctest.log | head -40; echo '```'; echo "### last lines of the log"; echo '```'; tail -120 ctest.log | cut -c1-300; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
   sanitizers:
     runs-on: ubuntu-24.04
