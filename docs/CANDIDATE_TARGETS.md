@@ -81,3 +81,20 @@ Mean landing error (deg) at 10 / 20 ms after the onset (foundation/landing_uav_s
 * Even the object being tracked in the video is reached by only 12 % of the saccades within 1 deg.
 * The saccades are small here, and the tables alone are already good (0.9 deg at 20 ms); any forced choice among candidates that do not contain the landing point is much worse.
 * **Conclusion: do not enable `saliency` for natural scenes / videos.** Candidates are useful only when the possible targets are known and few (target steps, buttons, words with a prior and `use_until_ms` about 12 ms). The saliency path stays in the engine as an option, off by default.
+
+### Other saliency models on the same videos (foundation/saliency_models.py, landing_uav_saliency2.py, runs/landing_uav_saliency2.json)
+
+NSS = saliency at the landing point in standard deviations of the map (0 = chance). Errors in degrees at 10 / 20 ms; tables alone: **1.67 / 0.90**; dense 32 x 18 grid of candidates with flat weights (no saliency): 2.23 / 2.17.
+
+| model | Python ms / frame | NSS | a peak within 1 / 2 deg | 16 peaks as candidates | grid weighted by the map |
+|---|---|---|---|---|---|
+| PQFT (the engine's) | 7.3 | **0.73** | 23 / 57 % | 5.52 / 5.79 | 2.39 / 2.60 |
+| spectral residual | 7.6 | 0.55 | 23 / 57 % | 5.64 / 5.95 | 2.49 / 2.67 |
+| Itti-Koch-Niebur 1998 (static) | 55.9 | 0.42 | 24 / 66 % | 4.92 / 5.11 | 2.31 / 2.37 |
+| Itti dynamic (+ flicker, Reichardt motion) | 66.1 | 0.65 | 27 / 69 % | 4.96 / 5.12 | 2.28 / 2.37 |
+| frame difference only | 7.1 | 0.28 | 24 / 60 % | 5.58 / 5.90 | 2.27 / 2.39 |
+| centre bias (Gaussian) | 6.5 | 0.61 | 6 / 17 % | 4.83 / 4.92 | **2.19 / 2.18** |
+
+* Every map predicts the landing point a little better than chance (NSS 0.3-0.7), but a plain centre bias does almost as well as the best (0.61 against 0.73); the dynamic Itti model is not better than PQFT and is 9 times slower.
+* As a prior on a dense grid, no map beats the flat grid, and nothing beats the tables alone: in this viewing (small saccades, 20 x 11 deg frames) the kinematics already say more than any of these maps.
+* The PQFT peak coverage depends on the resampling (box filter in landing_uav_saliency.py: 9 % within 1 deg; bilinear here: 23 %); 16 random points reach 19 %.
