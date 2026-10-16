@@ -22,6 +22,7 @@ from foundation.train_lodo import DEV
 H, SPAN, UVIS = 256, 100, 225          # sequence-model history; U-Net: 225 visible + 100 hidden = 325 samples (multiple of 25)
 PAD = max(H, UVIS) + 14
 CTX = KIN = WEIGHT = TGT = False
+HIST = False        # subject history: sp.HIST (n, 51) = last 8 saccades of the same recording (dx, dy, amplitude, peak speed, duration, valid) + 3 summaries (mean amplitude, mean peak speed / amplitude, count)
 CAND = 0            # number of candidate-target slots (GazeBase RAN with distractors); sp.CAND (n, CAND, 2) = candidate positions relative to the start, true target first; b['K'] valid slots per row          # set by the command line: --ctx (no rotation augmentation; absolute positions + direction harmonics), --kin (Savitzky-Golay v, a, j along the chord), --weight (tau-weighted loss + auxiliary remaining-duration head)
 NIN = 7
 import scipy.signal as _sg
@@ -79,6 +80,8 @@ def seq_input(sp, b, L=H):
     if TGT:                                                                     # the known target of the saccade, relative to the start position (GazeBase RAN), rotated like the rest
         tv = rotate(sp.TV[b["i"]], b); Lw = len(k)
         parts += [(tv / 10.0)[:, None, :].repeat(Lw, 1), (np.linalg.norm(tv, axis=1) / 10.0)[:, None, None].repeat(Lw, 1)]
+    if HIST:                                                                     # what the same subject did before: its previous saccade vectors are rotated like the current one
+        hv = sp.HIST[b["i"]].copy(); Hs = hv[:, :48].reshape(len(hv), 8, 6); Hs[..., 0:2] = rotate(Hs[..., 0:2], b); hv[:, :48] = Hs.reshape(len(hv), 48); parts += [hv[:, None, :].repeat(len(k), 1)]
     if CAND:                                                                     # candidate targets, each a (cx, cy, |c|, cos to the current chord, valid); the K valid ones sorted by that cosine
         C = rotate(sp.CAND[b["i"]][:, :CAND], b); Lw = len(k); chord = b["cur"] - b["p0"]; ch = rotate(chord[:, None, :], b)[:, 0]; chn = np.maximum(np.linalg.norm(ch, axis=1), 1e-6)
         valid = np.arange(CAND)[None, :] < b["K"][:, None]; nc = np.maximum(np.linalg.norm(C, axis=2), 1e-6); cs = (C * ch[:, None, :]).sum(2) / (nc * chn[:, None])
