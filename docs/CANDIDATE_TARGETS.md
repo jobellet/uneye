@@ -63,3 +63,21 @@ Test on 42 000 saccades of held-out participants (foundation/landing_tex_salienc
 * The prior depends on the position before the saccade: the application re-weights the candidates at each fixation (`weight` = prior of the vector candidate - current fixation) and calls `candidates_set` again.
 * A precision-weighted blend (weight from the tables' uncertainty proportional to the amplitude, candidate noise in degrees) was tried and was worse than the time-based rule on GazeBase RAN (2.64 / 3.05 / 3.57 deg for 2 / 4 / 8 candidates against 2.09 / 2.68 / 3.29). Not kept.
 * A gate that refuses a candidate far from the tables' landing keeps the tables' error on reading (4.01 / 2.02 deg) but removes the gain on RAN (2.0 -> 3.9+ deg), because the tables are poor for large saccades there. Not kept; the engine always chooses unless `min_confidence` is set.
+
+## Real videos (EyeTrackUAV2 + DTB70, 2026-10-16): saliency candidates make things worse
+
+9 DTB70 drone videos (1280 x 720 shown at native size, 20.1 x 11.3 deg), 30 participants in free viewing, gaze at 1 kHz; 4 826 saccades detected by a speed threshold (no human labels).
+Mean landing error (deg) at 10 / 20 ms after the onset (foundation/landing_uav_saliency.py, foundation/runs/landing_uav_saliency.json):
+
+| estimate | 10 ms | 20 ms | candidate within 1 / 2 deg of the landing |
+|---|---|---|---|
+| tables alone | **1.67** | **0.90** | - |
+| PQFT saliency peaks (16), forced choice | 7.33 | 7.50 | 9 % / 27 % |
+| tracked object's centre (DTB70 ground truth) | 5.35 | 5.67 | 12 % / 29 % |
+| object + saliency peaks | 5.41 | 5.42 | - |
+| 16 random points in the frame (control) | 5.05 | 5.33 | 19 % / 57 % |
+
+* The saliency peaks land near the eye less often than random points (they cluster on a few salient spots); in free viewing of these videos the eye does not go to them.
+* Even the object being tracked in the video is reached by only 12 % of the saccades within 1 deg.
+* The saccades are small here, and the tables alone are already good (0.9 deg at 20 ms); any forced choice among candidates that do not contain the landing point is much worse.
+* **Conclusion: do not enable `saliency` for natural scenes / videos.** Candidates are useful only when the possible targets are known and few (target steps, buttons, words with a prior and `use_until_ms` about 12 ms). The saliency path stays in the engine as an option, off by default.
