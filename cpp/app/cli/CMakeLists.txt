@@ -19,3 +19,7 @@ endif()
 # simulation of the assisted-annotation workflow on a labelled dataset (ground truth plays the expert); not a test: run by hand, see docs/AUTOLEARN_SIM.md
 add_executable(eyelive_autolearn_sim ${CMAKE_CURRENT_SOURCE_DIR}/tools/autolearn_sim.cpp)
 target_link_libraries(eyelive_autolearn_sim PRIVATE eyelive_engine eyelive_detect_net eyelive_annot)
+
+# prints what the engine receives from a stimulus script through the frame mailbox (docs/FRAME_MAILBOX.md); used with cpp/app/tools/psychopy_feed_demo.py
+add_executable(eyelive_feed_probe ${CMAKE_CURRENT_SOURCE_DIR}/tools/feed_probe.cpp)
+target_link_libraries(eyelive_feed_probe PRIVATE eyelive_engine eyelive_detect_net)
