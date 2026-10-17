@@ -7,6 +7,7 @@
 //   40  u64 frame_count (frames published so far; the newest is in slot (frame_count - 1) % slots)  -- written last
 //   48  f64 gaze_x_left   56 f64 gaze_y_top   64 f64 gaze_x_right   72 f64 gaze_y_bottom   (gaze-unit coordinates of the frame edges)
 //   80  u64 cand_seq (seqlock: odd while the script writes the candidates)   88 u32 cand_count   96 f64 cand_until_ms
+//   104 f64 cand_t_writer_s (time stamp of the candidate list in the writer's clock, 0 = none: the engine then uses the time it saw the list)
 //   256 candidates: max_candidates x { f32 x, f32 y, f32 weight, f32 reserved }  (gaze units)
 //   256 + 16 * max_candidates = first slot; slot = { u64 seq (seqlock), f64 t_writer_s, u64 frame_no, u32 flags, u32 reserved } (32 bytes) + width * height * channels pixel bytes
 // Writer protocol: slot.seq += 1 (odd); write t, frame_no, pixels; slot.seq += 1 (even); then frame_count = frame_no (release). Reader: copy the slot, accept it only if seq is even and unchanged and frame_no matches.
@@ -32,7 +33,7 @@
 namespace eyelive {
 namespace fm {
 constexpr uint32_t kVersion = 1, kHeaderBytes = 256, kSlotHeader = 32, kMaxCand = 64;
-constexpr size_t kOffMagic = 0, kOffVersion = 8, kOffHeader = 12, kOffW = 16, kOffH = 20, kOffC = 24, kOffSlots = 28, kOffSlotHdr = 32, kOffMaxCand = 36, kOffCount = 40, kOffGx0 = 48, kOffGy0 = 56, kOffGx1 = 64, kOffGy1 = 72, kOffCandSeq = 80, kOffCandN = 88, kOffCandUntil = 96;
+constexpr size_t kOffMagic = 0, kOffVersion = 8, kOffHeader = 12, kOffW = 16, kOffH = 20, kOffC = 24, kOffSlots = 28, kOffSlotHdr = 32, kOffMaxCand = 36, kOffCount = 40, kOffGx0 = 48, kOffGy0 = 56, kOffGx1 = 64, kOffGy1 = 72, kOffCandSeq = 80, kOffCandN = 88, kOffCandUntil = 96, kOffCandT = 104;
 inline size_t slot_bytes(uint32_t w, uint32_t h, uint32_t c) { return kSlotHeader + size_t(w) * h * c; }
 inline size_t file_bytes(uint32_t w, uint32_t h, uint32_t c, uint32_t slots) { return kHeaderBytes + 16 * size_t(kMaxCand) + slot_bytes(w, h, c) * slots; }
 
@@ -98,9 +99,9 @@ class FrameMailboxWriter {
         auto* seq = fm::a64(s, 0); seq->fetch_add(1, std::memory_order_acq_rel); fm::put<double>(s, 8, t_writer_s); fm::put<uint64_t>(s, 16, no); fm::put<uint32_t>(s, 24, 0);
         std::memcpy(s + fm::kSlotHeader, pixels, size_t(w_) * h_ * c_); seq->fetch_add(1, std::memory_order_release); n_ = no; fm::a64(b, fm::kOffCount)->store(no, std::memory_order_release);
     }
-    void set_candidates(const std::vector<Candidate>& c, double until_ms = 1e9) {
+    void set_candidates(const std::vector<Candidate>& c, double until_ms = 1e9, double t_writer_s = 0) {
         uint8_t* b = map_.data(); auto* seq = fm::a64(b, fm::kOffCandSeq); seq->fetch_add(1, std::memory_order_acq_rel); const uint32_t n = uint32_t(std::min<size_t>(c.size(), fm::kMaxCand));
-        fm::put<uint32_t>(b, fm::kOffCandN, n); fm::put<double>(b, fm::kOffCandUntil, until_ms);
+        fm::put<uint32_t>(b, fm::kOffCandN, n); fm::put<double>(b, fm::kOffCandUntil, until_ms); fm::put<double>(b, fm::kOffCandT, t_writer_s);
         for (uint32_t i = 0; i < n; ++i) { uint8_t* p = b + fm::kHeaderBytes + 16 * size_t(i); fm::put<float>(p, 0, c[i].x); fm::put<float>(p, 4, c[i].y); fm::put<float>(p, 8, c[i].weight); fm::put<float>(p, 12, 0.f); }
         seq->fetch_add(1, std::memory_order_release);
     }
@@ -110,7 +111,7 @@ class FrameMailboxWriter {
 };
 
 struct MailboxFrame { uint32_t width = 0, height = 0, channels = 0; uint64_t frame_no = 0; double t_writer_s = 0; double gx0 = 0, gy0 = 0, gx1 = 0, gy1 = 0; std::vector<uint8_t> pixels; };
-struct MailboxCandidates { uint64_t seq = 0; double until_ms = 1e9; std::vector<Candidate> list; };
+struct MailboxCandidates { uint64_t seq = 0; double until_ms = 1e9, t_writer_s = 0; std::vector<Candidate> list; };
 
 class FrameMailboxReader {
  public:
@@ -142,7 +143,7 @@ class FrameMailboxReader {
         const uint8_t* b = map_.data(); const uint64_t cs = fm::a64(b, fm::kOffCandSeq)->load(std::memory_order_acquire); if (cs == after_seq) return false;
         for (int attempt = 0; attempt < 4; ++attempt) {
             const uint64_t s1 = fm::a64(b, fm::kOffCandSeq)->load(std::memory_order_acquire); if (s1 & 1) continue;
-            const uint32_t n = std::min<uint32_t>(fm::get<uint32_t>(b, fm::kOffCandN), fm::kMaxCand); out.until_ms = fm::get<double>(b, fm::kOffCandUntil); out.list.resize(n);
+            const uint32_t n = std::min<uint32_t>(fm::get<uint32_t>(b, fm::kOffCandN), fm::kMaxCand); out.until_ms = fm::get<double>(b, fm::kOffCandUntil); out.t_writer_s = fm::get<double>(b, fm::kOffCandT); out.list.resize(n);
             for (uint32_t i = 0; i < n; ++i) { const uint8_t* p = b + fm::kHeaderBytes + 16 * size_t(i); out.list[i].x = fm::get<float>(p, 0); out.list[i].y = fm::get<float>(p, 4); out.list[i].weight = fm::get<float>(p, 8); }
             std::atomic_thread_fence(std::memory_order_acquire); if (fm::a64(b, fm::kOffCandSeq)->load(std::memory_order_acquire) != s1) continue; out.seq = s1; return true;
         }

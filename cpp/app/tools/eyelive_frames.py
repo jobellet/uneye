@@ -4,7 +4,7 @@
     from eyelive_frames import FrameWriter
     fw = FrameWriter("/tmp/stim.frames", 64, 64, 3, gaze_rect=(x_left, y_top, x_right, y_bottom))   # gaze units of the frame edges
     fw.push_frame(rgb_bytes, t=core.getTime())          # w * h * 3 bytes, row 0 = top (numpy: arr.tobytes())
-    fw.set_candidates([(x, y, weight), ...], until_ms=12)   # up to 64, gaze units; weight > 0 (prior)
+    fw.set_candidates([(x, y, weight), ...], until_ms=12)   # up to 64, gaze units; weight > 0 (prior); stamped with the same clock as push_frame (t=...)
 
 PsychoPy: draw the stimulus into a small off-screen buffer (or use the array you built for the ImageStim), downscale to 64 x 64 and push it once per frame (or once for a static picture).
     python3 eyelive_frames.py selftest <path>        writes a small test file (used by the C++ test)
@@ -31,9 +31,9 @@ class FrameWriter:
         self.m[off + SLOT_HEADER: off + SLOT_HEADER + len(pixels)] = bytes(pixels); struct.pack_into("<Q", self.m, off, seq + 2)    # even: done
         struct.pack_into("<Q", self.m, 40, self.n)                                                                  # published last
 
-    def set_candidates(self, candidates, until_ms=1e9):
+    def set_candidates(self, candidates, until_ms=1e9, t=None):
         seq, = struct.unpack_from("<Q", self.m, 80); struct.pack_into("<Q", self.m, 80, seq + 1); c = list(candidates)[:MAX_CAND]
-        struct.pack_into("<I", self.m, 88, len(c)); struct.pack_into("<d", self.m, 96, float(until_ms))
+        struct.pack_into("<I", self.m, 88, len(c)); struct.pack_into("<d", self.m, 96, float(until_ms)); struct.pack_into("<d", self.m, 104, time.monotonic() if t is None else float(t))     # time stamp in the writer's clock
         for i, cand in enumerate(c):
             x, y = cand[0], cand[1]; w = cand[2] if len(cand) > 2 else 1.0; struct.pack_into("<ffff", self.m, HEADER + 16 * i, float(x), float(y), float(w), 0.0)
         struct.pack_into("<Q", self.m, 80, seq + 2)

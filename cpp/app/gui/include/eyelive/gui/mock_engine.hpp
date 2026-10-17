@@ -33,6 +33,7 @@ class MockEngine final : public IEngine {
     bool landing_model_load(const std::string&, std::string* error) override { if (error) *error = "not available in the mock engine"; return false; }
     bool landing_model_loaded() const override { return false; }
     std::vector<Candidate> candidates() const override { return candidates_; }
+    std::vector<Candidate> candidates_at(double) const override { return candidates_; }
     bool stimulus_feed_open(const StimulusFeedConfig&, std::string* error) override { if (error) *error = "not available in the mock engine"; return false; }
     void stimulus_feed_close() override {}
     StimulusFeedStatus stimulus_feed_status() const override { return StimulusFeedStatus(); }

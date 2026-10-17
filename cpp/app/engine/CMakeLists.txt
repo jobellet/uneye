@@ -1,2 +1,2 @@
-eyelive_add_module(engine eyelive_recorder eyelive_source eyelive_state eyelive_detect_hmm eyelive_detect_fast eyelive_detect_net eyelive_annot eyelive_calib eyelive_train eyelive_trigger uneye_rt)
+eyelive_add_module(engine eyelive_recorder eyelive_source eyelive_state eyelive_detect_hmm eyelive_detect_fast eyelive_detect_net eyelive_annot eyelive_calib eyelive_train eyelive_trigger eyelive_export uneye_rt)
 target_compile_definitions(eyelive_engine_test_mailbox PRIVATE EYELIVE_TOOLS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tools")

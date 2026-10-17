@@ -1,5 +1,6 @@
 // IEngine (task T18): source thread -> recorder (the queue) -> analysis thread (detectors, events, state block, triggers); rate measurement, preallocation, blink events, scale selection, hot swap, prelabel, training glue.
 #include "eyelive/candidates.hpp"
+#include "eyelive/export.hpp"
 #include "eyelive/frame_mailbox.hpp"
 #include "eyelive/landing_net.hpp"
 #include "eyelive/saliency.hpp"
@@ -7,6 +8,8 @@
 #include "eyelive/engine_hooks.hpp"
 #include <algorithm>
 #include <atomic>
+#include <limits>
+#include <deque>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -67,7 +70,8 @@ class Engine final : public IEngine {
         det_prov_ = det_->info().provisional_latency_ms >= 0; slow_hop_ = std::max<int64_t>(1, int64_t(std::nearbyint(0.005 * rate))); slow_done_ = 0; analysed_ = 0;
         if (al_job_.valid()) al_job_.wait(); al_job_ = std::future<std::vector<Event>>(); al_committed_ = 0; al_relabel_pending_ = false; al_dirty_ = false; al_training_ = false; al_gen_ = 0; al_labeler_ = al_cfg_.first_labeler; al_spans_.assign(1, {}); al_gen_names_.assign(1, al_cfg_.first_labeler); al_gen_train_.assign(1, AutoGeneration()); al_prev_model_.clear(); al_msg_.clear(); al_history_cache_.clear();
         expert_ = std::make_unique<ExpertLabels>(cfg.n_classes); finals_.clear(); provs_.clear(); prov_open_.clear(); n_final_ = n_prov_ = 0; last_final_off_ = -1; blink_start_ = -1; scanned_ = 0; id_counter_ = 0; lat_.clear();
-        rate_measured_ = measured; rate_standard_ = standard; gaps_seen_ = gaps; recorder_full_ = false; src_done_ = false; scale_started_ = false; scale_confidence_ = 0; scale_low_ = false; warning_.clear();
+        rate_measured_ = measured; rate_standard_ = standard; gaps_seen_ = gaps; recorder_full_ = false; src_done_ = false; scale_started_ = false; scale_confidence_ = 0; scale_low_ = false; warning_.clear(); landing_path_.clear();
+        if (!cfg.landing_model.empty()) { std::string p = cfg.landing_model, e; std::error_code ec; if (!std::filesystem::exists(p, ec)) { const std::string f = find_model_file(p); if (!f.empty()) p = f; } if (landing_model_load(p, &e)) landing_path_ = p; else warning_ = "landing network not loaded (" + e + "): the tables are used"; }
         { std::lock_guard<std::mutex> fl(fc_mu_); gaze_.reset(); fc_ring_.assign(kForecastRing, ForecastSample()); gaze_n_ = 0; fc_from_ = 0; }
         if (std::fabs(rate - 1000.0) < 50.0) {                            // forecast of the eye position: needs the two causal networks of the gaze engine and a 1 kHz stream
             const std::string fast = find_model_file("causal.bin"), refine = find_model_file("tcn_l10.bin");
@@ -83,7 +87,18 @@ class Engine final : public IEngine {
         std::lock_guard<std::mutex> life(life_mu_); if (!running_ && !src_thread_.joinable() && !ana_thread_.joinable()) return;
         stop_ = true; if (src_thread_.joinable()) src_thread_.join(); drain_ = true; stop_ana_ = true; if (ana_thread_.joinable()) ana_thread_.join();
         if (swap_thread_.joinable()) swap_thread_.join(); if (scale_thread_.joinable()) scale_thread_.join();
-        trig_->stop(); sync_expert(); std::string err; if (rec_) rec_->close(&err); if (src_) src_->close(); running_ = false; stop_ana_ = false; drain_ = false;
+        trig_->stop(); sync_expert(); std::string err; if (rec_) { rec_->close(&err); write_session_artifacts(); } if (src_) src_->close(); running_ = false; stop_ana_ = false; drain_ = false;
+    }
+
+    // provenance journal and one-page report next to the session file (best effort: a failure is reported in EngineStats::warning, the data are safe)
+    void write_session_artifacts() {
+        if (!rec_ || rec_->size() == 0) return;
+        try {
+            ProvenanceInfo pi; pi.engine_version = engine_version(); pi.detector_id = active_id_; pi.profile = cfg_.profile_name; pi.landing_model = landing_model_loaded() ? landing_path_ : std::string(); pi.command_line = cfg_.command_line; pi.extra["source"] = cfg_.source.kind;
+            if (active_id_.rfind("user:", 0) == 0) pi.user_model = find_model_file(active_id_.substr(5));
+            std::string e; std::string problems; if (!write_provenance(*rec_, pi, "", &e)) problems += e; if (!write_report(summarize(*rec_), cfg_.session_path + ".report.html", &e)) problems += (problems.empty() ? "" : "; ") + e;
+            if (!problems.empty()) { std::lock_guard<std::mutex> l(mu_); warning_ += (warning_.empty() ? "" : "; ") + std::string("session notes not written: ") + problems; }
+        } catch (const std::exception& ex) { std::lock_guard<std::mutex> l(mu_); warning_ += std::string(warning_.empty() ? "" : "; ") + "session notes not written: " + ex.what(); }
     }
 
     EngineStats stats() const override {
@@ -292,18 +307,34 @@ class Engine final : public IEngine {
         return true;
     }
     bool landing_model_loaded() const override { return bool(std::atomic_load(&net_)); }
-    // candidate targets: the landing estimate becomes the chosen candidate (positions in the stream frame, converted to degrees with sc)
+    // candidate targets: the landing estimate becomes the chosen candidate (positions in the stream frame, converted to degrees with sc). The list is the one that was on the screen when the saccade started
+    // (lists written by a stimulus script carry the time of the flip, mapped to the host clock; a list set through candidates_set() is valid at all times)
     void apply_candidates(const uneye::gaze::Output& o, int64_t i, double sc, ForecastSample& f) const {
         if (!cands_any_.load(std::memory_order_acquire) || o.event_onset < 0) return;
         const int64_t on = i - (o.index - o.event_onset);                                  // recorder index of the onset (the gaze engine counts from its last reset)
         if (on < 1 || on > i) return;
-        if ((rec_->t(i) - rec_->t(on)) * 1000.0 > cand_until_snapshot()) return;
+        const int64_t total = rec_->size(); const double t_on = (total - on < int64_t(kArrivalRing) - 64) ? arrival(on) : std::numeric_limits<double>::infinity();   // host time of the onset (older samples: the newest list)
+        thread_local CandSet cs; if (!candidates_active_at(t_on, cs)) return;
+        if ((rec_->t(i) - rec_->t(on)) * 1000.0 > cs.until_ms) return;
         const double p0x = rec_->x(on - 1) * sc, p0y = rec_->y(on - 1) * sc, cx = rec_->x(i) * sc, cy = rec_->y(i) * sc;
         const double rem = std::hypot(double(f.lx) * sc - cx, double(f.ly) * sc - cy);
-        CandidateChoice ch; { std::lock_guard<std::mutex> l(cand_mu_); ch = pick_candidate(p0x, p0y, cx, cy, rem, cands_.data(), cands_.size(), sc, CandidateParams()); if (ch.index >= 0) { const double ms = (rec_->t(i) - rec_->t(on)) * 1000.0; double lx = 0, ly = 0; landing_from_candidate(rec_->x(on - 1), rec_->y(on - 1), cands_[size_t(ch.index)].x, cands_[size_t(ch.index)].y, f.lx, f.ly, ms, lx, ly); f.lx = float(lx); f.ly = float(ly); } }
-        if (ch.index >= 0) { f.candidate = ch.index; f.candidate_confidence = float(ch.confidence); }
+        const CandidateChoice ch = pick_candidate(p0x, p0y, cx, cy, rem, cs.c.data(), cs.c.size(), sc, CandidateParams());
+        if (ch.index >= 0) { const double ms = (rec_->t(i) - rec_->t(on)) * 1000.0; double lx = 0, ly = 0; landing_from_candidate(rec_->x(on - 1), rec_->y(on - 1), cs.c[size_t(ch.index)].x, cs.c[size_t(ch.index)].y, f.lx, f.ly, ms, lx, ly); f.lx = float(lx); f.ly = float(ly); f.candidate = ch.index; f.candidate_confidence = float(ch.confidence); }
     }
-    std::vector<Candidate> candidates() const override { std::lock_guard<std::mutex> l(cand_mu_); return cands_; }
+    struct CandSet { double t_host = -std::numeric_limits<double>::infinity(); std::vector<Candidate> c; double until_ms = 1e9; };
+    bool candidates_active_at(double t_host, CandSet& out) const {                            // newest timed list not later than t_host, else the static list; false when there is none
+        std::lock_guard<std::mutex> l(cand_mu_); const CandSet* best = nullptr;
+        for (auto it = cand_hist_.rbegin(); it != cand_hist_.rend(); ++it) if (it->t_host <= t_host) { best = &*it; break; }
+        if (!best && !cand_hist_.empty() && !std::isfinite(t_host)) best = &cand_hist_.back();
+        if (!best && !cand_static_.c.empty()) best = &cand_static_;
+        if (!best || best->c.empty()) return false; out = *best; return true;
+    }
+    void push_timed_candidates(const std::vector<Candidate>& c, double until_ms, double t_host) {
+        { std::lock_guard<std::mutex> l(cand_mu_); CandSet s; s.t_host = t_host; s.c = c; s.until_ms = until_ms; if (!cand_hist_.empty() && cand_hist_.back().t_host > t_host) s.t_host = cand_hist_.back().t_host; cand_hist_.push_back(std::move(s)); while (cand_hist_.size() > 256) cand_hist_.pop_front(); }
+        cands_any_.store(true, std::memory_order_release); if (!running_) { std::lock_guard<std::mutex> l(fc_mu_); gaze_n_ = 0; fc_from_ = INT64_MAX; }
+    }
+    std::vector<Candidate> candidates_at(double t_host) const override { CandSet s; return candidates_active_at(t_host, s) ? s.c : std::vector<Candidate>(); }
+    std::vector<Candidate> candidates() const override { std::lock_guard<std::mutex> l(cand_mu_); return cand_hist_.empty() ? cand_static_.c : cand_hist_.back().c; }
     // ---- stimulus feed: polls the mailbox, explicit candidates first, else the saliency peaks of the newest frame
     bool stimulus_feed_open(const StimulusFeedConfig& cfg, std::string* error) override {
         stimulus_feed_close(); auto r = std::make_unique<FrameMailboxReader>(); if (!r->open(cfg.path, error)) return false;
@@ -311,23 +342,25 @@ class Engine final : public IEngine {
         feed_run_ = true; feed_thread_ = std::thread([this, cfg, rd = std::move(r)] { feed_loop(cfg, *rd); }); return true;
     }
     void stimulus_feed_close() override { feed_run_ = false; if (feed_thread_.joinable()) feed_thread_.join(); std::lock_guard<std::mutex> l(feed_mu_); feed_st_.open = false; }
-    StimulusFeedStatus stimulus_feed_status() const override { std::lock_guard<std::mutex> l(feed_mu_); StimulusFeedStatus s = feed_st_; if (s.open && last_frame_t_ > 0) s.last_frame_age_s = std::chrono::duration<double>(Clock::now().time_since_epoch()).count() - last_frame_t_; return s; }
+    StimulusFeedStatus stimulus_feed_status() const override { std::lock_guard<std::mutex> l(feed_mu_); StimulusFeedStatus s = feed_st_; if (s.open && last_frame_t_ > 0) s.last_frame_age_s = trigger_host_now_s() - last_frame_t_; return s; }
     void feed_loop(const StimulusFeedConfig& cfg, FrameMailboxReader& rd) {
         SaliencyPQFT sal(64, 3.0, 0.0); MailboxFrame f; MailboxCandidates mc; uint64_t last_no = 0, last_seq = 0; bool have_explicit = false;
+        std::deque<double> diffs;                                                           // host time of arrival minus the time stamp of the writer, over the last 64 stamps: its minimum is the clock offset + the smallest delay
+        auto offset = [&](double t_writer) { const double now = trigger_host_now_s(); diffs.push_back(now - t_writer); if (diffs.size() > 64) diffs.pop_front(); return *std::min_element(diffs.begin(), diffs.end()); };
         while (feed_run_) {
-            bool changed = false;
-            if (rd.read_candidates(last_seq, mc)) { last_seq = mc.seq; have_explicit = !mc.list.empty(); if (have_explicit) { candidates_set(mc.list, mc.until_ms); changed = true; } else changed = true; }
+            bool changed = false; const double now = trigger_host_now_s();
+            if (rd.read_candidates(last_seq, mc)) { last_seq = mc.seq; have_explicit = !mc.list.empty(); changed = true;
+                if (have_explicit) { const double t = mc.t_writer_s > 0 ? mc.t_writer_s + offset(mc.t_writer_s) : now; push_timed_candidates(mc.list, mc.until_ms, std::min(t, now)); } }
             if (rd.read_frame(last_no, f)) {
-                last_no = f.frame_no; last_frame_t_ = std::chrono::duration<double>(Clock::now().time_since_epoch()).count(); { std::lock_guard<std::mutex> l(feed_mu_); ++feed_st_.frames; }
-                if (cfg.saliency && !have_explicit) { sal.push(f.pixels.data(), int(f.width), int(f.height), int(f.channels), f.t_writer_s); candidates_set(peaks_from_map(sal.map().data(), sal.size(), sal.size(), f.gx0, f.gy0, f.gx1, f.gy1, cfg.max_peaks, cfg.rel_threshold), cfg.use_until_ms); changed = true; }
+                last_no = f.frame_no; last_frame_t_ = now; { std::lock_guard<std::mutex> l(feed_mu_); ++feed_st_.frames; } const double t = f.t_writer_s > 0 ? f.t_writer_s + offset(f.t_writer_s) : now;
+                if (cfg.saliency && !have_explicit) { sal.push(f.pixels.data(), int(f.width), int(f.height), int(f.channels), f.t_writer_s); push_timed_candidates(peaks_from_map(sal.map().data(), sal.size(), sal.size(), f.gx0, f.gy0, f.gx1, f.gy1, cfg.max_peaks, cfg.rel_threshold), cfg.use_until_ms, std::min(t, now)); changed = true; }
             }
             { std::lock_guard<std::mutex> l(feed_mu_); if (changed) ++feed_st_.candidate_updates; feed_st_.explicit_candidates = have_explicit; }
-            { std::lock_guard<std::mutex> l(cand_mu_); std::lock_guard<std::mutex> l2(feed_mu_); feed_st_.candidates = int(cands_.size()); }
+            { std::lock_guard<std::mutex> l(cand_mu_); std::lock_guard<std::mutex> l2(feed_mu_); feed_st_.candidates = int((cand_hist_.empty() ? cand_static_.c : cand_hist_.back().c).size()); feed_st_.clock_offset_s = diffs.empty() ? 0.0 : *std::min_element(diffs.begin(), diffs.end()); }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
     }
-    double cand_until_snapshot() const { std::lock_guard<std::mutex> l(cand_mu_); return cand_until_ms_; }
-    void candidates_set(const std::vector<Candidate>& c, double use_until_ms = 1e9) override { { std::lock_guard<std::mutex> l(cand_mu_); cands_ = c; cand_until_ms_ = use_until_ms; } cands_any_.store(!c.empty(), std::memory_order_release);
+    void candidates_set(const std::vector<Candidate>& c, double use_until_ms = 1e9) override { { std::lock_guard<std::mutex> l(cand_mu_); cand_static_.c = c; cand_static_.until_ms = use_until_ms; cand_static_.t_host = -std::numeric_limits<double>::infinity(); cand_hist_.clear(); } cands_any_.store(!c.empty(), std::memory_order_release);
         if (!running_) { std::lock_guard<std::mutex> l(fc_mu_); gaze_n_ = 0; fc_from_ = INT64_MAX; } }       // a finished session: forecasts already computed are stale (while recording, only the new samples use the new list)
     // pushes sample i through the gaze engine (positions in degrees) and returns its forecast in stream units
     ForecastSample forecast_of(int64_t i, double sc) const {
@@ -435,8 +468,8 @@ private:
     AutoLearnConfig al_cfg_; std::string al_labeler_ = "hmm_accel", al_prev_model_, al_msg_; int al_gen_ = 0, al_job_gen_ = 0, al_trainings_ = 0; int64_t al_committed_ = 0, al_job_from_ = 0, al_job_to_ = 0; bool al_relabel_pending_ = false, al_job_relabel_ = false, al_dirty_ = false, al_training_ = false;
     double al_last_edit_ = 0, al_train_t0_ = 0, al_stats_time_ = -1e9; std::future<std::vector<Event>> al_job_; std::vector<std::vector<std::pair<int64_t, int64_t>>> al_spans_; std::vector<std::string> al_gen_names_; std::vector<AutoGeneration> al_gen_train_, al_history_, al_history_cache_;
     std::thread feed_thread_; std::atomic<bool> feed_run_{false}; mutable std::mutex feed_mu_; StimulusFeedStatus feed_st_; std::atomic<double> last_frame_t_{0};
-    std::shared_ptr<const LandingNet> net_;
-    mutable std::mutex cand_mu_; std::vector<Candidate> cands_; double cand_until_ms_ = 1e9; std::atomic<bool> cands_any_{false};
+    std::shared_ptr<const LandingNet> net_; std::string landing_path_;
+    mutable std::mutex cand_mu_; CandSet cand_static_; std::deque<CandSet> cand_hist_; std::atomic<bool> cands_any_{false};
     static constexpr size_t kForecastRing = 65536; mutable std::mutex fc_mu_; mutable std::unique_ptr<uneye::gaze::GazeEngine> gaze_; mutable std::vector<ForecastSample> fc_ring_; mutable int64_t gaze_n_ = 0, fc_from_ = 0; std::atomic<double> fc_until_{0.0}; bool gaze_stale_ = true;
     std::mutex ana_mu_; std::condition_variable ana_cv_; bool det_prov_ = false; int64_t slow_hop_ = 5, slow_done_ = 0;
     mutable std::mutex mu_, life_mu_, infos_mu_, swap_mu_, swap_slot_mu_, train_mu_; SessionConfig cfg_; SessionInfo info_; std::atomic<double> scale_{1.0}; bool scale_estimated_ = false; double scale_confidence_ = 0; bool scale_low_ = false; double pending_scale_ = 0; std::string warning_;

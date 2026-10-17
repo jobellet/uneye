@@ -4,7 +4,7 @@
 %   fw = eyelive_frames('open', '/tmp/stim.frames', 64, 64, 3, [xl yt xr yb]);   % gaze units of the frame edges (left, top, right, bottom)
 %   img = imresize(Screen('GetImage', smallWin, [], 'backBuffer'), [64 64]);       % e.g. a 64 x 64 off-screen copy of the stimulus (uint8, h x w x 3)
 %   fw = eyelive_frames('frame', fw, img, GetSecs);
-%   fw = eyelive_frames('candidates', fw, [x1 y1 w1; x2 y2 w2], 12);               % up to 64 rows, gaze units, weight > 0; last argument: use_until_ms
+%   fw = eyelive_frames('candidates', fw, [x1 y1 w1; x2 y2 w2], 12, GetSecs);       % up to 64 rows, gaze units, weight > 0; then use_until_ms and the time stamp (same clock as the frames)
 %   eyelive_frames('close', fw);
 function fw = eyelive_frames(cmd, fw, varargin)
   slots = 3; HEADER = 256; MAXC = 64; SLOTH = 32;
@@ -31,7 +31,8 @@ function fw = eyelive_frames(cmd, fw, varargin)
       put(fw, 40, uint64(fw.n)); flush_(fw);                                                           % published last
     case 'candidates'
       cand = varargin{1}; until_ms = 1e9; if numel(varargin) > 1, until_ms = varargin{2}; end
-      seq = get64(fw, 80); put(fw, 80, uint64(seq + 1)); flush_(fw); n = min(size(cand, 1), 64); put(fw, 88, uint32(n)); put(fw, 96, double(until_ms));
+      tcand = 0; if numel(varargin) > 2, tcand = varargin{3}; end                                                  % time stamp in the writer's clock (same clock as the frames, e.g. GetSecs), 0 = none
+      seq = get64(fw, 80); put(fw, 80, uint64(seq + 1)); flush_(fw); n = min(size(cand, 1), 64); put(fw, 88, uint32(n)); put(fw, 96, double(until_ms)); put(fw, 104, double(tcand));
       blk = zeros(4, 64, 'single'); if n > 0, blk(1:2, 1:n) = single(cand(1:n, 1:2)'); if size(cand, 2) >= 3, blk(3, 1:n) = single(cand(1:n, 3)'); else, blk(3, 1:n) = 1; end, end
       put(fw, HEADER, reshape(blk, 1, [])); flush_(fw); put(fw, 80, uint64(seq + 2)); flush_(fw);
     case 'close'

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <functional>
 #include <fstream>
+#include <sstream>
 #include <thread>
 #if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
 #define SANITIZED 1
@@ -73,6 +74,9 @@ int main(int argc, char** argv) {
         SimSource sim(c.source); std::string se; sim.open(&se); const auto truth = sim.truth(); int n = 0, hit = 0; for (const auto& t : truth) { if (t.amplitude_deg < 0.3f || t.offset > 60000 - 400) continue; ++n; hit += found(ev, t, 1); }
         std::printf("end to end: %llu samples, rate measured %.1f Hz (standard %.0f), %zu events, recall of the %d truth events >= 0.3 deg: %d (%.1f %%), cpu %.1f %%\n", (unsigned long long)fin.samples, fin.rate_hz_measured, fin.rate_hz_standard, ev.size(), n, hit, n ? 100.0 * hit / n : 0.0, st.cpu_percent);
         CHECK(fin.samples == 60000, "recorded %llu samples", (unsigned long long)fin.samples); CHECK(n > 20 && double(hit) >= 0.95 * n, "recall %d / %d", hit, n);
+        { std::string pj, rh; { std::ifstream f(c.session_path + ".provenance.json"); std::stringstream ss; ss << f.rdbuf(); pj = ss.str(); } { std::ifstream f(c.session_path + ".report.html"); std::stringstream ss; ss << f.rdbuf(); rh = ss.str(); }
+          CHECK(pj.find("\"schema\": \"eyelive-provenance-1\"") != std::string::npos && pj.find("\"detector_id\": \"hmm_accel\"") != std::string::npos && pj.find("\"samples\": 60000") != std::string::npos && pj.find("\"data_sha256\": \"") != std::string::npos, "provenance journal missing or incomplete: %.200s", pj.c_str());
+          CHECK(rh.find("Session report") != std::string::npos && rh.find("60000") != std::string::npos && rh.find("</html>") != std::string::npos, "report missing or incomplete (%zu bytes)", rh.size()); CHECK(fin.warning.find("session notes not written") == std::string::npos, "notes warning: %s", fin.warning.c_str()); }
         auto rd = Recorder::open_readonly(c.session_path, &err); CHECK(rd != nullptr, "reload: %s", err.c_str());
         if (rd) { CHECK(rd->size() == 60000 && rd->event_count() > 20, "reloaded %lld samples, %lld events", (long long)rd->size(), (long long)rd->event_count()); bool ok = true; for (int64_t i = 0; i < rd->size() && ok; ++i) ok = std::fabs(rd->t(i) - double(i) / 1000.0) < 1e-9;
             CHECK(ok, "time stamps changed in the file"); StateBlock sb; CHECK(read_state_block(rd->state_block(), &sb), "state block unreadable"); std::printf("state block: magic %08x, %llu samples, %llu final events, rate %.0f\n", sb.magic, (unsigned long long)sb.n_samples, (unsigned long long)sb.event_counter, sb.rate_hz);
@@ -190,6 +194,22 @@ int main(int argc, char** argv) {
         size_t with_net = 0, with_landing = 0; for (const auto& f : fc) { with_landing += f.landing; with_net += f.landing_net; }
         std::printf("landing network in the engine: %zu samples with a landing estimate, %zu of them from the network\n", with_landing, with_net); CHECK(with_landing > 200 && with_net >= with_landing * 95 / 100, "network used for %zu of %zu estimates", with_net, with_landing);
         CHECK(e->landing_model_load("", &err) && !e->landing_model_loaded(), "unload"); fc.clear(); e->forecasts(0, N, fc); size_t net_after = 0; for (const auto& f : fc) net_after += f.landing_net; CHECK(net_after == 0, "network still used after unloading (%zu)", net_after);
+    }
+    // 8e. candidate lists are time stamped: the list that applies to a saccade is the one that was on the screen when it started, whatever the offset between the clock of the script and the clock of the engine
+    {
+        const std::string fp = (fs::temp_directory_path() / "eyelive_feed_time.frames").string(); FrameMailboxWriter w; std::string err; CHECK(w.create(fp, 8, 8, 1, 3, 0, 0, 1, 1, &err), "create: %s", err.c_str()); auto e = make_engine(); StimulusFeedConfig fc; fc.path = fp; CHECK(e->stimulus_feed_open(fc, &err), "open: %s", err.c_str());
+        const double kOff = 1000.0; auto host = [] { return trigger_host_now_s(); }; auto lst = [](float x) { return std::vector<Candidate>{Candidate{x, 0.f, 1.f}}; };
+        std::vector<double> stamps; for (int k = 1; k <= 3; ++k) { stamps.push_back(host()); w.set_candidates(lst(float(k)), 1e9, host() + kOff); sleep_ms(250); }
+        CHECK(e->candidates_at(stamps[0] - 0.100).empty(), "a list is claimed before it existed"); auto at = [&](double t) { const auto c = e->candidates_at(t); return c.empty() ? -1.f : c[0].x; };
+        CHECK(at(stamps[0] + 0.100) == 1.f && at(stamps[1] + 0.100) == 2.f && at(stamps[2] + 0.100) == 3.f && at(host() + 5.0) == 3.f, "lists by time: %.0f %.0f %.0f %.0f", double(at(stamps[0] + 0.1)), double(at(stamps[1] + 0.1)), double(at(stamps[2] + 0.1)), double(at(host() + 5.0)));
+        const double off = e->stimulus_feed_status().clock_offset_s; CHECK(std::fabs(off - (-kOff)) < 0.05, "clock offset %.4f s, expected %.1f", off, -kOff); CHECK(e->candidates()[0].x == 3.f, "newest list");
+        e->candidates_set(lst(9.f)); CHECK(at(host()) == 9.f && at(stamps[0]) == 9.f, "a static list is valid at all times and replaces the history"); e->stimulus_feed_close(); fs::remove(fp);
+    }
+    // 8f. landing network from the session configuration (file name looked up in the models folder), and a missing file is reported without stopping the session
+    {
+        auto e = make_engine(); std::string err; SessionConfig c = cfg_sim("landcfg.eyelive", 1000, 0.0, "hmm_accel"); c.landing_model = "landing_mlp_drone.bin"; c.profile_name = "test profile"; CHECK(e->start(c, &err), "start: %s", err.c_str()); CHECK(e->landing_model_loaded(), "network not loaded from the session configuration"); wait_done(*e, 60000); e->stop();
+        { std::ifstream f(c.session_path + ".provenance.json"); std::stringstream ss; ss << f.rdbuf(); const std::string pj = ss.str(); CHECK(pj.find("\"profile\": \"test profile\"") != std::string::npos && pj.find("landing_mlp_drone.bin") != std::string::npos, "journal lacks the profile or the landing network: %.300s", pj.c_str()); const size_t k = pj.find("\"landing_model\""); CHECK(k != std::string::npos && pj.find("\"sha256\": \"", k) != std::string::npos && pj.find("\"sha256\": \"\"", k) != pj.find("\"sha256\": \"", k), "no hash of the landing network"); }
+        SessionConfig c2 = cfg_sim("landcfg2.eyelive", 1000, 0.0, "hmm_accel"); c2.landing_model = "does_not_exist.bin"; auto e2 = make_engine(); CHECK(e2->start(c2, &err), "a missing network must not stop the session: %s", err.c_str()); CHECK(!e2->landing_model_loaded() && e2->stats().warning.find("landing network not loaded") != std::string::npos, "warning: '%s'", e2->stats().warning.c_str()); wait_done(*e2, 60000); e2->stop();
     }
     // 8c. stimulus feed: a script shares a frame (saliency peaks become the candidates) and then explicit candidates (priority) through the mailbox
     {

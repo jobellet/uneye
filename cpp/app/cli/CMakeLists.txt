@@ -23,3 +23,11 @@ target_link_libraries(eyelive_autolearn_sim PRIVATE eyelive_engine eyelive_detec
 # prints what the engine receives from a stimulus script through the frame mailbox (docs/FRAME_MAILBOX.md); used with cpp/app/tools/psychopy_feed_demo.py
 add_executable(eyelive_feed_probe ${CMAKE_CURRENT_SOURCE_DIR}/tools/feed_probe.cpp)
 target_link_libraries(eyelive_feed_probe PRIVATE eyelive_engine eyelive_detect_net)
+
+# everything done with a session after the recording (docs/eyelive/MANUAL.md): info, export (CSV, BIDS-style, MAT), re-detection of a folder, checks, profiles
+add_executable(eyelive_tool ${CMAKE_CURRENT_SOURCE_DIR}/tools/eyelive_tool.cpp)
+target_link_libraries(eyelive_tool PRIVATE eyelive_engine eyelive_detect_net eyelive_export eyelive_setup)
+add_executable(eyelive_cli_test_tool_e2e ${CMAKE_CURRENT_SOURCE_DIR}/tests_tool/test_tool_e2e.cpp)
+target_link_libraries(eyelive_cli_test_tool_e2e PRIVATE eyelive_contracts Threads::Threads)
+add_test(NAME eyelive_cli_test_tool_e2e COMMAND eyelive_cli_test_tool_e2e $<TARGET_FILE:eyelive_cli> $<TARGET_FILE:eyelive_tool> ${CMAKE_SOURCE_DIR})
+set_tests_properties(eyelive_cli_test_tool_e2e PROPERTIES LABELS "eyelive;cli" TIMEOUT 1500)

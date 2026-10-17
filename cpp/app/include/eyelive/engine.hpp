@@ -22,6 +22,9 @@ struct SessionConfig {
     double deg_per_unit = 0;            // 0 = automatic (calib.hpp: select_scale once enough events exist); otherwise exact (e.g. 1/pixels_per_degree)
     std::string detector_id = "hmm_accel";
     int n_classes = 3;                  // fixation, saccade, blink (blink events come from the invalid-sample runs flagged by the input guard)
+    std::string profile_name;           // recorded in the provenance journal (setup.hpp: DeviceProfile)
+    std::string landing_model;          // landing network to load at the start (file name of cpp/models or a path); a failure is reported in EngineStats::warning, the tables are used
+    std::string command_line;           // recorded in the provenance journal
 };
 
 // Forecast of the eye position made at every sample by the gaze engine (cpp/include/uneye/gaze_engine.hpp: two causal networks + fixed landing tables, 1 kHz only). Positions are in STREAM units like the trace;
@@ -69,7 +72,8 @@ struct AutoLearnStatus {
 // Stimulus feed: a script shares frames and / or candidate targets through a memory-mapped file (cpp/app/engine/include/eyelive/frame_mailbox.hpp, writers in cpp/app/tools).
 // Explicit candidates written by the script have priority; otherwise, with saliency = true, the PQFT saliency peaks of the newest frame become the candidates.
 struct StimulusFeedConfig { std::string path; bool saliency = false; int max_peaks = 16; double rel_threshold = 0.3; double use_until_ms = 1e9; };
-struct StimulusFeedStatus { bool open = false; uint64_t frames = 0, candidate_updates = 0; int candidates = 0; bool explicit_candidates = false; double last_frame_age_s = -1; int width = 0, height = 0; std::string error; };
+struct StimulusFeedStatus { bool open = false; uint64_t frames = 0, candidate_updates = 0; int candidates = 0; bool explicit_candidates = false; double last_frame_age_s = -1; int width = 0, height = 0; std::string error;
+                            double clock_offset_s = 0; };           // host clock minus the writer's clock (minimum of arrival - time stamp over the last 64 stamps: exact up to the smallest transport delay, about a millisecond)
 
 class IEngine {
  public:
@@ -87,7 +91,8 @@ class IEngine {
     virtual void candidates_set(const std::vector<Candidate>& c, double use_until_ms = 1e9) = 0;   // possible targets of the next saccades (empty = none): the landing estimate then picks the most plausible one; can be called at any time (e.g. at every fixation, with weights from a prior on the saccade vector). Later than use_until_ms after the onset the tables' estimate is kept (reading: ~ 12 ms)
     virtual bool landing_model_load(const std::string& path, std::string* error) = 0;   // optional network for the landing estimate (cpp/models/landing_mlp_ctx.bin, eyelive/landing_net.hpp); "" unloads. Takes effect for the samples processed after the call
     virtual bool landing_model_loaded() const = 0;
-    virtual std::vector<Candidate> candidates() const = 0;                 // the list currently used
+    virtual std::vector<Candidate> candidates() const = 0;
+    virtual std::vector<Candidate> candidates_at(double host_time_s) const = 0;   // the list that applies to a saccade starting at that host time (trigger_clock.hpp: trigger_host_now_s)                 // the list currently used
     virtual bool stimulus_feed_open(const StimulusFeedConfig& cfg, std::string* error) = 0;   // polls the mailbox file every 5 ms in its own thread (independent of start / stop)
     virtual void stimulus_feed_close() = 0;
     virtual StimulusFeedStatus stimulus_feed_status() const = 0;

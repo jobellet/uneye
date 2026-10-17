@@ -32,7 +32,7 @@ function(eyelive_add_module name)
   endforeach()
 endfunction()
 
-foreach(m dsp core recorder source state detect_hmm detect_fast detect_net annot calib train trigger engine)
+foreach(m dsp core recorder source state detect_hmm detect_fast detect_net annot calib train trigger export setup engine)
   add_subdirectory(${m})
 endforeach()
 option(EYELIVE_BUILD_GUI "Build the Dear ImGui front-end (run sh cpp/third_party/fetch.sh first; needs OpenGL, and X11/Wayland dev packages on Linux)" OFF)
