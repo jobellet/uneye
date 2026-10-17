@@ -131,9 +131,9 @@ int main(int argc, char** argv) {
         std::printf("review -> train -> deploy: trainer got %zu traces, %zu samples; 'user:stub_model' registered\n", sp->n_traces, sp->n_samples);
     }
     // 7. assisted annotation: the label-free detector labels the data, the expert corrects, a model is trained after the quiet delay and then labels the windows after the reviewed ones
-    {
-        auto e = make_engine(); SessionConfig c = cfg_sim("auto.eyelive", 1000, 0.0, "hmm_accel"); c.source.seed = 3; std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); wait_done(*e, 60000); e->stop(); const int64_t N = e->trace().size();
-        AutoLearnConfig ac; ac.enabled = true; ac.retrain_delay_s = 0.3; ac.chunk_s = 2.0; ac.max_epochs = SANITIZED ? 4 : 25; ac.expected_epochs = 25; if (SANITIZED) ac.adopt_min_f1 = 0.0; ac.max_seconds_of_data = SANITIZED ? 8.0 : 30.0; e->autolearn_set(ac);
+    auto autolearn_case = [&](bool guard) {       // guard = true: the adoption threshold is impossible to reach, the model must be refused and the label-free detector must keep labelling
+        auto e = make_engine(); SessionConfig c = cfg_sim(guard ? "auto_guard.eyelive" : "auto.eyelive", 1000, 0.0, "hmm_accel"); c.source.seed = 3; std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); wait_done(*e, 60000); e->stop(); const int64_t N = e->trace().size();
+        AutoLearnConfig ac; ac.enabled = true; ac.retrain_delay_s = 0.3; ac.chunk_s = 2.0; ac.max_epochs = (SANITIZED || guard) ? 4 : 25; ac.expected_epochs = 25; ac.adopt_min_f1 = guard ? 2.0 : 0.0;   /* a model trained on 3 corrected events is chaotic (F1 0.88 on macOS, 0.0 on Linux): the adoption path is tested with any model, the guard with an impossible threshold */ ac.max_seconds_of_data = SANITIZED ? 8.0 : 30.0; e->autolearn_set(ac);
         auto poll_until = [&](const std::function<bool(const AutoLearnStatus&)>& done, double timeout_s, bool edited_first = false) { AutoLearnStatus st; bool edited = edited_first; const auto t0 = std::chrono::steady_clock::now();
             while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < timeout_s) { st = e->autolearn_poll(edited); edited = false; if (done(st)) return st; sleep_ms(20); } return st; };
         auto st = poll_until([&](const AutoLearnStatus& s) { return s.labelled_s >= double(N) / 1000.0 - 0.5; }, 120); std::printf("auto: labelled %.1f s with '%s', %zu events\n", st.labelled_s, st.labeler.c_str(), e->expert().events().size());
@@ -142,8 +142,10 @@ int main(int argc, char** argv) {
         // the expert deletes the first two events; their neighbourhood is reviewed (silently, like the Review tab does) and the poll is told about the edit
         const size_t before = e->expert().events().size(); int64_t rev_end = 0; for (int k = 0; k < 2; ++k) { const Event ev = e->expert().events()[0]; rev_end = std::max<int64_t>(rev_end, ev.offset + 500); CHECK(e->expert().remove(0), "remove"); e->expert().mark_reviewed(std::max<int64_t>(0, ev.onset - 500), ev.offset + 500, true, false); }
         CHECK(e->expert().events().size() == before - 2, "events after two deletions");
-        bool saw_training = false; int max_epoch = 0; double max_progress = 0; st = poll_until([&](const AutoLearnStatus& s) { saw_training |= s.training; max_epoch = std::max(max_epoch, s.epoch); max_progress = std::max(max_progress, s.progress); return s.generation >= 1 && !s.training; }, SANITIZED ? 400 : 240, true);
+        bool saw_training = false; int max_epoch = 0; double max_progress = 0; st = poll_until([&](const AutoLearnStatus& s) { saw_training |= s.training; max_epoch = std::max(max_epoch, s.epoch); max_progress = std::max(max_progress, s.progress); return guard ? (saw_training && !s.training) : (s.generation >= 1 && !s.training); }, SANITIZED ? 400 : 240, true);
         std::printf("auto: after the corrections the labeler is '%s' (generation %d), training seen %d, max epoch %d, progress %.2f, message '%s'\n", st.labeler.c_str(), st.generation, int(saw_training), max_epoch, max_progress, st.message.c_str());
+        if (guard) { CHECK(st.generation == 0 && st.labeler == "hmm_accel" && st.message.find("not good enough") != std::string::npos, "the model was adopted despite the threshold: generation %d, labeler %s, message '%s'", st.generation, st.labeler.c_str(), st.message.c_str()); CHECK(saw_training && max_epoch >= 1, "no training seen");
+            sleep_ms(500); poll_until([&](const AutoLearnStatus& s) { return !s.labeling; }, 60); int by_model = 0; for (const auto& p : e->expert().prelabels()) by_model += p.model_version != 0; CHECK(by_model == 0, "windows labelled by a refused model: %d", by_model); CHECK(e->expert().events().size() > 10, "events %zu", e->expert().events().size()); return; }
         CHECK(st.generation == 1 && st.labeler == "user:auto_g1", "no model was trained: generation %d, message '%s'", st.generation, st.message.c_str()); CHECK(saw_training && max_epoch >= 1, "the training progress was never visible");
         // the next windows (after the reviewed ones) are now labelled by the model; the deleted events stay deleted; the history lists both labelers
         st = poll_until([&](const AutoLearnStatus& s) { return !s.labeling && s.history.size() >= 2; }, 180); poll_until([&](const AutoLearnStatus& s) { return !s.labeling; }, 120);
@@ -152,8 +154,9 @@ int main(int argc, char** argv) {
         if (!SANITIZED) { CHECK(by_model > 10 && by_hmm == 0, "windows after the reviewed ones: %d by the model, %d by the detector", by_model, by_hmm); CHECK(e->expert().events().size() > 10, "events after relabelling: %zu", e->expert().events().size()); }   // (a sanitizer build trains a toy model: only the safety checks apply)
         CHECK(deleted_back == 0, "a model re-labelled a reviewed window");
         CHECK(st.history.size() >= 2 && st.history[0].reviewed_s > 0, "history: %zu generations", st.history.size());
-        CHECK(e->expert().undo(), "the expert's last edit can be undone"); 
-    }
+        CHECK(e->expert().undo(), "the expert's last edit can be undone");
+    };
+    autolearn_case(false); autolearn_case(true);
     // 8. forecast of the eye position: the gaze engine runs on the stream; its +10 / +20 ms forecasts are compared with what the eye really did and with the trivial "stay where you are" forecast
     {
         auto e = make_engine(); e->forecast_enable(true); SessionConfig c = cfg_sim("forecast.eyelive", 1000, 0.0, "hmm_accel"); c.source.seed = 5; std::string err; CHECK(e->start(c, &err), "start: %s", err.c_str()); for (int w = 0; w < 6000 && e->stats().samples < 60000; ++w) { e->forecast_enable(true); sleep_ms(10); } std::vector<ForecastSample> probe; for (int w = 0; w < 3000; ++w) { e->forecast_enable(true); sleep_ms(10); if (e->forecasts(59000, 59001, probe) > 0) break; } e->stop();      // sanitizer builds analyse slowly: keep asking for the forecast until the end of the stream has one
