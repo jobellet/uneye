@@ -47,6 +47,8 @@ bool UdpSource::open(std::string* error) {
     fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
 #endif
 
+    { int rcv = 4 << 20; ::setsockopt(socket_, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&rcv), sizeof rcv); }        // 4 MB: a stall of the reader of a few tens of ms does not lose packets
+
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(spec_.port);
@@ -90,6 +92,10 @@ size_t UdpSource::read(std::vector<Sample>& out, size_t max_samples, int timeout
 #endif
 
     size_t initial_size = out.size();
+    while (!pending_.empty() && out.size() - initial_size < max_samples) { out.push_back(pending_.front()); pending_.pop_front(); }
+    if (!pending_.empty()) return out.size() - initial_size;        // still behind: deliver before reading more packets (order is kept)
+    if (max_samples == 0) return 0;
+    if (out.size() > initial_size) timeout_ms = 0;                   // some samples were already delivered: only look at what is waiting, do not block
 
 #ifdef _WIN32
     fd_set readfds;
@@ -134,9 +140,8 @@ size_t UdpSource::read(std::vector<Sample>& out, size_t max_samples, int timeout
                             s.x /= spec_.pixels_per_degree;
                             s.y /= spec_.pixels_per_degree;
                         }
-                        out.push_back(s);
-                        if (out.size() - initial_size >= max_samples) break;
-                    }
+                        if (out.size() - initial_size < max_samples) out.push_back(s); else if (pending_.size() < kMaxPending) pending_.push_back(s); else { pending_.pop_front(); pending_.push_back(s); ++dropped_; }
+                    } else { ++dropped_; }                                  // a line that is not "t x y [valid]"
                 }
             } else if (n >= 8) {
                 // Binary mode
@@ -152,7 +157,7 @@ size_t UdpSource::read(std::vector<Sample>& out, size_t max_samples, int timeout
                         dropped_++;
                     } else {
                         const char* ptr = buf + 8;
-                        for (uint32_t i = 0; i < count && out.size() - initial_size < max_samples; ++i) {
+                        for (uint32_t i = 0; i < count; ++i) {
                             Sample s;
                             std::memcpy(&s.t, ptr, 8);
                             std::memcpy(&s.x, ptr + 8, 4);
@@ -162,7 +167,7 @@ size_t UdpSource::read(std::vector<Sample>& out, size_t max_samples, int timeout
                                 s.x /= spec_.pixels_per_degree;
                                 s.y /= spec_.pixels_per_degree;
                             }
-                            out.push_back(s);
+                            if (out.size() - initial_size < max_samples) out.push_back(s); else if (pending_.size() < kMaxPending) pending_.push_back(s); else { pending_.pop_front(); pending_.push_back(s); ++dropped_; }
                             ptr += 20;
                         }
                     }

@@ -1,5 +1,6 @@
 #pragma once
 #include "eyelive/source.hpp"
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,8 @@ class UdpSource : public ISource {
  private:
     SourceSpec spec_;
     uint64_t dropped_ = 0;
+    std::deque<Sample> pending_;     // samples of a packet that did not fit in max_samples: delivered by the next read() (a text packet can hold thousands of lines)
+    static constexpr size_t kMaxPending = 1u << 20;   // a sender that floods faster than the engine reads loses the oldest samples (counted in dropped_packets), memory stays bounded
 #ifdef _WIN32
     unsigned long long socket_ = ~0ull; // INVALID_SOCKET
 #else

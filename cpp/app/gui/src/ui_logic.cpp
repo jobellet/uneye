@@ -51,7 +51,9 @@ void UiController::reload_profiles() {
     for (const auto& key : list_profiles(profile_dir_)) { DeviceProfile p; std::string e; const bool ok = load_profile((fs::path(profile_dir_) / (key + ".profile")).string(), p, &e); cache_.push_back({key, ok && !p.name.empty() ? p.name : key, false}); seen.insert(key); }
     for (const auto& b : builtin_profiles()) if (!seen.count(fs::path(profile_file_name(b.name)).stem().string())) cache_.push_back({b.name, b.name, true});
 }
+static bool safe_key(const std::string& k) { return !k.empty() && k.find('/') == std::string::npos && k.find('\\') == std::string::npos && k.find("..") == std::string::npos; }      // a profile key is a file name, never a path
 bool UiController::select_profile(const std::string& key, std::string* error) {
+    if (!safe_key(key)) { if (error) *error = "invalid profile name"; return false; }
     DeviceProfile p; std::error_code ec; const fs::path saved = fs::path(profile_dir_) / (key + ".profile");
     if (fs::exists(saved, ec)) { if (!load_profile(saved.string(), p, error)) return false; }
     else { bool found = false; for (const auto& b : builtin_profiles()) if (b.name == key) { p = b; found = true; } if (!found) { if (error) *error = "no profile '" + key + "'"; return false; } }
@@ -59,6 +61,7 @@ bool UiController::select_profile(const std::string& key, std::string* error) {
 }
 bool UiController::save_profile(std::string* error) { std::vector<std::string> pr; if (!profile_problems(profile_, &pr)) { if (error) *error = pr.empty() ? "invalid profile" : pr[0]; return false; } if (!save_profile_to(error)) return false; settings_.set("ui.profile", fs::path(profile_file_name(profile_.name)).stem().string()); reload_profiles(); return true; }
 bool UiController::delete_profile(const std::string& name, std::string* error) {
+    if (!safe_key(name)) { if (error) *error = "invalid profile name"; return false; }
     std::error_code ec; const std::string path = (fs::path(profile_dir_) / (name + ".profile")).string(); if (!fs::exists(path, ec)) { if (error) *error = "'" + name + "' is a built-in profile or does not exist"; return false; }
     if (!fs::remove(path, ec) || ec) { if (error) *error = "cannot delete " + path; return false; } if (fs::path(profile_file_name(profile_.name)).stem().string() == name) { profile_ = builtin_profiles()[0]; settings_.set("ui.profile", profile_.name); } reload_profiles(); return true;
 }
