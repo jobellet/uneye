@@ -12,6 +12,7 @@
 #include <thread>
 #include <algorithm>
 #include "eyelive/engine.hpp"
+#include "eyelive/setup.hpp"
 #include "eyelive/net_detectors.hpp"
 
 using namespace eyelive;
@@ -35,14 +36,7 @@ static void usage() {
               "  --quiet                  do not print events while recording");
 }
 
-static bool parse_rule(const std::string& line, TriggerRule& r) {
-    std::stringstream ss(line); std::string kv; r = TriggerRule(); bool any = false;
-    while (std::getline(ss, kv, ';')) { const size_t e = kv.find('='); if (e == std::string::npos) continue; const std::string k = kv.substr(0, e), v = kv.substr(e + 1);
-        if (k == "name") r.name = v; else if (k == "cls") r.cls = uint8_t(std::atoi(v.c_str())); else if (k == "any") { r.any_class = v == "1"; any = true; } else if (k == "amp_min") r.amp_min_deg = float(std::atof(v.c_str())); else if (k == "amp_max") r.amp_max_deg = float(std::atof(v.c_str()));
-        else if (k == "anchor") { if (v == "provisional") r.anchor = TriggerAnchor::OnsetProvisional; else if (v == "final") r.anchor = TriggerAnchor::OnsetFinal; else if (v == "offset") r.anchor = TriggerAnchor::Offset; else return false; }
-        else if (k == "delay_ms") r.delay_ms = std::atof(v.c_str()); else if (k == "refractory_ms") r.refractory_ms = std::atof(v.c_str()); else if (k == "sink") r.sink = v; else if (k == "payload") r.payload = v; else if (k == "enabled") r.enabled = v != "0"; else return false; }
-    (void)any; return !r.name.empty() && !r.sink.empty();
-}
+static bool parse_rule(const std::string& line, TriggerRule& r) { std::string e; if (parse_trigger_rule(line, r, &e)) return true; std::fprintf(stderr, "trigger rule: %s\n", e.c_str()); return false; }
 
 int main(int argc, char** argv) {
     SessionConfig cfg; cfg.session_path = "eyelive_cli_session.eyelive"; cfg.source.kind = ""; cfg.source.speed = -1.0; cfg.duration_s = 0; cfg.deg_per_unit = 1.0; double duration = 0; uint64_t samples = 0; bool train = false, quiet = false; double prelabel_s = -1; std::string triggers, events_out;

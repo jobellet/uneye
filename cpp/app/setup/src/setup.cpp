@@ -24,6 +24,7 @@ namespace {
 std::string trim(const std::string& s) { size_t a = 0, b = s.size(); while (a < b && std::isspace((unsigned char)s[a])) ++a; while (b > a && std::isspace((unsigned char)s[b - 1])) --b; return s.substr(a, b - a); }
 bool to_double(const std::string& v, double* out) { if (v.empty()) return false; char* e = nullptr; errno = 0; const double d = std::strtod(v.c_str(), &e); if (e == v.c_str() || *e != 0 || errno == ERANGE || !std::isfinite(d)) return false; *out = d; return true; }
 std::string num(double v) { char b[40]; std::snprintf(b, sizeof b, "%.10g", v); return b; }
+std::string human_bytes(double b) { char o[40]; if (b >= 1e9) std::snprintf(o, sizeof o, "%.1f GB", b / 1e9); else if (b >= 1e6) std::snprintf(o, sizeof o, "%.0f MB", b / 1e6); else std::snprintf(o, sizeof o, "%.0f kB", b / 1e3); return o; }
 }  // namespace
 
 double pixels_per_degree(const ScreenGeometry& g) {
@@ -42,7 +43,7 @@ std::string serialize_profile(const DeviceProfile& p) {
     auto clean = [](std::string s) { for (char& c : s) if (c == '\n' || c == '\r') c = ' '; return s; };
     std::string o = "# EyeLive device profile\n"; auto kv = [&](const std::string& k, const std::string& v) { o += k + "=" + clean(v) + "\n"; };
     kv("name", p.name); kv("tracker", p.tracker); kv("source", p.source.kind); kv("bind", p.source.bind_address); kv("port", std::to_string(p.source.port)); kv("file", p.source.path); kv("file_speed", num(p.source.speed)); kv("sim_rate_hz", num(p.source.rate_hz));
-    kv("rate_hz", num(p.rate_hz)); kv("stream_in_pixels", p.stream_in_pixels ? "1" : "0"); kv("screen_width_cm", num(p.screen.width_cm)); kv("screen_height_cm", num(p.screen.height_cm)); kv("screen_distance_cm", num(p.screen.distance_cm));
+    kv("rate_hz", num(p.rate_hz)); kv("units", p.units); kv("screen_width_cm", num(p.screen.width_cm)); kv("screen_height_cm", num(p.screen.height_cm)); kv("screen_distance_cm", num(p.screen.distance_cm));
     kv("screen_res_x", std::to_string(p.screen.res_x)); kv("screen_res_y", std::to_string(p.screen.res_y)); kv("detector", p.detector_id); kv("landing_model", p.landing_model); kv("triggers_file", p.triggers_file); kv("duration_min", num(p.duration_min)); kv("notes", p.notes);
     for (const auto& e : p.extra) kv(e.first, e.second); return o;
 }
@@ -56,7 +57,7 @@ bool parse_profile(const std::string& text, DeviceProfile& out, std::string* err
         if (k == "name") p.name = v; else if (k == "tracker") p.tracker = v; else if (k == "source") p.source.kind = v; else if (k == "bind") p.source.bind_address = v; else if (k == "file") p.source.path = v;
         else if (k == "port") { if (!integer(&p.source.port)) return fail("bad number for port"); } else if (k == "file_speed") { if (!number(&p.source.speed)) return fail("bad number for file_speed"); }
         else if (k == "sim_rate_hz") { if (!number(&p.source.rate_hz)) return fail("bad number for sim_rate_hz"); } else if (k == "rate_hz") { if (!number(&p.rate_hz)) return fail("bad number for rate_hz"); }
-        else if (k == "stream_in_pixels") p.stream_in_pixels = v == "1" || v == "true"; else if (k == "screen_width_cm") { if (!number(&p.screen.width_cm)) return fail("bad number for screen_width_cm"); }
+        else if (k == "units") { if (v != "degrees" && v != "pixels" && v != "auto") return fail("units must be degrees, pixels or auto"); p.units = v; } else if (k == "screen_width_cm") { if (!number(&p.screen.width_cm)) return fail("bad number for screen_width_cm"); }
         else if (k == "screen_height_cm") { if (!number(&p.screen.height_cm)) return fail("bad number for screen_height_cm"); } else if (k == "screen_distance_cm") { if (!number(&p.screen.distance_cm)) return fail("bad number for screen_distance_cm"); }
         else if (k == "screen_res_x") { if (!integer(&p.screen.res_x)) return fail("bad number for screen_res_x"); } else if (k == "screen_res_y") { if (!integer(&p.screen.res_y)) return fail("bad number for screen_res_y"); }
         else if (k == "detector") p.detector_id = v; else if (k == "landing_model") p.landing_model = v; else if (k == "triggers_file") p.triggers_file = v; else if (k == "duration_min") { if (!number(&p.duration_min)) return fail("bad number for duration_min"); }
@@ -73,7 +74,8 @@ bool profile_problems(const DeviceProfile& p, std::vector<std::string>* problems
     if (p.rate_hz < 0 || p.rate_hz > 10000) bad.push_back("rate_hz must be 0 (measured) or up to 10000");
     if (k == "sim" && (p.source.rate_hz < 50 || p.source.rate_hz > 10000)) bad.push_back("simulation rate must be between 50 and 10000 Hz");
     if (p.duration_min <= 0 || p.duration_min > 24 * 60) bad.push_back("planned duration must be between 1 minute and 24 hours");
-    if (p.stream_in_pixels && !p.screen.complete()) bad.push_back("the tracker sends pixels: give the screen width, the viewing distance and the horizontal resolution");
+    if (p.units != "degrees" && p.units != "pixels" && p.units != "auto") bad.push_back("units must be degrees, pixels or auto");
+    if (p.units == "pixels" && !p.screen.complete()) bad.push_back("the tracker sends pixels: give the screen width, the viewing distance and the horizontal resolution");
     if (p.screen.width_cm < 0 || p.screen.distance_cm < 0 || p.screen.res_x < 0) bad.push_back("screen values cannot be negative");
     if (p.screen.complete()) { if (p.screen.distance_cm < 20 || p.screen.distance_cm > 300) warn.push_back("warning: viewing distance " + num(p.screen.distance_cm) + " cm is unusual");
         if (p.screen.width_cm < 10 || p.screen.width_cm > 300) warn.push_back("warning: screen width " + num(p.screen.width_cm) + " cm is unusual");
@@ -98,14 +100,33 @@ std::string default_profile_dir() { const char* h = std::getenv("HOME"); if (!h)
 std::vector<DeviceProfile> builtin_profiles() {
     std::vector<DeviceProfile> v; DeviceProfile sim; sim.name = "Simulation (demo)"; sim.tracker = "simulated eye"; sim.source.kind = "sim"; sim.source.rate_hz = 1000; sim.duration_min = 10; v.push_back(sim);
     DeviceProfile udp; udp.name = "Tracker over UDP, degrees"; udp.tracker = "generic"; udp.source.kind = "udp"; udp.source.port = 5005; udp.source.bind_address = "127.0.0.1"; udp.duration_min = 60; v.push_back(udp);
-    DeviceProfile px = udp; px.name = "Tracker over UDP, screen pixels"; px.stream_in_pixels = true; px.screen.width_cm = 53; px.screen.height_cm = 30; px.screen.distance_cm = 60; px.screen.res_x = 1920; px.screen.res_y = 1080; v.push_back(px);
-    DeviceProfile file; file.name = "Replay a recorded file"; file.tracker = "recording"; file.source.kind = "file"; file.source.speed = 1.0; file.duration_min = 30; v.push_back(file); return v;
+    DeviceProfile px = udp; px.name = "Tracker over UDP, screen pixels"; px.units = "pixels"; px.screen.width_cm = 53; px.screen.height_cm = 30; px.screen.distance_cm = 60; px.screen.res_x = 1920; px.screen.res_y = 1080; v.push_back(px);
+    DeviceProfile file; file.name = "Replay a recorded file"; file.tracker = "recording"; file.units = "auto"; file.source.kind = "file"; file.source.speed = 1.0; file.duration_min = 30; v.push_back(file); return v;
 }
 
 SessionConfig session_config(const DeviceProfile& p, const std::string& session_path) {
-    SessionConfig c; c.source = p.source; c.session_path = session_path; c.duration_s = p.duration_min * 60.0; c.rate_hz = p.rate_hz; c.detector_id = p.detector_id; c.deg_per_unit = 0;
-    if (p.stream_in_pixels) c.source.pixels_per_degree = pixels_per_degree(p.screen);
+    SessionConfig c; c.source = p.source; c.session_path = session_path; c.duration_s = p.duration_min * 60.0; c.rate_hz = p.rate_hz; c.detector_id = p.detector_id; c.deg_per_unit = p.units == "degrees" ? 1.0 : (p.units == "pixels" ? degrees_per_pixel(p.screen) : 0.0);
     c.profile_name = p.name; c.landing_model = p.landing_model; return c;
+}
+
+bool parse_trigger_rule(const std::string& line, TriggerRule& out, std::string* error) {
+    TriggerRule r; std::stringstream ss(line); std::string kv; auto fail = [&](const std::string& m) { if (error) *error = m; return false; }; auto num_of = [&](const std::string& k, const std::string& v, double* d) { if (!to_double(v, d)) { fail("bad number for " + k); return false; } return true; };
+    while (std::getline(ss, kv, ';')) { kv = trim(kv); if (kv.empty()) continue; const size_t e = kv.find('='); if (e == std::string::npos) return fail("expected key=value in '" + kv + "'"); const std::string k = trim(kv.substr(0, e)), v = trim(kv.substr(e + 1)); double d = 0;
+        if (k == "name") r.name = v; else if (k == "cls") { if (!num_of(k, v, &d)) return false; if (d < 1 || d >= kMaxClasses || d != std::floor(d)) return fail("cls must be 1 to " + std::to_string(kMaxClasses - 1)); r.cls = uint8_t(d); }
+        else if (k == "any") r.any_class = v == "1" || v == "true"; else if (k == "amp_min") { if (!num_of(k, v, &d)) return false; r.amp_min_deg = float(d); } else if (k == "amp_max") { if (!num_of(k, v, &d)) return false; r.amp_max_deg = float(d); }
+        else if (k == "anchor") { if (v == "provisional") r.anchor = TriggerAnchor::OnsetProvisional; else if (v == "final") r.anchor = TriggerAnchor::OnsetFinal; else if (v == "offset") r.anchor = TriggerAnchor::Offset; else return fail("anchor must be provisional, final or offset"); }
+        else if (k == "delay_ms") { if (!num_of(k, v, &d)) return false; if (d < 0 || d > 5000) return fail("delay_ms must be between 0 and 5000"); r.delay_ms = d; } else if (k == "refractory_ms") { if (!num_of(k, v, &d)) return false; if (d < 0 || d > 600000) return fail("refractory_ms must be between 0 and 600000"); r.refractory_ms = d; }
+        else if (k == "sink") r.sink = v; else if (k == "payload") r.payload = v; else if (k == "enabled") r.enabled = v != "0" && v != "false"; else return fail("unknown key '" + k + "'"); }
+    if (r.name.empty()) return fail("a rule needs name=..."); if (r.sink.empty()) return fail("a rule needs sink=udp:HOST:PORT, log:FILE or stdout");
+    if (r.amp_min_deg > r.amp_max_deg) return fail("amp_min is larger than amp_max");
+    if (r.sink.rfind("udp:", 0) == 0) { const size_t c = r.sink.rfind(':'); double port = 0; if (c <= 4 || !to_double(r.sink.substr(c + 1), &port) || port < 1 || port > 65535 || port != std::floor(port)) return fail("sink 'udp:HOST:PORT' needs a port between 1 and 65535"); }
+    else if (r.sink.rfind("log:", 0) == 0) { if (r.sink.size() == 4) return fail("sink 'log:' needs a file name"); } else if (r.sink != "stdout") return fail("sink must be udp:HOST:PORT, log:FILE or stdout");
+    out = r; return true;
+}
+bool load_trigger_rules(const std::string& path, std::vector<TriggerRule>& out, std::string* error) {
+    std::ifstream f(path); if (!f) { if (error) *error = "cannot read " + path; return false; } std::vector<TriggerRule> v; std::string line; int ln = 0;
+    while (std::getline(f, line)) { ++ln; line = trim(line); if (line.empty() || line[0] == '#') continue; TriggerRule r; std::string e; if (!parse_trigger_rule(line, r, &e)) { if (error) *error = path + ":" + std::to_string(ln) + ": " + e; return false; } v.push_back(r); }
+    out = v; return true;
 }
 
 bool udp_port_free(const std::string& bind_address, int port, std::string* error) {
@@ -142,8 +163,8 @@ std::vector<CheckResult> run_checks(const DeviceProfile& p, const std::string& s
     { std::error_code ec; fs::create_directories(session_dir, ec); const std::string probe = (fs::path(session_dir) / ".eyelive_write_test").string(); std::ofstream f(probe); const bool w = bool(f); f.close(); fs::remove(probe, ec);
       if (!w) add("session folder", CheckLevel::Fail, "cannot write in " + session_dir, "choose a folder you own");
       else { const double free_b = free_disk_bytes(session_dir); const double need = (p.rate_hz > 0 ? p.rate_hz : (p.source.kind == "sim" ? p.source.rate_hz : 1000.0)) * p.duration_min * 60.0 * 19.0 * 1.05;
-          if (free_b >= 0 && free_b < need * 1.5) add("disk space", CheckLevel::Fail, "needs about " + num(need / 1e6) + " MB, only " + num(free_b / 1e6) + " MB free", "free some space or shorten the planned duration"); else add("disk space", CheckLevel::Ok, "about " + num(need / 1e6) + " MB needed, " + (free_b >= 0 ? num(free_b / 1e9) + " GB free" : "free space unknown")); } }
-    if (p.stream_in_pixels && p.screen.complete()) add("scale", CheckLevel::Ok, num(pixels_per_degree(p.screen)) + " pixels per degree at the screen centre"); else if (!p.stream_in_pixels) add("scale", CheckLevel::Ok, "the stream is in degrees");
+          if (free_b >= 0 && free_b < need * 1.5) add("disk space", CheckLevel::Fail, "needs about " + human_bytes(need) + ", only " + human_bytes(free_b) + " free", "free some space or shorten the planned duration"); else add("disk space", CheckLevel::Ok, "about " + human_bytes(need) + " needed, " + (free_b >= 0 ? human_bytes(free_b) + " free" : "free space unknown")); } }
+    if (p.units == "pixels" && p.screen.complete()) add("scale", CheckLevel::Ok, num(pixels_per_degree(p.screen)) + " pixels per degree at the screen centre"); else if (p.units == "degrees") add("scale", CheckLevel::Ok, "the stream is in degrees"); else if (p.units == "auto") add("scale", CheckLevel::Warn, "the scale will be estimated from the data (needs about a minute of saccades)", "give the screen geometry for an exact scale");
     if (!p.landing_model.empty()) add("landing network", CheckLevel::Ok, "'" + p.landing_model + "' will be loaded at the start (a failure is reported, the tables are used instead)");
     return r;
 }

@@ -11,6 +11,8 @@ ImU32 class_color(int cls, float a) {
     static const ImVec4 c[5] = {{0.55f, 0.55f, 0.58f, 1}, {0.20f, 0.55f, 0.95f, 1}, {0.95f, 0.60f, 0.15f, 1}, {0.25f, 0.75f, 0.40f, 1}, {0.70f, 0.40f, 0.85f, 1}};
     ImVec4 v = c[std::max(0, std::min(cls, 4))]; v.w = a; return ImGui::ColorConvertFloat4ToU32(v);
 }
+bool input_string(const char* label, std::string& value, size_t max_len) { std::vector<char> buf(max_len + 1, 0); std::snprintf(buf.data(), buf.size(), "%s", value.c_str()); if (!ImGui::InputText(label, buf.data(), buf.size())) return false; value = buf.data(); return true; }
+void help_marker(const char* text) { ImGui::SameLine(); ImGui::TextDisabled("(?)"); if (ImGui::BeginItemTooltip()) { ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f); ImGui::TextUnformatted(text); ImGui::PopTextWrapPos(); ImGui::EndTooltip(); } }
 const char* class_name(int cls) { static const char* n[5] = {"fixation", "saccade", "blink", "class 3", "class 4"}; return n[std::max(0, std::min(cls, 4))]; }
 std::string format_bytes(double b) { char s[32]; if (b >= 1e9) std::snprintf(s, sizeof s, "%.2f GB", b / 1e9); else if (b >= 1e6) std::snprintf(s, sizeof s, "%.1f MB", b / 1e6); else if (b >= 1e3) std::snprintf(s, sizeof s, "%.1f kB", b / 1e3); else std::snprintf(s, sizeof s, "%.0f B", b); return s; }
 std::string format_time(double t) { char s[32]; if (t >= 3600) std::snprintf(s, sizeof s, "%d:%02d:%02d", int(t / 3600), int(std::fmod(t, 3600) / 60), int(std::fmod(t, 60))); else std::snprintf(s, sizeof s, "%02d:%04.1f", int(t / 60), std::fmod(t, 60)); return s; }

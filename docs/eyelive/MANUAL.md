@@ -10,7 +10,17 @@ Unzip the release into a folder you own and follow [INSTALL_UNSIGNED.md](INSTALL
 * Nothing leaves the computer. UDP is opened only while a session records.
 * Three classes by default: **fixation** (smooth pursuit stays in it), **saccade** (post-saccadic oscillations stay in it), **blink**. You can use up to five.
 
-## 3. First session: the Acquire tab
+## 3. First session in four clicks: the wizard and the Start button
+At the first launch a window asks four questions (your tracker, the signal, what you want, a name) and saves the answers as a **profile**. Afterwards a recording is: pick the profile, press the big green **Start recording**.
+* **The four modes** at the top group the tabs: *Record* (Setup, Live, Triggers), *Review* (Review, Detection, Train), *Analyze* (Predict, Export, Log), *Help*. *Advanced* shows every tab, including the old *Acquire* tab of section 3b.
+* **The health light** at the top right is never the only information: it says *idle*, *OK*, *CHECK* or *PROBLEM* and why (no sample for 2 s, lost packets, a high detection latency, a file that is almost full).
+* **Profiles** (`~/.eyelive/profiles/*.profile`, a text file you can copy to another computer) hold the tracker, the port, the rate, the units and the screen, the detector, the landing network (section 9), the trigger rules and the planned duration. The *Setup* tab edits and saves them and runs the **checks** (port free, disk space, rules file readable, scale).
+  Each session is saved as `~/EyeLive/<profile>_<date>_<time>.eyelive`, never over an existing one. If the profile has a trigger rules file, a mistake in it stops the *start*, not the experiment.
+* **Next to each session file**: `<session>.provenance.json` (version of the program, detector, profile, landing network, SHA-256 of the data and of the model files: what you need to reproduce an analysis) and `<session>.report.html` (one page: duration, missing samples, gaps, saccade rate, amplitudes, main sequence, warnings such as "the stream is probably in pixels").
+* **Export tab**: events CSV, BIDS-style TSV + JSON, MAT-file (`t, x, y, valid, label, expert, events`; MATLAB, Octave, `scipy.io.loadmat`), or the report.
+* **Help tab**: the checks again, where files are, the usual problems, and a diagnostic text (version, profile, checks, statistics, no gaze data) to paste into a message to the support.
+
+## 3b. The Acquire tab (Advanced mode)
 ![Acquire tab](img/tab_Acquire.png)
 1. **Source.** *Simulator* (no tracker needed: try everything with it), *File replay* (a CSV `t,x,y[,valid]`), or *UDP stream* (the tracker computer sends the samples to a port; section 3.1).
 2. **Sampling rate and duration.** Leave the rate at 0 and EyeLive measures it from the first 500 ms and snaps it to the nearest standard rate (60, 120, 250, 300, 500, 1000, 1200, 2000 Hz). The planned duration sets the preallocation, shown as you type, with the free disk space.
@@ -52,7 +62,17 @@ A rule fires on an event of a class (or any), optionally within an amplitude ran
 ![Predict tab](img/tab_Predict.png)
 No TTL hardware is needed: your stimulus program reads the **state block** of the session file (last gaze, speed, event counters, last event). MATLAB / Psychtoolbox: `m = memmapfile(session, 'Offset', 256, 'Format', 'uint8', 'Repeat', 256);` then `eyelive_state(m.Data)` (`cpp/app/readers/matlab/`). Python / PsychoPy: `from eyelive_reader import StateReader` (`cpp/app/readers/python/`). The **Predict** tab (and the *forecast +20 ms* box of the Live tab, off by default) draws the forecast of the eye position 10 and 20 ms ahead over the measurement (magenta x, yellow y, shifted to the future time and extending 20 ms beyond the last sample, with its 80 % interval) and measures its error over the last 10 s against 'the eye stays where it is'. It needs a 1 kHz stream; the latest forecast is also in the state block.
 
-## 10. Without the window: eyelive_cli
+## 10. After the recording, without the window: eyelive_tool
+```sh
+eyelive_tool info session.eyelive                                  # the report as text
+eyelive_tool export session.eyelive --csv events.csv --bids sub-01_task-x --mat session.mat --report report.html
+eyelive_tool redetect sessions/ --detector fast_threshold --out redo/ [--recursive]     # label a whole folder again with another detector or model; the sessions are not modified
+eyelive_tool check --profile "Lab A" --session-dir ~/EyeLive       # port, files, disk space, scale
+eyelive_tool profiles list | show NAME | new NAME --from "Tracker over UDP, screen pixels"
+```
+Exit code 0 on success, 1 on a failure (message on stderr), 2 on a usage error.
+
+## 10b. Without the window: eyelive_cli
 ```sh
 eyelive_cli --sim --duration 5 --session demo.eyelive
 eyelive_cli --udp 5005 --duration 3600 --session subject1.eyelive --scale auto

@@ -1,5 +1,5 @@
 // EyeLive window (task T12): GLFW + OpenGL 3.2 core + Dear ImGui, a tab bar built from tab_registry(), a status bar, render on demand, and an offscreen --shot mode.
-//   eyelive [--mock] [--demo] [--tab <title>] [--size WxH] [--shot file.ppm [--frames N]] [--settings file] [--run-seconds S]
+//   eyelive [--mock] [--demo] [--tab <title>] [--mode Record|Review|Analyze|Help|Advanced] [--profile <name>] [--wizard | --no-wizard] [--profiles-dir D] [--session-dir D] [--size WxH] [--shot file.ppm [--frames N]] [--settings file] [--run-seconds S]
 //   --script "5:m:400:300,6:d,7:u,9:k:Delete" (with --shot): simulated input at given frames: m:x:y mouse move (window points), d / u mouse down / up, k:Name key press (Delete, Backspace, A, Z, Escape, S, M, R, 1-4)
 //   --mock: synthetic engine; --demo: real engine on a simulated session (60 s recorded as fast as possible, pre-labelled); --run-seconds: exit after S seconds (idle CPU measurement)
 #include <GLFW/glfw3.h>
@@ -22,6 +22,7 @@
 #include "imgui_impl_opengl3.h"
 #include "eyelive/gui/mock_engine.hpp"
 #include "eyelive/gui/settings.hpp"
+#include "eyelive/gui/shell_ui.hpp"
 #include "eyelive/gui/widgets.hpp"
 #include "eyelive/gui_tab.hpp"
 #include "eyelive/net_detectors.hpp"
@@ -29,10 +30,10 @@
 using namespace eyelive;
 using Clock = std::chrono::steady_clock;
 
-struct Args { bool mock = false, demo = false; std::string shot, tab, settings, script; int frames = 5, w = 1360, h = 820; double run_seconds = 0; };
+struct Args { bool mock = false, demo = false, wizard = false, no_wizard = false; std::string shot, tab, settings, script, mode, profile, profiles_dir, session_dir; int frames = 5, w = 1360, h = 820; double run_seconds = 0; };
 static Args parse(int argc, char** argv) {
     Args a; for (int i = 1; i < argc; ++i) { const std::string s = argv[i]; auto next = [&](std::string& out) { if (i + 1 < argc) out = argv[++i]; };
-        if (s == "--mock") a.mock = true; else if (s == "--demo") a.demo = true; else if (s == "--script") next(a.script); else if (s == "--run-seconds" && i + 1 < argc) a.run_seconds = std::atof(argv[++i]); else if (s == "--shot") next(a.shot); else if (s == "--tab") next(a.tab); else if (s == "--settings") next(a.settings);
+        if (s == "--wizard") a.wizard = true; else if (s == "--no-wizard") a.no_wizard = true; else if (s == "--mode") next(a.mode); else if (s == "--profile") next(a.profile); else if (s == "--profiles-dir") next(a.profiles_dir); else if (s == "--session-dir") next(a.session_dir); else if (s == "--mock") a.mock = true; else if (s == "--demo") a.demo = true; else if (s == "--script") next(a.script); else if (s == "--run-seconds" && i + 1 < argc) a.run_seconds = std::atof(argv[++i]); else if (s == "--shot") next(a.shot); else if (s == "--tab") next(a.tab); else if (s == "--settings") next(a.settings);
         else if (s == "--frames" && i + 1 < argc) a.frames = std::max(1, std::atoi(argv[++i]));
         else if (s == "--size" && i + 1 < argc) { std::sscanf(argv[++i], "%dx%d", &a.w, &a.h); } }
     return a;
@@ -78,6 +79,9 @@ int main(int argc, char** argv) {
     { namespace fs = std::filesystem; std::error_code ec; fs::path d = fs::absolute(argv[0], ec).parent_path(); for (int up = 0; up < 7 && !d.empty(); ++up, d = d.parent_path()) { for (const char* rel : {"models", "cpp/models"}) if (fs::exists(d / rel / "combined.bin", ec)) { set_models_dir((d / rel).string()); up = 99; break; } } }      // models next to the executable or in a repository checkout
     std::unique_ptr<IEngine> engine; if (args.mock) engine = std::make_unique<gui::MockEngine>(); else engine = make_engine();
     std::vector<std::unique_ptr<ITab>> tabs; for (auto& f : tab_registry()) tabs.push_back(f()); std::stable_sort(tabs.begin(), tabs.end(), [](const std::unique_ptr<ITab>& a, const std::unique_ptr<ITab>& b) { return a->order() < b->order(); });
+    gui::configure_shared_ui(args.profiles_dir.empty() ? default_profile_dir() : args.profiles_dir, args.session_dir); gui::UiController& uic = gui::shared_ui(); { std::string e; if (!args.profile.empty() && !uic.select_profile(args.profile, &e)) std::fprintf(stderr, "profile: %s\n", e.c_str()); }
+    if (!args.mode.empty()) uic.set_mode(gui::mode_from_name(args.mode, uic.mode())); else if (!args.tab.empty()) { for (auto& t : tabs) if (args.tab == t->title() && !gui::tab_in_mode(uic.mode(), t->title())) uic.set_mode(gui::Mode::Advanced); }
+    gui::WizardState wiz; bool wizard_open = !args.no_wizard && (args.wizard || (uic.wizard_needed() && args.shot.empty() && !args.mock && !args.demo)); bool wizard_open_now = wizard_open; std::string strip_error;
     if (args.demo && !args.mock) {
         SessionConfig c; c.source.kind = "sim"; c.source.speed = 0; c.source.rate_hz = 1000; c.session_path = (std::filesystem::temp_directory_path() / ("eyelive_demo_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".eyelive")).string(); c.duration_s = 70; c.deg_per_unit = 1.0; c.detector_id = "hmm_accel"; std::string err;
         if (!engine->start(c, &err)) { std::fprintf(stderr, "demo: %s\n", err.c_str()); return 5; }
@@ -106,11 +110,14 @@ int main(int argc, char** argv) {
         ImGui_ImplOpenGL3_NewFrame(); ImGui_ImplGlfw_NewFrame(); inject(script, frame_counter, io); ImGui::NewFrame(); const ImVec2 disp = io.DisplaySize; const float status_h = ImGui::GetFrameHeight() + 8;
         ImGui::SetNextWindowPos(ImVec2(0, 0)); ImGui::SetNextWindowSize(ImVec2(disp.x, disp.y - status_h));
         ImGui::Begin("EyeLive", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
-        if (tabs.empty()) ImGui::TextUnformatted("no tabs"); else if (ImGui::BeginTabBar("tabs")) {
-            for (size_t i = 0; i < tabs.size(); ++i) { ImGuiTabItemFlags fl = 0; if (select_tab == int(i)) { fl |= ImGuiTabItemFlags_SetSelected; if (frames_drawn >= 1) select_tab = -1; }
+        bool ask_wizard = false; const bool mode_changed = gui::draw_strip(*engine, uic, strip_error, &ask_wizard); if (ask_wizard) { wiz = gui::WizardState(); wizard_open = true; wizard_open_now = true; }
+        if (mode_changed) { select_tab = -1; for (size_t i = 0; i < tabs.size(); ++i) if (gui::tab_in_mode(uic.mode(), tabs[i]->title())) { select_tab = int(i); break; } frames_drawn = 0; }
+        bool any_visible = false; for (auto& t : tabs) any_visible |= gui::tab_in_mode(uic.mode(), t->title());
+        if (!any_visible) ImGui::TextUnformatted("no tabs in this mode"); else if (ImGui::BeginTabBar("tabs")) {
+            for (size_t i = 0; i < tabs.size(); ++i) { if (!gui::tab_in_mode(uic.mode(), tabs[i]->title())) continue; ImGuiTabItemFlags fl = 0; if (select_tab == int(i)) { fl |= ImGuiTabItemFlags_SetSelected; if (frames_drawn >= 1) select_tab = -1; }
                 if (ImGui::BeginTabItem(tabs[i]->title(), nullptr, fl)) { active = int(i); if (ImGui::BeginChild("body", ImVec2(0, 0), ImGuiChildFlags_None)) tabs[i]->draw(*engine); ImGui::EndChild(); ImGui::EndTabItem(); } }
             ImGui::EndTabBar(); }
-        ImGui::End(); draw_status(*engine, disp); ImGui::Render();
+        ImGui::End(); if (wizard_open) { wizard_open = gui::draw_wizard(uic, wiz, wizard_open_now); wizard_open_now = false; } draw_status(*engine, disp); ImGui::Render();
         int fw, fh; glfwGetFramebufferSize(win, &fw, &fh); glViewport(0, 0, fw, fh); glClearColor(0.09f, 0.09f, 0.10f, 1); glClear(GL_COLOR_BUFFER_BIT); ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         ++frames_drawn; ++frame_counter; last_render = Clock::now(); if (extra_frames > 0) --extra_frames; if (ImGui::IsAnyItemActive() || event) extra_frames = std::max(extra_frames, 2);        // one more frame after any interaction: widgets show their new state a frame late
         if (!args.shot.empty() && frame_counter >= max_frames) { if (!write_ppm(args.shot, fw, fh)) { std::fprintf(stderr, "cannot write %s\n", args.shot.c_str()); return 4; } break; }

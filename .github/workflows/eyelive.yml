@@ -44,6 +44,9 @@ jobs:
         run: |
           set -o pipefail
           ctest --test-dir build -L eyelive --output-on-failure --timeout 900 2>&1 | tee ctest.log
+      - name: Commands of the manual (eyelive_cli and eyelive_tool)
+        shell: bash
+        run: sh docs/eyelive/check_commands.sh build/app/cli/eyelive_cli cpp/models build/app/cli/eyelive_tool
       - name: Publish test failures in the run summary (readable without signing in)
         if: failure()
         shell: bash
@@ -111,4 +114,12 @@ jobs:
           d = open('/tmp/a.ppm', 'rb').read(); body = d[d.index(b'255\n') + 4:]; assert len(set(body[i] for i in range(0, len(body), 997))) > 8, 'uniform image'; print('shot ok', len(d), 'bytes')
           PY
           xvfb-run -a build/app/gui/eyelive --demo --tab Review --shot /tmp/b.ppm --frames 5
+          # the simplified interface: every mode, and the first-launch wizard (isolated settings, profiles and session folders)
+          for m in Record Review Analyze Help Advanced; do xvfb-run -a build/app/gui/eyelive --mock --no-wizard --mode $m --settings /tmp/ui_settings.txt --profiles-dir /tmp/ui_profiles --session-dir /tmp/ui_sessions --shot /tmp/mode_$m.ppm --frames 5; done
+          xvfb-run -a build/app/gui/eyelive --mock --wizard --settings /tmp/ui_settings.txt --profiles-dir /tmp/ui_profiles --session-dir /tmp/ui_sessions --shot /tmp/wizard.ppm --frames 5
+          python3 - <<'PY'
+          for f in ['Record', 'Review', 'Analyze', 'Help', 'Advanced']:
+              d = open('/tmp/mode_%s.ppm' % f, 'rb').read(); body = d[d.index(b'255\n') + 4:]; assert len(set(body[i] for i in range(0, len(body), 997))) > 8, 'uniform image in mode ' + f
+          a = open('/tmp/mode_Record.ppm', 'rb').read(); w = open('/tmp/wizard.ppm', 'rb').read(); assert a != w, 'the wizard changes nothing on the screen'; print('mode and wizard shots ok')
+          PY
           ctest --test-dir build -L gui --output-on-failure

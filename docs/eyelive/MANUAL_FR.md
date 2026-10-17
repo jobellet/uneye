@@ -10,7 +10,17 @@ Décompressez la version dans un dossier qui vous appartient et suivez [INSTALL_
 * Rien ne quitte l'ordinateur. Le port UDP n'est ouvert que pendant une session.
 * Trois classes par défaut : **fixation** (la poursuite lente y reste), **saccade** (les oscillations post-saccadiques y restent), **clignement**. Jusqu'à cinq classes sont possibles.
 
-## 3. Première session : onglet Acquire
+## 3. Première session en quatre clics : l'assistant et le bouton Start
+Au premier lancement, une fenêtre pose quatre questions (votre oculomètre, le signal, ce que vous voulez, un nom) et enregistre les réponses dans un **profil**. Ensuite, enregistrer = choisir le profil et appuyer sur le grand bouton vert **Start recording**.
+* **Les quatre modes** en haut regroupent les onglets : *Record* (Setup, Live, Triggers), *Review* (Review, Detection, Train), *Analyze* (Predict, Export, Log), *Help*. *Advanced* montre tous les onglets, dont l'ancien onglet *Acquire* (section 3b).
+* **Le voyant de santé** (en haut à droite) n'est jamais la seule information : il écrit *idle*, *OK*, *CHECK* ou *PROBLEM* et la raison (aucun échantillon depuis 2 s, paquets perdus, latence de détection élevée, fichier presque plein).
+* **Les profils** (`~/.eyelive/profiles/*.profile`, un fichier texte copiable sur un autre ordinateur) contiennent l'oculomètre, le port, la fréquence, les unités et l'écran, le détecteur, le réseau d'atterrissage (section 9), les règles de déclenchement et la durée prévue. L'onglet *Setup* les modifie, les enregistre et lance les **vérifications** (port libre, espace disque, fichier de règles lisible, échelle).
+  Chaque session est enregistrée sous `~/EyeLive/<profil>_<date>_<heure>.eyelive`, jamais par-dessus une autre. Si le profil a un fichier de règles de déclenchement, une erreur dedans empêche le *démarrage*, pas l'expérience.
+* **À côté de chaque session** : `<session>.provenance.json` (version du programme, détecteur, profil, réseau d'atterrissage, SHA-256 des données et des fichiers de modèle : de quoi reproduire une analyse) et `<session>.report.html` (une page : durée, échantillons manquants, trous, taux de saccades, amplitudes, séquence principale, avertissements du type « le flux est probablement en pixels »).
+* **Onglet Export** : CSV des événements, TSV + JSON de type BIDS, fichier MAT (`t, x, y, valid, label, expert, events` ; MATLAB, Octave, `scipy.io.loadmat`), ou le rapport.
+* **Onglet Help** : les vérifications, l'emplacement des fichiers, les problèmes usuels, et un texte de diagnostic (version, profil, vérifications, statistiques, aucune donnée de regard) à coller dans un message au support.
+
+## 3b. L'onglet Acquire (mode Advanced)
 ![Onglet Acquire](img/tab_Acquire.png)
 1. **Source.** *Simulator* (aucun oculomètre nécessaire : essayez tout avec), *File replay* (un CSV `t,x,y[,valid]`) ou *UDP stream* (l'ordinateur de l'oculomètre envoie les échantillons à un port ; section 3.1).
 2. **Fréquence et durée.** Laissez la fréquence à 0 : EyeLive la mesure sur les premières 500 ms et l'arrondit à la fréquence standard la plus proche (60, 120, 250, 300, 500, 1000, 1200, 2000 Hz). La durée prévue fixe la pré-allocation, affichée pendant la saisie avec l'espace disque libre.
@@ -52,7 +62,17 @@ Une règle se déclenche sur un événement d'une classe (ou toutes), éventuell
 ![Onglet Predict](img/tab_Predict.png)
 Aucun matériel TTL : votre programme de stimulation lit le **bloc d'état** du fichier de session (dernier regard, vitesse, compteurs d'événements, dernier événement). MATLAB / Psychtoolbox : `m = memmapfile(session, 'Offset', 256, 'Format', 'uint8', 'Repeat', 256);` puis `eyelive_state(m.Data)` (`cpp/app/readers/matlab/`). Python / PsychoPy : `from eyelive_reader import StateReader` (`cpp/app/readers/python/`). L'onglet **Predict** (et la case *forecast +20 ms* de l'onglet Live, désactivée par défaut) trace la prévision de la position de l'œil 10 et 20 ms à l'avance par-dessus la mesure (x en magenta, y en jaune, décalés au temps futur et dépassant de 20 ms le dernier échantillon, avec leur intervalle à 80 %) et mesure son erreur sur les 10 dernières secondes, comparée à « l'œil reste où il est ». Il faut un flux à 1 kHz ; la dernière prévision est aussi dans le bloc d'état.
 
-## 10. Sans fenêtre : eyelive_cli
+## 10. Après l'enregistrement, sans fenêtre : eyelive_tool
+```sh
+eyelive_tool info session.eyelive                                  # le rapport en texte
+eyelive_tool export session.eyelive --csv events.csv --bids sub-01_task-x --mat session.mat --report report.html
+eyelive_tool redetect sessions/ --detector fast_threshold --out redo/ [--recursive]     # ré-étiqueter un dossier avec un autre détecteur ou modèle ; les sessions ne sont pas modifiées
+eyelive_tool check --profile "Lab A" --session-dir ~/EyeLive       # port, fichiers, espace disque, échelle
+eyelive_tool profiles list | show NOM | new NOM --from "Tracker over UDP, screen pixels"
+```
+Code de sortie 0 si tout va bien, 1 en cas d'échec (message sur stderr), 2 pour une erreur d'usage.
+
+## 10b. Sans fenêtre : eyelive_cli
 ```sh
 eyelive_cli --sim --duration 5 --session demo.eyelive
 eyelive_cli --udp 5005 --duration 3600 --session sujet1.eyelive --scale auto

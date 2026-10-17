@@ -12,6 +12,8 @@ namespace eyelive { namespace gui {
 
 ImU32 class_color(int cls, float alpha = 1.0f);                 // 0 fixation (grey), 1 saccade (blue), 2 blink (orange), 3 and 4 (green, purple)
 const char* class_name(int cls);
+bool input_string(const char* label, std::string& value, size_t max_len = 512);   // InputText on a std::string; true when the text changed
+void help_marker(const char* text);                              // a (?) that shows the text on hover
 std::string format_bytes(double bytes);
 std::string format_time(double seconds);                         // mm:ss.s or h:mm:ss
 

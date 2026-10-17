@@ -22,7 +22,7 @@ struct DeviceProfile {
     std::string tracker = "generic";                          // free label shown in the reports: "EyeLink 1000 Plus", "Tobii Pro Spectrum", "Pupil Core", ...
     SourceSpec source;                                         // kind (udp | file | sim), bind address, port, replay file, simulation rate
     double rate_hz = 0;                                        // 0 = measured from the first 500 ms
-    bool stream_in_pixels = false;                             // true: the tracker sends screen pixels, converted with the geometry below; false: degrees
+    std::string units = "degrees";                             // what the tracker sends: "degrees", "pixels" (converted with the geometry below, the file keeps the pixels) or "auto" (the scale is estimated from the data)
     ScreenGeometry screen;
     std::string detector_id = "hmm_accel";
     std::string landing_model;                                 // "" = tables only; a file name of cpp/models (landing_mlp_gazebase.bin) or a path
@@ -42,8 +42,12 @@ std::vector<std::string> list_profiles(const std::string& dir);                 
 std::string default_profile_dir();                             // ~/.eyelive/profiles
 std::vector<DeviceProfile> builtin_profiles();                 // simulation, generic UDP (degrees, pixels), replay of a file
 
-// SessionConfig of a profile; deg_per_unit stays 0 (automatic) unless the geometry fixes it (pixels converted at the source: SourceSpec::pixels_per_degree)
+// SessionConfig of a profile: deg_per_unit = 1 (degrees), degrees per pixel of the geometry (pixels; the session file keeps the raw pixels) or 0 (auto: estimated from the data)
 SessionConfig session_config(const DeviceProfile& p, const std::string& session_path);
+
+// ---- trigger rules file (one rule per line, '#' starts a comment): name=sacc;cls=1;anchor=provisional;delay_ms=10;sink=udp:127.0.0.1:6000;payload=SACC {t} {amp}
+bool parse_trigger_rule(const std::string& line, TriggerRule& out, std::string* error);        // strict: unknown keys, bad numbers, negative delays and bad sinks are errors
+bool load_trigger_rules(const std::string& path, std::vector<TriggerRule>& out, std::string* error);   // error: "rules.txt:3: unknown key 'dely_ms'"
 
 // ---- checks run before a session and by the Help tab
 enum class CheckLevel { Ok, Warn, Fail };
