@@ -3,7 +3,9 @@
 #include <fstream>
 #include <cstdlib>
 #include <cstring>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <string>
 
 using namespace eyelive;

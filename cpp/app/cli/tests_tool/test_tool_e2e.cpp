@@ -7,6 +7,9 @@
 #include <string>
 #ifndef _WIN32
 #include <sys/wait.h>
+#else
+#define popen _popen
+#define pclose _pclose
 #endif
 namespace fs = std::filesystem;
 static int fails = 0;
