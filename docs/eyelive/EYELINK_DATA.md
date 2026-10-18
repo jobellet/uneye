@@ -4,7 +4,7 @@ EyeLive's file source reads EyeLink **ASC** text files (what `edf2asc` writes fr
 Detection is automatic (`.asc` extension or `**` / `MSG` / `START` / `SAMPLES` lines at the top).
 
 ```
-eyelive_cli --file recording.asc --eye right --ppd 35.0 ...
+eyelive_cli --replay recording.asc --eye right --ppd 35.0 ...
 ```
 
 * Samples need **GAZE** coordinates (screen pixels). A file converted with HREF-only samples is refused with an explanatory message.
