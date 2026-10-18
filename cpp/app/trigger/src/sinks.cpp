@@ -8,6 +8,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#include <ws2tcpip.h>
 using sock_t = SOCKET; static const sock_t kBadSock = INVALID_SOCKET;
 static void close_sock(sock_t s) { closesocket(s); }
 static void set_nonblocking(sock_t s) { u_long on = 1; ioctlsocket(s, FIONBIO, &on); }
