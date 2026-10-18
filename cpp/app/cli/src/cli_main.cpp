@@ -20,7 +20,7 @@ static std::atomic<bool> g_stop{false};
 static void on_signal(int) { g_stop = true; }
 
 static void usage() {
-    std::puts("usage: eyelive_cli (--udp <port> | --replay <file.csv> [--speed <x>] | --sim [--rate <Hz>]) [options]\n"
+    std::puts("usage: eyelive_cli (--udp <port> | --replay <file.csv> [--speed <x>] [--eye auto|left|right] [--ppd <pixels per degree>] | --sim [--rate <Hz>]) [options]\n"
               "  --bind <addr>            UDP bind address (default 127.0.0.1)\n"
               "  --duration <s>           stop after this many seconds of acquisition (replay and sim also stop at the end of the data)\n"
               "  --samples <n>            stop after n recorded samples\n"
@@ -41,7 +41,7 @@ static bool parse_rule(const std::string& line, TriggerRule& r) { std::string e;
 int main(int argc, char** argv) {
     SessionConfig cfg; cfg.session_path = "eyelive_cli_session.eyelive"; cfg.source.kind = ""; cfg.source.speed = -1.0; cfg.duration_s = 0; cfg.deg_per_unit = 1.0; double duration = 0; uint64_t samples = 0; bool train = false, quiet = false; double prelabel_s = -1; std::string triggers, events_out;
     for (int i = 1; i < argc; ++i) { const std::string a = argv[i]; auto need = [&](const char* name) -> const char* { if (i + 1 >= argc) { std::fprintf(stderr, "%s needs a value\n", name); std::exit(2); } return argv[++i]; };
-        if (a == "--udp") { cfg.source.kind = "udp"; cfg.source.port = std::atoi(need("--udp")); } else if (a == "--bind") cfg.source.bind_address = need("--bind"); else if (a == "--replay") { cfg.source.kind = "file"; cfg.source.path = need("--replay"); } else if (a == "--speed") cfg.source.speed = std::atof(need("--speed"));
+        if (a == "--udp") { cfg.source.kind = "udp"; cfg.source.port = std::atoi(need("--udp")); } else if (a == "--bind") cfg.source.bind_address = need("--bind"); else if (a == "--replay") { cfg.source.kind = "file"; cfg.source.path = need("--replay"); } else if (a == "--speed") cfg.source.speed = std::atof(need("--speed")); else if (a == "--eye") cfg.source.eye = need("--eye"); else if (a == "--ppd") cfg.source.pixels_per_degree = std::atof(need("--ppd"));
         else if (a == "--sim") cfg.source.kind = "sim"; else if (a == "--rate") cfg.source.rate_hz = std::atof(need("--rate")); else if (a == "--rate-hz") cfg.rate_hz = std::atof(need("--rate-hz")); else if (a == "--duration") duration = std::atof(need("--duration")); else if (a == "--samples") samples = uint64_t(std::atoll(need("--samples")));
         else if (a == "--detector") cfg.detector_id = need("--detector"); else if (a == "--session") cfg.session_path = need("--session"); else if (a == "--scale") { const std::string v = need("--scale"); cfg.deg_per_unit = v == "auto" ? 0.0 : std::atof(v.c_str()); }
         else if (a == "--triggers") triggers = need("--triggers"); else if (a == "--prelabel-seconds") prelabel_s = std::atof(need("--prelabel-seconds")); else if (a == "--events-out") events_out = need("--events-out"); else if (a == "--train") train = true; else if (a == "--models-dir") set_models_dir(need("--models-dir")); else if (a == "--quiet") quiet = true;
