@@ -19,6 +19,7 @@ struct SourceSpec {
     double speed = 1.0;                // file: 1.0 = real time, 0 = as fast as possible, 4.0 = four times faster
     double rate_hz = 1000.0;           // sim: sampling rate; file without timestamps: declared rate
     uint64_t seed = 1;                 // sim
+    std::string eye = "auto";          // file: EyeLink .asc recordings: "auto" (the only eye, or the mean of both when both are valid), "left", "right"
     double pixels_per_degree = 0;      // >0: positions in the stream are pixels, converted to degrees at the source (SessionInfo::deg_per_unit stays 1); 0: used as received
 };
 

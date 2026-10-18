@@ -17,6 +17,10 @@ bool FileSource::open(std::string* error) {
         if (error) *error = "Failed to open file: " + spec_.path;
         return false;
     }
+    asc_.reset(); gap_total_s_ = 0; last_t_ = -1;
+    { std::string head, l; for (int i = 0; i < 40 && std::getline(file_, l); ++i) head += l + "\n"; file_.clear(); file_.seekg(0, std::ios::beg);
+      const std::string& p = spec_.path; std::string ext = p.size() >= 4 ? p.substr(p.size() - 4) : ""; for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
+      if (ext == ".asc" || AscParser::looks_like_asc(head)) { asc_ = std::make_unique<AscParser>(spec_.eye); first_t_ = -1; finished_ = false; return true; } }
     std::string header;
     std::getline(file_, header);
     // basic check to see if it's a string header instead of a sample
@@ -52,15 +56,21 @@ size_t FileSource::read(std::vector<Sample>& out, size_t max_samples, int timeou
     while (out.size() - initial_size < max_samples && std::getline(file_, line)) {
         if (line.empty() || line[0] == '\r') continue;
 
-        // parse CSV replacing commas with spaces
-        for (char& c : line) if (c == ',') c = ' ';
-        std::stringstream ss(line);
-        Sample s;
-        if (ss >> s.t >> s.x >> s.y) {
-            uint32_t valid = 1;
-            if (ss >> valid) {
-                if (!valid) s.flags = 0;
+        Sample s; bool got = false;
+        if (asc_) { got = asc_->feed(line, s); if (!asc_->error().empty()) { finished_ = true; return out.size() - initial_size; } }
+        else {
+            // parse CSV replacing commas with spaces
+            for (char& c : line) if (c == ',') c = ' ';
+            std::stringstream ss(line);
+            if (ss >> s.t >> s.x >> s.y) {
+                uint32_t valid = 1;
+                if (ss >> valid) {
+                    if (!valid) s.flags = 0;
+                }
+                got = true;
             }
+        }
+        if (got) {
             if (spec_.pixels_per_degree > 0) {
                 s.x /= spec_.pixels_per_degree;
                 s.y /= spec_.pixels_per_degree;
@@ -70,15 +80,16 @@ size_t FileSource::read(std::vector<Sample>& out, size_t max_samples, int timeou
                 first_t_ = s.t;
                 start_time_ = std::chrono::steady_clock::now();
             } else if (spec_.speed > 0) {
+                if (last_t_ >= 0 && s.t - last_t_ > 0.5) gap_total_s_ += s.t - last_t_ - 1.0 / 1000.0;           // a pause between two recording blocks: do not wait for it
                 auto now = std::chrono::steady_clock::now();
                 double elapsed_real_s = std::chrono::duration<double>(now - start_time_).count();
-                double elapsed_sim_s = (s.t - first_t_) / spec_.speed;
+                double elapsed_sim_s = (s.t - first_t_ - gap_total_s_) / spec_.speed;
                 if (elapsed_sim_s > elapsed_real_s) {
                     std::this_thread::sleep_for(std::chrono::duration<double>(elapsed_sim_s - elapsed_real_s));
                 }
             }
 
-            out.push_back(s);
+            last_t_ = s.t; out.push_back(s);
         }
     }
 

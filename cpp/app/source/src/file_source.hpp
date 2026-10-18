@@ -1,5 +1,7 @@
 #pragma once
 #include "eyelive/source.hpp"
+#include "asc_parser.hpp"
+#include <memory>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -22,7 +24,8 @@ class FileSource : public ISource {
     SourceSpec spec_;
     std::ifstream file_;
     bool finished_ = false;
-    double first_t_ = -1;
+    double first_t_ = -1, last_t_ = -1, gap_total_s_ = 0;      // gap_total_s_: time jumps between EyeLink recording blocks, not waited for when the file is replayed in real time
+    std::unique_ptr<AscParser> asc_;                           // set when the file is an EyeLink ASC recording
     std::chrono::steady_clock::time_point start_time_;
 };
 
