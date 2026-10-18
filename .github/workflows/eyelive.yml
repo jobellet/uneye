@@ -123,3 +123,48 @@ jobs:
           a = open('/tmp/mode_Record.ppm', 'rb').read(); w = open('/tmp/wizard.ppm', 'rb').read(); assert a != w, 'the wizard changes nothing on the screen'; print('mode and wizard shots ok')
           PY
           ctest --test-dir build -L gui --output-on-failure
+
+  windows:
+    # Windows build with MSVC (never built by the authors before this job): its result is informative until it is green; the programs and the MATLAB test files are published as the artifact `eyelive-windows`
+    runs-on: windows-2022
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        shell: bash
+        run: cmake -S cpp -B build -G "Visual Studio 17 2022" -A x64 -DEYELIVE_PORTABLE=ON 2>&1 | tee configure.log
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build --config Release --parallel 2>&1 | tee build.log
+      - name: Publish compiler errors in the run summary
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "error C[0-9]+|error LNK|fatal error|CMake Error" build.log configure.log | head -12 | cut -c1-320 | while IFS= read -r l; do echo "::error title=windows build::$l"; done
+      - name: Test
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ctest --test-dir build -C Release -L eyelive --output-on-failure --timeout 900 2>&1 | tee ctest.log
+      - name: Publish test failures
+        if: always()
+        shell: bash
+        run: |
+          grep -E "Failed|Timeout|\*\*\*|FAIL|tests passed" ctest.log 2>/dev/null | head -14 | cut -c1-320 | while IFS= read -r l; do echo "::warning title=windows test::$l"; done || true
+      - name: Collect the programs and the MATLAB files
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p dist/bin dist/cpp/app/readers dist/cpp/app/tools; for f in eyelive_cli eyelive_tool eyelive_feed_probe; do cp "build/app/cli/Release/$f.exe" dist/bin/ 2>/dev/null || true; done
+          mkdir -p dist/bin/models && cp cpp/models/*.bin cpp/models/*.txt dist/bin/models/ 2>/dev/null || true
+          cp -r cpp/app/readers/matlab cpp/app/readers/python dist/cpp/app/readers/; cp cpp/app/tools/eyelive_frames.m cpp/app/tools/eyelive_frames.py dist/cpp/app/tools/; cp docs/eyelive/WINDOWS_MATLAB_TEST.md dist/README.md; ls -R dist | head -40
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eyelive-windows
+          path: dist
+          retention-days: 30
