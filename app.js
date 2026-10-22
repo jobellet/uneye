@@ -42,10 +42,13 @@
         prelabels: [],
         undoStack: [],
 
-        // Pass 2 state
+        // Pass 2 state: One event at a time, centered [-50ms .. +50ms]
         refineQueue: [],
         refineIdx: 0,
         currentMarkAt: -1,
+        currentPutativeOnset: -1,
+        currentPutativeOffset: -1,
+        zoomMultiplier: 1.0,
 
         // Touch & Gesture state
         pointerDown: false,
@@ -88,6 +91,9 @@
         nextEpochBtn: document.getElementById('nextEpochBtn'),
         pass1Controls: document.getElementById('pass1Controls'),
         pass2Controls: document.getElementById('pass2Controls'),
+        prevEventBtn: document.getElementById('prevEventBtn'),
+        nextEventBtn: document.getElementById('nextEventBtn'),
+        eventCounterBadge: document.getElementById('eventCounterBadge'),
         notEventBtn: document.getElementById('notEventBtn'),
         widerBtn: document.getElementById('widerBtn'),
         acceptPreBtn: document.getElementById('acceptPreBtn'),
@@ -175,6 +181,18 @@
         }
 
         loadDataset(trials, 1000.0, 1.0, 'hmm');
+
+        // Populate initial point marks from Pass 1 for demo trials so user can immediately test Pass 1 and Pass 2!
+        for (let t = 0; t < nTrials; t++) {
+            for (const p of state.prelabels[t]) {
+                const mid = Math.round((p.onset + p.offset) / 2);
+                state.pointMarks[t].push({ at: mid, cls: p.cls });
+            }
+            state.pointMarks[t].sort((a, b) => a.at - b.at);
+        }
+
+        updateStatus();
+        render();
     }
 
     // --- Dataset Loader & State Initializer ---
@@ -185,7 +203,7 @@
         state.currentTrialIdx = 0;
         state.trialLength = trials[0] ? trials[0].x.length : 1000;
         state.fromSample = 0;
-        state.toSample = Math.min(state.trialLength - 1, 999);
+        state.toSample = Math.min(state.trialLength - 1, 499);
 
         // Clear and initialize per-trial annotation arrays
         const n = trials.length;
@@ -295,6 +313,10 @@
         state.expertEvents[trialIdx] = prev.expertEvents;
         state.reviewedRanges[trialIdx] = prev.reviewedRanges;
         syncRenderedLabels(trialIdx);
+        if (state.pass === PASS_TWO) {
+            buildRefineQueue();
+            focusCurrentMark();
+        }
         updateStatus();
         render();
     }
@@ -328,7 +350,7 @@
         if (onset > offset) return false;
 
         // Remove point mark closest to `at`
-        const pmIdx = state.pointMarks[trialIdx].findIndex(m => Math.abs(m.at - at) <= 20);
+        const pmIdx = state.pointMarks[trialIdx].findIndex(m => Math.abs(m.at - at) <= 35);
         if (pmIdx !== -1) {
             state.pointMarks[trialIdx].splice(pmIdx, 1);
         }
@@ -346,7 +368,7 @@
 
     function deleteMarkAt(trialIdx, at) {
         saveUndo(trialIdx);
-        state.pointMarks[trialIdx] = state.pointMarks[trialIdx].filter(m => Math.abs(m.at - at) > 20);
+        state.pointMarks[trialIdx] = state.pointMarks[trialIdx].filter(m => Math.abs(m.at - at) > 25);
         state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => !(e.onset <= at && at <= e.offset));
         syncRenderedLabels(trialIdx);
     }
@@ -425,21 +447,24 @@
     // --- Pass Switching & Navigation ---
     function setPass(newPass) {
         state.pass = newPass;
+        state.zoomMultiplier = 1.0;
         if (newPass === PASS_ONE) {
-            elements.passIndicator.textContent = "Pass 1 : Marquer";
+            elements.passIndicator.textContent = "Pass 1: Mark";
             elements.passIndicator.className = "badge pass-badge";
             elements.pass1Controls.classList.remove('hidden');
             elements.pass2Controls.classList.add('hidden');
             elements.classToggle.classList.remove('hidden');
+
+            state.fromSample = 0;
+            state.toSample = Math.min(state.trialLength - 1, 499);
         } else {
-            elements.passIndicator.textContent = "Pass 2 : Onset / Offset";
+            elements.passIndicator.textContent = "Pass 2: Refine (Onset / Offset)";
             elements.passIndicator.className = "badge pass-badge pass-two";
             elements.pass1Controls.classList.add('hidden');
             elements.pass2Controls.classList.remove('hidden');
             elements.classToggle.classList.add('hidden');
 
-            // Build refinement queue from point marks
-            state.refineQueue = [...state.pointMarks[state.currentTrialIdx]].sort((a, b) => a.at - b.at);
+            buildRefineQueue();
             state.refineIdx = 0;
             focusCurrentMark();
         }
@@ -447,19 +472,95 @@
         render();
     }
 
+    function buildRefineQueue() {
+        const trialIdx = state.currentTrialIdx;
+        // If no point marks in current trial, but prelabels exist, seed marks from prelabels
+        if (state.pointMarks[trialIdx].length === 0 && state.prelabels[trialIdx].length > 0) {
+            for (const p of state.prelabels[trialIdx]) {
+                const mid = Math.round((p.onset + p.offset) / 2);
+                state.pointMarks[trialIdx].push({ at: mid, cls: p.cls });
+            }
+        }
+        state.pointMarks[trialIdx].sort((a, b) => a.at - b.at);
+        state.refineQueue = [...state.pointMarks[trialIdx]];
+    }
+
+    /**
+     * Pass 2: Always center the window on one labeled time from Pass 1.
+     * One event at a time.
+     * Window: -50 ms before event (or putative onset) to +50 ms after event (or putative offset).
+     */
     function focusCurrentMark() {
-        if (state.refineQueue.length === 0 || state.refineIdx >= state.refineQueue.length) {
+        const trialIdx = state.currentTrialIdx;
+        if (state.refineQueue.length === 0) {
             state.currentMarkAt = -1;
+            state.currentPutativeOnset = -1;
+            state.currentPutativeOffset = -1;
+            if (elements.eventCounterBadge) {
+                elements.eventCounterBadge.textContent = "No Events";
+            }
             return;
         }
+
+        if (state.refineIdx < 0) state.refineIdx = 0;
+        if (state.refineIdx >= state.refineQueue.length) {
+            // All events in this trial reviewed
+            state.currentMarkAt = -1;
+            markEpochReviewed(trialIdx, 0, state.trialLength - 1);
+            if (elements.eventCounterBadge) {
+                elements.eventCounterBadge.textContent = "All Reviewed ✓";
+            }
+            updateStatus();
+            render();
+            return;
+        }
+
         const mark = state.refineQueue[state.refineIdx];
         state.currentMarkAt = mark.at;
         state.activeClass = mark.cls;
 
-        // Center a window of +/- 60ms around mark
-        const span = 120;
-        state.fromSample = Math.max(0, mark.at - Math.floor(span / 2));
-        state.toSample = Math.min(state.trialLength - 1, state.fromSample + span);
+        // Find putative onset and offset:
+        let putativeOnset = mark.at;
+        let putativeOffset = mark.at;
+
+        // 1) Check existing expert event
+        const exp = state.expertEvents[trialIdx].find(e => 
+            (e.onset <= mark.at && mark.at <= e.offset) || 
+            Math.abs(e.onset - mark.at) <= 30 || 
+            Math.abs(e.offset - mark.at) <= 30
+        );
+
+        // 2) Check prelabel covering or closest to mark.at
+        const pre = state.prelabels[trialIdx].find(p => 
+            (p.onset <= mark.at && mark.at <= p.offset) || 
+            Math.abs(p.onset - mark.at) <= 40 || 
+            Math.abs(p.offset - mark.at) <= 40
+        );
+
+        if (exp) {
+            putativeOnset = exp.onset;
+            putativeOffset = exp.offset;
+            state.activeClass = exp.cls;
+        } else if (pre) {
+            putativeOnset = pre.onset;
+            putativeOffset = pre.offset;
+            state.activeClass = pre.cls;
+        }
+
+        state.currentPutativeOnset = putativeOnset;
+        state.currentPutativeOffset = putativeOffset;
+
+        // Window: -50 ms before event (or putative onset) to +50 ms after event (or putative offset)
+        const mult = state.zoomMultiplier || 1.0;
+        const pad50ms = Math.round(50.0 * (state.rateHz / 1000.0) * mult);
+
+        state.fromSample = Math.max(0, putativeOnset - pad50ms);
+        state.toSample = Math.min(state.trialLength - 1, putativeOffset + pad50ms);
+
+        if (elements.eventCounterBadge) {
+            const clsName = state.activeClass === CLS_SACCADE ? "Saccade" : "Blink";
+            elements.eventCounterBadge.textContent = `Event ${state.refineIdx + 1}/${state.refineQueue.length} (${clsName})`;
+        }
     }
 
     function nextEpoch() {
@@ -542,7 +643,7 @@
         drawTrace(tr.y, tr.valid, yLane, '#43A047', 'Position Y (°)', width);
 
         // 4. Draw Velocity Lane
-        drawVelocity(tr, speedLane, '#7E57C2', 'Vitesse (°/s)', width);
+        drawVelocity(tr, speedLane, '#7E57C2', 'Velocity (°/s)', width);
 
         // 5. Draw Prelabels & Annotations
         drawAnnotations(width, height);
@@ -557,7 +658,7 @@
         ctx.fillStyle = '#78909C';
         ctx.font = '600 18px var(--font-stack)';
         ctx.textAlign = 'center';
-        ctx.fillText("Aucune trace chargée — Touchez '⚡ Démo' ou 'Ouvrir…'", w / 2, h / 2);
+        ctx.fillText("No trace loaded — Tap '⚡ Demo' or 'Open…'", w / 2, h / 2);
     }
 
     function drawLabelBands(w, h) {
@@ -600,73 +701,76 @@
         const bottom = lane.bottom - 12;
         const h = bottom - top;
 
-        // Find min/max in current window
-        let minVal = Infinity, maxVal = -Infinity;
-        for (let i = state.fromSample; i <= state.toSample && i < arr.length; i++) {
+        const from = state.fromSample;
+        const to = state.toSample;
+
+        // Find min / max in visible window
+        let minV = Infinity, maxV = -Infinity;
+        for (let i = from; i <= to && i < arr.length; i++) {
             if (valid[i] && !isNaN(arr[i])) {
-                if (arr[i] < minVal) minVal = arr[i];
-                if (arr[i] > maxVal) maxVal = arr[i];
+                if (arr[i] < minV) minV = arr[i];
+                if (arr[i] > maxV) maxV = arr[i];
             }
         }
-        if (minVal === Infinity) { minVal = -1; maxVal = 1; }
-        const range = Math.max(0.5, (maxVal - minVal) * 1.25);
-        const midVal = (minVal + maxVal) / 2;
+        if (minV === Infinity) { minV = -5.0; maxV = 5.0; }
+        const pad = Math.max(0.2, (maxV - minV) * 0.15);
+        minV -= pad;
+        maxV += pad;
 
-        function valToY(v) {
-            return bottom - ((v - (midVal - range / 2)) / range) * h;
-        }
-
-        // Title and floating scale
+        // Title and floating scale bar
         ctx.fillStyle = '#78909C';
         ctx.font = '500 13px var(--font-stack)';
         ctx.textAlign = 'left';
         ctx.fillText(title, 16, lane.top + 24);
         ctx.textAlign = 'right';
-        ctx.fillText(`±${(range / 2).toFixed(1)}°`, w - 16, lane.top + 24);
+        ctx.fillText(`${(maxV - minV).toFixed(1)}°`, w - 16, lane.top + 24);
 
-        // Draw Invalid / NaN gaps
-        for (let i = state.fromSample; i <= state.toSample && i < arr.length; i++) {
-            if (!valid[i] || isNaN(arr[i])) {
-                const px = sampleToPx(i, w);
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.04)';
-                ctx.fillRect(px, lane.top, Math.max(1, w / (state.toSample - state.fromSample)), lane.bottom - lane.top);
-            }
-        }
-
-        // Draw Path
+        // Draw Line Trace
         ctx.strokeStyle = color;
-        ctx.lineWidth = 2.5;
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
+        ctx.lineWidth = 2.0;
         ctx.beginPath();
-
         let started = false;
-        for (let i = state.fromSample; i <= state.toSample && i < arr.length; i++) {
-            if (valid[i] && !isNaN(arr[i])) {
-                const px = sampleToPx(i, w);
-                const py = valToY(arr[i]);
-                if (!started) {
-                    ctx.moveTo(px, py);
-                    started = true;
-                } else {
-                    ctx.lineTo(px, py);
-                }
-            } else {
+        for (let i = from; i <= to && i < arr.length; i++) {
+            if (!valid[i] || isNaN(arr[i])) {
                 started = false;
+                continue;
+            }
+            const px = sampleToPx(i, w);
+            const py = bottom - ((arr[i] - minV) / (maxV - minV)) * h;
+            if (!started) {
+                ctx.moveTo(px, py);
+                started = true;
+            } else {
+                ctx.lineTo(px, py);
             }
         }
         ctx.stroke();
+
+        // Draw invalid / blink gap markers
+        ctx.fillStyle = 'rgba(198, 40, 40, 0.25)';
+        let invalidStart = -1;
+        for (let i = from; i <= to + 1; i++) {
+            const isInv = i <= to && (!valid[i] || isNaN(arr[i]));
+            if (isInv && invalidStart === -1) {
+                invalidStart = i;
+            } else if (!isInv && invalidStart !== -1) {
+                const x1 = sampleToPx(invalidStart, w);
+                const x2 = sampleToPx(i - 1, w);
+                ctx.fillRect(x1, lane.top, Math.max(2, x2 - x1), lane.bottom - lane.top);
+                invalidStart = -1;
+            }
+        }
     }
 
     function drawVelocity(tr, lane, color, title, w) {
         const top = lane.top + 20;
         const bottom = lane.bottom - 12;
         const h = bottom - top;
-        const dt = 1.0 / state.rateHz;
         const from = state.fromSample;
         const to = state.toSample;
+        const dt = 1.0 / state.rateHz;
 
-        let maxSpeed = 0;
+        let maxSpeed = 50.0;
         const speeds = new Float32Array(to - from + 1);
         for (let i = from; i <= to && i < tr.x.length; i++) {
             let s = 0;
@@ -751,11 +855,47 @@
             const offset = Math.max(state.dragStartSample, state.dragCurrentSample);
             const x1 = sampleToPx(onset, w);
             const x2 = sampleToPx(offset, w);
-            ctx.fillStyle = state.activeClass === CLS_SACCADE ? 'rgba(21, 101, 192, 0.35)' : 'rgba(198, 40, 40, 0.35)';
+            const color = state.activeClass === CLS_SACCADE ? '#1565C0' : '#C62828';
+
+            ctx.fillStyle = state.activeClass === CLS_SACCADE ? 'rgba(21, 101, 192, 0.22)' : 'rgba(198, 40, 40, 0.22)';
             ctx.fillRect(x1, 0, Math.max(2, x2 - x1), h);
-            ctx.strokeStyle = state.activeClass === CLS_SACCADE ? '#1565C0' : '#C62828';
-            ctx.lineWidth = 3;
-            ctx.strokeRect(x1, 4, Math.max(2, x2 - x1), h - 8);
+
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2.5;
+            ctx.strokeRect(x1, 6, Math.max(4, x2 - x1), h - 12);
+        }
+
+        // 5. In Pass 2: Draw target frame & header banner for the active event
+        if (state.pass === PASS_TWO && state.currentMarkAt >= 0) {
+            const onset = state.currentPutativeOnset >= 0 ? state.currentPutativeOnset : state.currentMarkAt;
+            const offset = state.currentPutativeOffset >= 0 ? state.currentPutativeOffset : state.currentMarkAt;
+            const x1 = sampleToPx(onset, w);
+            const x2 = sampleToPx(offset, w);
+            const color = state.activeClass === CLS_SACCADE ? '#1565C0' : '#C62828';
+
+            // Top banner info bar
+            ctx.fillStyle = state.activeClass === CLS_SACCADE ? 'rgba(21, 101, 192, 0.92)' : 'rgba(198, 40, 40, 0.92)';
+            ctx.fillRect(0, 0, w, 24);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '600 12px var(--font-stack)';
+            ctx.textAlign = 'center';
+            const clsName = state.activeClass === CLS_SACCADE ? 'Saccade' : 'Blink';
+            const durMs = Math.round((offset - onset) * (1000.0 / state.rateHz));
+            ctx.fillText(`Pass 2: Event ${state.refineIdx + 1}/${state.refineQueue.length} (${clsName}) — Putative: [${onset}..${offset}] (${durMs} ms) — Window: [-50ms .. +50ms]`, w / 2, 17);
+
+            // Shaded region between putative onset & offset
+            ctx.fillStyle = state.activeClass === CLS_SACCADE ? 'rgba(21, 101, 192, 0.12)' : 'rgba(198, 40, 40, 0.12)';
+            ctx.fillRect(x1, 24, Math.max(3, x2 - x1), h - 24);
+
+            // Left/right dashed boundary guides
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x1, 24); ctx.lineTo(x1, h);
+            ctx.moveTo(x2, 24); ctx.lineTo(x2, h);
+            ctx.stroke();
+            ctx.setLineDash([]);
         }
     }
 
@@ -909,9 +1049,11 @@
                     const onset = Math.min(state.dragStartSample, state.dragCurrentSample);
                     const offset = Math.max(state.dragStartSample, state.dragCurrentSample);
                     if (offset - onset >= 5) {
-                        refineMark(state.currentTrialIdx, state.dragStartSample, onset, offset, state.activeClass);
+                        const markAt = state.currentMarkAt >= 0 ? state.currentMarkAt : state.dragStartSample;
+                        refineMark(state.currentTrialIdx, markAt, onset, offset, state.activeClass);
                         if (state.pass === PASS_TWO) {
                             state.refineIdx++;
+                            state.zoomMultiplier = 1.0;
                             focusCurrentMark();
                         }
                     }
@@ -955,17 +1097,25 @@
         state.lastTapSample = sample;
 
         if (isDoubleTap) {
-            // Double-tap: accept nearest prelabel
-            const pre = state.prelabels[state.currentTrialIdx].find(p => p.onset <= sample && sample <= p.offset);
-            if (pre) {
-                refineMark(state.currentTrialIdx, sample, pre.onset, pre.offset, pre.cls);
-                if (state.pass === PASS_TWO) {
-                    state.refineIdx++;
-                    focusCurrentMark();
-                }
+            if (state.pass === PASS_TWO && state.currentMarkAt >= 0) {
+                const onset = state.currentPutativeOnset >= 0 ? state.currentPutativeOnset : sample - 15;
+                const offset = state.currentPutativeOffset >= 0 ? state.currentPutativeOffset : sample + 15;
+                refineMark(state.currentTrialIdx, state.currentMarkAt, onset, offset, state.activeClass);
+                state.refineIdx++;
+                state.zoomMultiplier = 1.0;
+                focusCurrentMark();
                 updateStatus();
                 render();
                 return;
+            } else {
+                // Double-tap in Pass 1: snap to prelabel
+                const pre = state.prelabels[state.currentTrialIdx].find(p => p.onset <= sample && sample <= p.offset);
+                if (pre) {
+                    refineMark(state.currentTrialIdx, sample, pre.onset, pre.offset, pre.cls);
+                    updateStatus();
+                    render();
+                    return;
+                }
             }
         }
 
@@ -974,6 +1124,8 @@
         } else {
             // In pass 2: tap selects or places
             addPointMark(state.currentTrialIdx, sample, state.activeClass);
+            buildRefineQueue();
+            focusCurrentMark();
         }
         updateStatus();
         render();
@@ -982,11 +1134,11 @@
     // --- UI Updates & Convergence Logic ---
     function updateStatus() {
         const nTrials = state.trials.length;
-        elements.trialStatus.textContent = `Essai ${state.currentTrialIdx + 1}/${Math.max(1, nTrials)}${state.testTrials.has(state.currentTrialIdx) ? ' (Test)' : ''}`;
-        elements.reviewedStatus.textContent = `Revu : ${totalReviewedSeconds().toFixed(1)} s`;
+        elements.trialStatus.textContent = `Trial ${state.currentTrialIdx + 1}/${Math.max(1, nTrials)}${state.testTrials.has(state.currentTrialIdx) ? ' (Test)' : ''}`;
+        elements.reviewedStatus.textContent = `Reviewed: ${totalReviewedSeconds().toFixed(1)} s`;
 
         const counts = totalExpertEventCounts();
-        elements.eventsStatus.textContent = `${counts.saccades} saccades, ${counts.blinks} clignements`;
+        elements.eventsStatus.textContent = `${counts.saccades} saccades, ${counts.blinks} blinks`;
 
         // Update convergence badge
         updateConvergenceBadge();
@@ -1003,12 +1155,12 @@
         } else {
             if (state.convergenceState === 'CONVERGED') {
                 elements.convergenceBadge.className = 'badge conv-badge converged';
-                elements.convergenceBadge.textContent = "Convergé ✓";
+                elements.convergenceBadge.textContent = "Converged ✓";
                 elements.convergenceBadge.classList.remove('hidden');
             } else {
                 state.convergenceState = 'COLLECTING';
                 elements.convergenceBadge.className = 'badge conv-badge';
-                elements.convergenceBadge.textContent = `Encore : ${counts.saccades}/${minSaccades} sac, ${counts.blinks}/${minBlinks} cli`;
+                elements.convergenceBadge.textContent = `Collecting: ${counts.saccades}/${minSaccades} sac, ${counts.blinks}/${minBlinks} blk`;
                 elements.convergenceBadge.classList.remove('hidden');
             }
         }
@@ -1017,13 +1169,13 @@
     // --- Client-Side Training & Convergence Bootstrap ---
     function runTrainingRound() {
         const reviewedS = totalReviewedSeconds();
-        if (reviewedS < 1.0) {
-            alert("Veuillez marquer au moins 1 seconde de données revues avant d'entraîner.");
+        if (reviewedS < 0.5) {
+            alert("Please label at least 0.5 seconds of reviewed data before training.");
             return;
         }
 
         elements.trainStatus.className = 'train-active';
-        elements.trainStatus.textContent = "Entraînement on-device…";
+        elements.trainStatus.textContent = "On-device training…";
 
         setTimeout(() => {
             // Simulate training metrics progressing on the iPad M1
@@ -1057,7 +1209,7 @@
             evaluateConvergenceFlag();
 
             elements.trainStatus.className = 'train-done';
-            elements.trainStatus.textContent = `Entraînement terminé (${round.epochs} époques — F1 test : ${testF1Saccade.toFixed(2)})`;
+            elements.trainStatus.textContent = `Training completed (${round.epochs} epochs — Test F1: ${testF1Saccade.toFixed(2)})`;
             updateStatus();
         }, 600);
     }
@@ -1103,7 +1255,7 @@
             if (!state.convergenceAlertShown) {
                 state.convergenceAlertShown = true;
                 const last = state.convergenceHistory[state.convergenceHistory.length - 1];
-                elements.alertMessage.textContent = `Le modèle on-device a convergé vers votre ground truth : F1 saccade ${last.testF1Saccade.toFixed(2)}, kappa ${last.testKappaSaccade.toFixed(2)}. Vous avez étiqueté suffisamment d'essais.`;
+                elements.alertMessage.textContent = `The on-device model has converged to your ground truth: Saccade F1 ${last.testF1Saccade.toFixed(2)}, kappa ${last.testKappaSaccade.toFixed(2)}. You have labeled enough data.`;
                 elements.alertModal.classList.remove('hidden');
             }
         } else {
@@ -1135,7 +1287,7 @@
             mctx.fillStyle = '#78909C';
             mctx.font = '500 16px var(--font-stack)';
             mctx.textAlign = 'center';
-            mctx.fillText("Aucun round d'entraînement enregistré — Touchez 'Entraîner'", w / 2, h / 2);
+            mctx.fillText("No training rounds recorded yet — Tap 'Train'", w / 2, h / 2);
             return;
         }
 
@@ -1152,8 +1304,8 @@
         mctx.fillStyle = '#37474F';
         mctx.font = '600 13px var(--font-stack)';
         mctx.textAlign = 'left';
-        mctx.fillText("F1 Événementiel", 10, 22);
-        mctx.fillText("Kappa de Cohen", midX + 20, 22);
+        mctx.fillText("Event F1 Score", 10, 22);
+        mctx.fillText("Cohen's Kappa", midX + 20, 22);
 
         const maxSec = Math.max(10, state.convergenceHistory[state.convergenceHistory.length - 1].labeledSeconds);
 
@@ -1268,7 +1420,7 @@
         // Toggle Active Class
         elements.classToggle.addEventListener('click', () => {
             state.activeClass = state.activeClass === CLS_SACCADE ? CLS_BLINK : CLS_SACCADE;
-            elements.classToggle.textContent = state.activeClass === CLS_SACCADE ? "Saccade" : "Clignement";
+            elements.classToggle.textContent = state.activeClass === CLS_SACCADE ? "Saccade" : "Blink";
             elements.classToggle.className = `btn btn-class ${state.activeClass === CLS_SACCADE ? 'saccade' : 'blink'}`;
         });
 
@@ -1304,8 +1456,15 @@
         elements.prevTrialBtn.addEventListener('click', () => {
             if (state.currentTrialIdx > 0) {
                 state.currentTrialIdx--;
-                state.fromSample = 0;
-                state.toSample = Math.min(state.trialLength - 1, 999);
+                state.zoomMultiplier = 1.0;
+                if (state.pass === PASS_TWO) {
+                    buildRefineQueue();
+                    state.refineIdx = 0;
+                    focusCurrentMark();
+                } else {
+                    state.fromSample = 0;
+                    state.toSample = Math.min(state.trialLength - 1, 499);
+                }
                 updateStatus();
                 render();
             }
@@ -1314,8 +1473,36 @@
         elements.nextTrialBtn.addEventListener('click', () => {
             if (state.currentTrialIdx < state.trials.length - 1) {
                 state.currentTrialIdx++;
-                state.fromSample = 0;
-                state.toSample = Math.min(state.trialLength - 1, 999);
+                state.zoomMultiplier = 1.0;
+                if (state.pass === PASS_TWO) {
+                    buildRefineQueue();
+                    state.refineIdx = 0;
+                    focusCurrentMark();
+                } else {
+                    state.fromSample = 0;
+                    state.toSample = Math.min(state.trialLength - 1, 499);
+                }
+                updateStatus();
+                render();
+            }
+        });
+
+        // Pass 2: Navigation across events
+        elements.prevEventBtn.addEventListener('click', () => {
+            if (state.refineIdx > 0) {
+                state.refineIdx--;
+                state.zoomMultiplier = 1.0;
+                focusCurrentMark();
+                updateStatus();
+                render();
+            }
+        });
+
+        elements.nextEventBtn.addEventListener('click', () => {
+            if (state.refineIdx < state.refineQueue.length - 1) {
+                state.refineIdx++;
+                state.zoomMultiplier = 1.0;
+                focusCurrentMark();
                 updateStatus();
                 render();
             }
@@ -1324,7 +1511,8 @@
         elements.notEventBtn.addEventListener('click', () => {
             if (state.currentMarkAt >= 0) {
                 deleteMarkAt(state.currentTrialIdx, state.currentMarkAt);
-                state.refineIdx++;
+                state.refineQueue.splice(state.refineIdx, 1);
+                state.zoomMultiplier = 1.0;
                 focusCurrentMark();
                 updateStatus();
                 render();
@@ -1332,21 +1520,18 @@
         });
 
         elements.widerBtn.addEventListener('click', () => {
-            const span = state.toSample - state.fromSample;
-            const center = (state.fromSample + state.toSample) / 2;
-            const newSpan = Math.min(state.trialLength, span * 2);
-            state.fromSample = Math.max(0, Math.round(center - newSpan / 2));
-            state.toSample = Math.min(state.trialLength - 1, state.fromSample + newSpan);
+            state.zoomMultiplier = (state.zoomMultiplier || 1.0) === 1.0 ? 2.5 : ((state.zoomMultiplier === 2.5) ? 5.0 : 1.0);
+            focusCurrentMark();
             render();
         });
 
         elements.acceptPreBtn.addEventListener('click', () => {
             if (state.currentMarkAt >= 0) {
-                const pre = state.prelabels[state.currentTrialIdx].find(p => p.onset <= state.currentMarkAt && state.currentMarkAt <= p.offset);
-                if (pre) {
-                    refineMark(state.currentTrialIdx, state.currentMarkAt, pre.onset, pre.offset, pre.cls);
-                }
+                const onset = state.currentPutativeOnset >= 0 ? state.currentPutativeOnset : state.currentMarkAt - 15;
+                const offset = state.currentPutativeOffset >= 0 ? state.currentPutativeOffset : state.currentMarkAt + 15;
+                refineMark(state.currentTrialIdx, state.currentMarkAt, onset, offset, state.activeClass);
                 state.refineIdx++;
+                state.zoomMultiplier = 1.0;
                 focusCurrentMark();
                 updateStatus();
                 render();

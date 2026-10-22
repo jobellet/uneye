@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -18,21 +18,21 @@
         <header id="top-bar">
             <div class="bar-left">
                 <span class="app-logo">U’n’Eye</span>
-                <span id="passIndicator" class="badge pass-badge">Pass 1 : Marquer</span>
-                <span id="convergenceBadge" class="badge conv-badge hidden">En attente</span>
+                <span id="passIndicator" class="badge pass-badge">Pass 1: Mark</span>
+                <span id="convergenceBadge" class="badge conv-badge hidden">Collecting</span>
             </div>
 
             <div class="bar-center">
                 <button id="classToggle" class="btn btn-class saccade">Saccade</button>
-                <button id="undoBtn" class="btn btn-secondary">Annuler</button>
+                <button id="undoBtn" class="btn btn-secondary">Undo</button>
             </div>
 
             <div class="bar-right">
-                <button id="demoBtn" class="btn btn-accent">⚡ Démo</button>
-                <button id="openBtn" class="btn btn-secondary">Ouvrir…</button>
-                <button id="metricsBtn" class="btn btn-secondary">Métriques</button>
-                <button id="trainNowBtn" class="btn btn-train">Entraîner</button>
-                <button id="exportBtn" class="btn btn-success">Exporter</button>
+                <button id="demoBtn" class="btn btn-accent">⚡ Demo</button>
+                <button id="openBtn" class="btn btn-secondary">Open…</button>
+                <button id="metricsBtn" class="btn btn-secondary">Metrics</button>
+                <button id="trainNowBtn" class="btn btn-train">Train</button>
+                <button id="exportBtn" class="btn btn-success">Export</button>
             </div>
         </header>
 
@@ -45,34 +45,37 @@
         <!-- Bottom Controls & Status Bar -->
         <footer id="bottom-bar">
             <div class="status-row">
-                <span id="trialStatus">Essai 1/1</span>
-                <span id="reviewedStatus">Revu : 0.0 s</span>
-                <span id="eventsStatus">0 saccades, 0 clignements</span>
-                <span id="trainStatus" class="train-idle">Entraînement : inactif</span>
+                <span id="trialStatus">Trial 1/1</span>
+                <span id="reviewedStatus">Reviewed: 0.0 s</span>
+                <span id="eventsStatus">0 saccades, 0 blinks</span>
+                <span id="trainStatus" class="train-idle">Training: idle</span>
             </div>
 
             <div class="controls-row">
                 <!-- Navigation -->
                 <div class="control-group">
-                    <button id="prevTrialBtn" class="btn btn-nav">◀ Essai préc.</button>
-                    <button id="nextTrialBtn" class="btn btn-nav">Essai suiv. ▶</button>
+                    <button id="prevTrialBtn" class="btn btn-nav">◀ Prev Trial</button>
+                    <button id="nextTrialBtn" class="btn btn-nav">Next Trial ▶</button>
                 </div>
 
-                <!-- Pass 2 specific controls -->
+                <!-- Pass 2 specific controls: One event at a time -->
                 <div id="pass2Controls" class="control-group hidden">
-                    <button id="notEventBtn" class="btn btn-danger">Pas un événement</button>
-                    <button id="widerBtn" class="btn btn-secondary">Plus large</button>
-                    <button id="acceptPreBtn" class="btn btn-accent">Accepter pré-label</button>
+                    <button id="prevEventBtn" class="btn btn-nav">◀ Prev Event</button>
+                    <span id="eventCounterBadge" class="badge event-counter">Event 1/1</span>
+                    <button id="nextEventBtn" class="btn btn-nav">Next Event ▶</button>
+                    <button id="acceptPreBtn" class="btn btn-accent">Accept Pre-label</button>
+                    <button id="notEventBtn" class="btn btn-danger">Not an Event</button>
+                    <button id="widerBtn" class="btn btn-secondary">Wider</button>
                 </div>
 
                 <!-- Pass 1 specific controls -->
                 <div id="pass1Controls" class="control-group">
-                    <button id="nextEpochBtn" class="btn btn-primary">Époque suivante ⏭</button>
+                    <button id="nextEpochBtn" class="btn btn-primary">Next Epoch ⏭</button>
                 </div>
 
                 <!-- Mode Switch -->
                 <div class="control-group">
-                    <button id="switchPassBtn" class="btn btn-mode">Changer de passe ⇄</button>
+                    <button id="switchPassBtn" class="btn btn-mode">Switch Pass ⇄</button>
                 </div>
             </div>
         </footer>
@@ -84,30 +87,30 @@
         <!-- Load Dialog Modal -->
         <div id="loadModal" class="modal hidden">
             <div class="modal-card">
-                <h3>Charger une trace oculaire</h3>
+                <h3>Load Eye Trace</h3>
                 <div class="form-row">
-                    <label>Fichier sélectionné :</label>
+                    <label>Selected file:</label>
                     <span id="modalFileName" class="filename-display">-</span>
                 </div>
                 <div class="form-row">
-                    <label for="rateInput">Fréquence d'échantillonnage (Hz) :</label>
+                    <label for="rateInput">Sampling rate (Hz):</label>
                     <input type="number" id="rateInput" value="1000" min="50" max="2000" step="50">
                 </div>
                 <div class="form-row">
-                    <label for="scaleInput">Degrés par unité :</label>
+                    <label for="scaleInput">Degrees per unit:</label>
                     <input type="number" id="scaleInput" value="1.0" min="0.001" max="100" step="0.1">
                 </div>
                 <div class="form-row">
-                    <label for="prelabelerSelect">Pré-étiqueteur automatique :</label>
+                    <label for="prelabelerSelect">Automatic pre-labeler:</label>
                     <select id="prelabelerSelect">
-                        <option value="hmm">HMM (accéléré)</option>
-                        <option value="velocity">Seuil de vitesse (30°/s)</option>
-                        <option value="none">Aucun</option>
+                        <option value="hmm">HMM (fast)</option>
+                        <option value="velocity">Velocity threshold (30°/s)</option>
+                        <option value="none">None</option>
                     </select>
                 </div>
                 <div class="modal-buttons">
-                    <button id="modalCancelBtn" class="btn btn-secondary">Annuler</button>
-                    <button id="modalConfirmBtn" class="btn btn-primary">Valider & Charger</button>
+                    <button id="modalCancelBtn" class="btn btn-secondary">Cancel</button>
+                    <button id="modalConfirmBtn" class="btn btn-primary">Load Trace</button>
                 </div>
             </div>
         </div>
@@ -116,16 +119,16 @@
         <div id="metricsModal" class="modal hidden">
             <div class="modal-card modal-large">
                 <div class="modal-header">
-                    <h3>Courbes d'apprentissage (Test Set)</h3>
+                    <h3>Learning Curves (Test Set)</h3>
                     <button id="metricsCloseBtn" class="btn-close">&times;</button>
                 </div>
                 <div class="metrics-canvas-wrap">
                     <canvas id="metricsCanvas"></canvas>
                 </div>
                 <div id="metricsLegend" class="metrics-legend">
-                    <span class="legend-item"><span class="dot sac"></span> Saccade (Bleu)</span>
-                    <span class="legend-item"><span class="dot blink"></span> Clignement (Rouge)</span>
-                    <span class="legend-item"><span class="line conv"></span> Seuil de convergence</span>
+                    <span class="legend-item"><span class="dot sac"></span> Saccade (Blue)</span>
+                    <span class="legend-item"><span class="dot blink"></span> Blink (Red)</span>
+                    <span class="legend-item"><span class="line conv"></span> Convergence threshold</span>
                 </div>
             </div>
         </div>
@@ -133,10 +136,10 @@
         <!-- Convergence Alert Modal -->
         <div id="alertModal" class="modal hidden">
             <div class="modal-card">
-                <h3 class="success-title">🎉 Convergence atteinte !</h3>
-                <p id="alertMessage">Le modèle on-device a convergé vers votre ground truth.</p>
+                <h3 class="success-title">🎉 Convergence Reached!</h3>
+                <p id="alertMessage">The on-device model has converged to your ground truth.</p>
                 <div class="modal-buttons">
-                    <button id="alertOkBtn" class="btn btn-primary">Continuer</button>
+                    <button id="alertOkBtn" class="btn btn-primary">Continue</button>
                 </div>
             </div>
         </div>

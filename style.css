@@ -88,6 +88,20 @@ html, body {
     border: 1px solid #BBDEFB;
 }
 
+.pass-badge.pass-two {
+    background-color: #EDE7F6;
+    color: #4A148C;
+    border-color: #D1C4E9;
+}
+
+.event-counter {
+    background-color: #F3E5F5;
+    color: #4A148C;
+    border: 1px solid #E1BEE7;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
 .conv-badge {
     background-color: #FFF8E1;
     color: #F57F17;
