@@ -133,8 +133,8 @@ object MatReader {
     private const val MI_SINGLE = 7L
     private const val MI_INT32 = 5L
     private const val MI_INT16 = 3L
-    private const val MI_INT8 = 2L
-    private const val MI_UINT8 = 1L
+    private const val MI_UINT8 = 2L
+    private const val MI_INT8 = 1L
     private const val MX_DOUBLE = 6
 
     private class MatVar(val name: String, val rows: Int, val cols: Int, val data: DoubleArray)
@@ -144,62 +144,65 @@ object MatReader {
         val buf = ByteBuffer.wrap(bytes).order(if (little) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN)
         var p = off
         val end = off + len
-        // array name (miINT8, small or regular format). Small elements pack the
-        // tag in 4 bytes and pad the data to 4 (not 8); regular elements pad to 8.
+
+        var classId = -1
+        var rows = 0
+        var cols = 0
         var name = ""
-        run {
+        var data: DoubleArray? = null
+
+        // Sub-elements: standard MATLAB 5 order is flags -> dims -> name -> data
+        while (p + 4 <= end) {
             val (t, s, adv) = readTag(buf, p)
-            if (adv == 4) {
-                name = String(bytes, p + adv, s.toInt(), Charsets.US_ASCII)
-                p += 8                      // 4-byte tag + 4 bytes of padded data
-            } else {
-                name = String(bytes, p + 8, s.toInt(), Charsets.US_ASCII)
-                p += (8 + s + ((8 - s % 8) % 8)).toInt()
+            if (s <= 0 && adv != 4) break
+            when (t) {
+                6L -> { // Array Flags (miUINT32)
+                    if (s >= 8 && p + 8 + 4 <= end) {
+                        classId = buf.getInt(p + 8) and 0xFF
+                    }
+                    p += (adv + s + ((8 - s % 8) % 8)).toInt()
+                }
+                5L -> { // Dimensions (miINT32)
+                    val nDims = (s / 4).toInt()
+                    if (nDims >= 1 && p + 8 + nDims * 4 <= end) {
+                        val dims = IntArray(nDims) { buf.getInt(p + 8 + it * 4) }
+                        rows = dims[0]
+                        cols = if (nDims > 1) dims[1] else 1
+                    }
+                    p += (adv + s + ((8 - s % 8) % 8)).toInt()
+                }
+                1L, 2L -> { // Array Name (miINT8 or miUINT8)
+                    if (adv == 4) {
+                        name = String(bytes, p + 4, s.toInt(), Charsets.US_ASCII)
+                        p += 8
+                    } else {
+                        name = String(bytes, p + 8, s.toInt(), Charsets.US_ASCII)
+                        p += (8 + s + ((8 - s % 8) % 8)).toInt()
+                    }
+                }
+                MI_DOUBLE, MI_SINGLE, MI_INT32, MI_INT16 -> { // Real data
+                    val n = rows.toLong() * cols
+                    if (n > 0 && n <= Int.MAX_VALUE / 2) {
+                        val dp = p + adv
+                        data = when (t) {
+                            MI_DOUBLE -> DoubleArray(n.toInt()) { buf.getDouble(dp + it * 8) }
+                            MI_SINGLE -> DoubleArray(n.toInt()) { buf.getFloat(dp + it * 4).toDouble() }
+                            MI_INT32 -> DoubleArray(n.toInt()) { buf.getInt(dp + it * 4).toDouble() }
+                            MI_INT16 -> DoubleArray(n.toInt()) { buf.getShort(dp + it * 2).toDouble() }
+                            else -> null
+                        }
+                    }
+                    p += (adv + s + ((8 - s % 8) % 8)).toInt()
+                }
+                else -> {
+                    if (adv == 4) p += 8
+                    else p += (8 + s + ((8 - s % 8) % 8)).toInt()
+                }
             }
+            if (data != null) break
         }
-        // array flags (miUINT32, 8 bytes): class in the low byte of the first word
-        val flagsTag = buf.getInt(p); val flagsSize = buf.getInt(p + 4)
-        if (flagsTag != 6 || flagsSize != 8) return null
-        val classId = buf.getInt(p + 8) and 0xFF
-        p += 16
-        // dimensions (miINT32)
-        val dimTag = buf.getInt(p); val dimSize = buf.getInt(p + 4)
-        if (dimTag != 5) return null
-        val nDims = dimSize / 4
-        val dims = IntArray(nDims) { buf.getInt(p + 8 + it * 4) }
-        p += 8 + dimSize + ((8 - dimSize % 8) % 8)
-        if (classId != MX_DOUBLE) return null          // only numeric real double arrays
-        if (nDims < 1) return null
-        val rows = dims[0]
-        val cols = if (nDims > 1) dims[1] else 1
-        val n = rows.toLong() * cols
-        if (n > Int.MAX_VALUE / 2 || p + 8 + n * 8 > end + 8) return null
-        // real part (miDOUBLE or a smaller numeric type, converted)
-        val (rt, rs, radv) = readTag(buf, p)
-        if (rt == MI_COMPRESSED) return null
-        val data = when (rt) {
-            MI_DOUBLE -> {
-                p += radv
-                DoubleArray(n.toInt()) { buf.getDouble(p + it * 8) }
-            }
-            MI_SINGLE -> {
-                p += radv
-                DoubleArray(n.toInt()) { buf.getFloat(p + it * 4).toDouble() }
-            }
-            MI_INT32 -> {
-                p += radv
-                DoubleArray(n.toInt()) { buf.getInt(p + it * 4).toDouble() }
-            }
-            MI_INT16 -> {
-                p += radv
-                DoubleArray(n.toInt()) { buf.getShort(p + it * 2).toDouble() }
-            }
-            MI_INT8, MI_UINT8 -> {
-                p += radv
-                DoubleArray(n.toInt()) { (if (rt == MI_INT8) buf.get(p + it) else buf.get(p + it).toInt() and 0xFF).toDouble() }
-            }
-            else -> return null
-        }
+
+        if (classId != MX_DOUBLE || data == null || rows <= 0 || cols <= 0) return null
         return MatVar(name, rows, cols, data)
     }
 

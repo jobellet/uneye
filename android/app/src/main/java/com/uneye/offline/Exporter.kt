@@ -71,7 +71,7 @@ object Exporter {
     fun writeLabelsCsv(stream: OutputStream, labels: Array<DoubleArray>) {
         stream.bufferedWriter(Charsets.UTF_8).use { w ->
             for (row in labels) {
-                w.write(row.joinToString(",") { formatDouble(it) })
+                w.write(row.joinToString(",") { formatLabel(it) })
                 w.newLine()
             }
         }
@@ -80,7 +80,7 @@ object Exporter {
     /** Labels CSV as a single column (one value per line) — when there is one trial. */
     fun writeLabelsCsvColumn(stream: OutputStream, labels: Array<DoubleArray>) {
         stream.bufferedWriter(Charsets.UTF_8).use { w ->
-            for (row in labels) for (v in row) { w.write(formatDouble(v)); w.newLine() }
+            for (row in labels) for (v in row) { w.write(formatLabel(v)); w.newLine() }
         }
     }
 
@@ -119,6 +119,11 @@ object Exporter {
         srcBin.copyTo(dstBin, overwrite = true)
         if (srcJson.exists()) srcJson.copyTo(dstJson, overwrite = true)
         return dstBin.absolutePath
+    }
+
+    private fun formatLabel(v: Double): String {
+        if (v.isNaN()) return "nan"
+        return v.toLong().toString()
     }
 
     private fun formatDouble(v: Double): String {

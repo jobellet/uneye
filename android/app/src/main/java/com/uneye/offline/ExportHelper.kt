@@ -1,14 +1,33 @@
 package com.uneye.offline
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+
+/**
+ * Storage Access Framework contract that takes Pair(mimeType, proposedFileName)
+ * and returns the user-chosen Uri.
+ */
+class CreateDocumentWithMime : ActivityResultContract<Pair<String, String>, Uri?>() {
+    override fun createIntent(context: Context, input: Pair<String, String>): Intent {
+        return Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            type = input.first
+            putExtra(Intent.EXTRA_TITLE, input.second)
+        }
+    }
+    override fun parseResult(resultCode: Int, intent: Intent?): Uri? {
+        return if (resultCode == android.app.Activity.RESULT_OK) intent?.data else null
+    }
+}
 
 /**
  * Export plumbing (phase 5): Storage Access Framework launchers for
@@ -28,8 +47,8 @@ class ExportHelper(private val activity: FragmentActivity) {
 
     private var pendingCallback: ((Uri?) -> Unit)? = null
 
-    private val createDocument: ActivityResultLauncher<Array<String>> =
-        activity.registerForActivityResult(ActivityResultContracts.CreateDocument()) { uri ->
+    private val createDocument: ActivityResultLauncher<Pair<String, String>> =
+        activity.registerForActivityResult(CreateDocumentWithMime()) { uri ->
             pendingCallback?.invoke(uri)
         }
 
@@ -44,17 +63,20 @@ class ExportHelper(private val activity: FragmentActivity) {
                  write: suspend (java.io.OutputStream) -> Unit,
                  onDone: (ok: Boolean, uri: Uri?) -> Unit) {
         pendingCallback = { uri ->
-            if (uri == null) { onDone(false, null); return@registerForActivityResult }
-            activity.lifecycleScope.launchWhenResumed {
-                val ok = try {
-                    withContext(Dispatchers.IO) {
-                        activity.contentResolver.openOutputStream(uri)?.use { write(it) } != null
-                    }
-                } catch (_: Exception) { false }
-                onDone(ok, uri)
+            if (uri == null) {
+                onDone(false, null)
+            } else {
+                activity.lifecycleScope.launch {
+                    val ok = try {
+                        withContext(Dispatchers.IO) {
+                            activity.contentResolver.openOutputStream(uri)?.use { write(it) } != null
+                        }
+                    } catch (e: Exception) { false }
+                    onDone(ok, uri)
+                }
             }
         }
-        createDocument.launch(arrayOf(mimeType, fileName))
+        createDocument.launch(mimeType to fileName)
     }
 
     /**

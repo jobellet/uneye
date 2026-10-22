@@ -18,9 +18,13 @@ import java.nio.ByteOrder
  */
 object MatWriter {
 
-    private const val MI_INT8 = 2
-    private const val MI_UINT32 = 6
+    private const val MI_INT8 = 1
+    private const val MI_UINT8 = 2
+    private const val MI_INT16 = 3
+    private const val MI_UINT16 = 4
     private const val MI_INT32 = 5
+    private const val MI_UINT32 = 6
+    private const val MI_SINGLE = 7
     private const val MI_DOUBLE = 9
     private const val MI_MATRIX = 14
     private const val MX_DOUBLE_CLASS = 6
@@ -49,13 +53,21 @@ object MatWriter {
         stream.use { it.write(out.toByteArray()) }
     }
 
-    /** One miMATRIX element: name + flags (mxDOUBLE_CLASS) + dims + column-major doubles. */
+    /** One miMATRIX element: flags (mxDOUBLE_CLASS) + dims + name + column-major doubles. */
     private fun matrixElement(name: String, rows: Array<DoubleArray>): ByteArray {
         val nRows = rows.size
         val nCols = if (nRows > 0) rows[0].size else 0
         val body = ByteArrayOutputStream()
 
-        // array name: small element format when <= 4 chars (miINT8), else regular
+        // 1. array flags: miUINT32, 8 bytes: [class | flags, 0]
+        body.write(le32(MI_UINT32)); body.write(le32(8))
+        body.write(le32(MX_DOUBLE_CLASS)); body.write(le32(0))
+
+        // 2. dimensions: miINT32, 2 dims
+        body.write(le32(MI_INT32)); body.write(le32(8))
+        body.write(le32(nRows)); body.write(le32(nCols))
+
+        // 3. array name: small element format when <= 4 chars (miINT8), else regular
         if (name.length <= 4) {
             body.write(le16(MI_INT8)); body.write(le16(name.length))
             body.write(name.toByteArray(Charsets.US_ASCII))
@@ -65,19 +77,14 @@ object MatWriter {
             body.write(name.toByteArray(Charsets.US_ASCII))
             body.write(ByteArray((8 - name.length % 8) % 8))
         }
-        // array flags: miUINT32, 8 bytes: [class | flags, 0]
-        body.write(le32(MI_UINT32)); body.write(le32(8))
-        body.write(le32(MX_DOUBLE_CLASS)); body.write(le32(0))
-        // dimensions: miINT32, 2 dims
-        body.write(le32(MI_INT32)); body.write(le32(8))
-        body.write(le32(nRows)); body.write(le32(nCols))
-        // real part: miDOUBLE, column-major
+
+        // 4. real part: miDOUBLE, column-major
         val n = nRows.toLong() * nCols
         body.write(le32(MI_DOUBLE)); body.write(le32((n * 8).toInt()))
         val bb = ByteBuffer.allocate((n * 8).toInt()).order(ByteOrder.LITTLE_ENDIAN)
         for (c in 0 until nCols) for (r in 0 until nRows) bb.putDouble(rows[r][c])
         body.write(bb.array())
-        body.write(ByteArray((8 - (n * 8) % 8) % 8))
+        body.write(ByteArray(((8 - ((n * 8) % 8)) % 8).toInt()))
 
         val bodyBytes = body.toByteArray()
         val el = ByteArrayOutputStream()
