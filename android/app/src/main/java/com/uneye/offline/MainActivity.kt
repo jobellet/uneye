@@ -111,7 +111,12 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton(R.string.load) { _, _ ->
                 val rate = rateEdit.text.toString().toDoubleOrNull() ?: 1000.0
                 val unit = unitEdit.text.toString().toDoubleOrNull() ?: 1.0
-                val prelabeler = preSpinner.selectedItemPosition
+                val prelabeler = when (preSpinner.selectedItemPosition) {
+                    0 -> Native.PRELABELER_HMM
+                    1 -> Native.PRELABELER_SHIPPED_MODEL
+                    2 -> Native.PRELABELER_LAST_TRAINED
+                    else -> Native.PRELABELER_NONE
+                }
                 val modelBin = modelEdit.text.toString().trim()
                 loadFile(mat, y, rate, unit, estimateBox.isChecked, prelabeler, modelBin)
             }

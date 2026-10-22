@@ -44,6 +44,7 @@ class Session(private val filesDir: File) {
         val kappa: Double = 0.0,
         val elapsedS: Double = 0.0,
         val finished: Boolean = false,
+        val cancelled: Boolean = false,
         val failed: Boolean = false,
         val message: String = "",
     )
@@ -172,6 +173,7 @@ class Session(private val filesDir: File) {
 
     fun addPointMark(trial: Long, at: Long, cls: Int) = native.addPointMark(trial, at, cls)
     fun removePointMark(trial: Long, at: Long): Boolean = native.removePointMark(trial, at)
+    fun clearPointMarks(trial: Long) = native.clearPointMarks(trial)
     fun snapToPrelabel(trial: Long, at: Long, tolerance: Long): Long =
         native.snapToPrelabel(trial, at, tolerance)
 
@@ -217,7 +219,7 @@ class Session(private val filesDir: File) {
                 message: String,
             ) {
                 val ui = TrainUi(!finished && !cancelled && !failed, epoch, trainLoss, valLoss,
-                                 valF1, kappa, elapsedS, finished, failed, message)
+                                 valF1, kappa, elapsedS, finished, cancelled, failed, message)
                 uiHandler.post {
                     _train.value = ui
                     onProgress(ui)
@@ -244,6 +246,7 @@ class Session(private val filesDir: File) {
 
     fun setPrelabeler(prelabeler: Int, modelBin: String) = native.setPrelabeler(prelabeler, modelBin)
     fun prelabelTrial(trial: Long): Boolean = native.prelabelTrial(trial)
+    fun rePrelabelAll(): Boolean = native.rePrelabelAll()
     fun prelabeler(): Int = native.prelabeler()
 
     /** Directory for the app's own files (labels, trained models). */

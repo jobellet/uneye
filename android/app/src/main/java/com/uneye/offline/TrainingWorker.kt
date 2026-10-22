@@ -29,7 +29,9 @@ import kotlin.coroutines.resume
 class TrainingWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val app = applicationContext as UneyeApp
+        val app = (applicationContext as? UneyeApp)
+            ?: (applicationContext.applicationContext as? UneyeApp)
+            ?: return@withContext Result.failure()
         val session = app.session
         if (!session.loaded.value) return@withContext Result.failure()
 
@@ -37,19 +39,22 @@ class TrainingWorker(context: Context, params: WorkerParameters) : CoroutineWork
 
         val modelPath = File(app.modelsDir(), "model_round.bin").absolutePath
         val labelsPath = app.labelsPathFor(session, 0)
-        val result = suspendCancellableCoroutine { cont ->
+        val result = suspendCancellableCoroutine<Pair<Boolean, Session.TrainUi>> { cont ->
             var lastUi = Session.TrainUi()
-            val ok = session.startTraining(
+            var started = false
+            started = session.startTraining(
                 maxSeconds = 50.0, nThreads = 2, maxEpochs = 500, patience = 4,
                 rotationAug = true, initModel = "", useLastModelAsInit = true,
             ) { ui ->
                 lastUi = ui
-                app.trainingState.postValue(ui)   // for the UI (phase 4 metrics)
-                if (ui.finished || ui.failed) {
-                    if (cont.isActive) cont.resume(ok to lastUi)
+                app.trainingState.value = ui   // for the UI (phase 4 metrics)
+                if (ui.finished || ui.cancelled || ui.failed) {
+                    if (cont.isActive) cont.resume(Pair(true, lastUi))
                 }
             }
-            if (!ok) { if (cont.isActive) cont.resume(false to lastUi) }
+            if (!started) {
+                if (cont.isActive) cont.resume(Pair(false, lastUi))
+            }
             cont.invokeOnCancellation { session.cancelTraining() }
         }
         val (started, lastUi) = result
@@ -81,7 +86,7 @@ class TrainingWorker(context: Context, params: WorkerParameters) : CoroutineWork
                 modelPath = modelPath,
             )
         )
-        app.trainingState.postValue(lastUi.copy(running = false, finished = true))
+        app.trainingState.value = lastUi.copy(running = false, finished = true)
         session.markTrainingBaseline()
         Result.success()
     }
