@@ -132,6 +132,8 @@ class OfflineSession {
     // --- ExpertLabels passthrough (undo/redo, edits, reviewed/excluded) ----
     eyelive::ExpertLabels& expert();
     const eyelive::ExpertLabels& expert() const;
+    bool undo(int64_t trial);                                 // ExpertLabels::undo of that trial
+    bool redo(int64_t trial);
     std::vector<Mark> events(int64_t trial) const;           // expert events of one trial
     std::vector<Mark> prelabels(int64_t trial) const;
     double reviewed_seconds() const;
@@ -143,6 +145,9 @@ class OfflineSession {
     bool start_training(const TrainRequest& req, std::function<void(const TrainEvent&)> progress, std::string* error);
     void cancel_training();
     bool training_running() const;
+    // Blocks until the trainer stops (call cancel_training() first for a
+    // prompt shutdown). Safe to call from any thread, also when idle.
+    void wait_training_done() const;
     // Saves the trained model (.bin + .json sidecar, read by detect_net) and
     // makes it the pre-labeler for the next loads.
     bool save_trained_model(const std::string& path, std::string* error);
@@ -159,6 +164,10 @@ class OfflineSession {
     // --- pre-labeling ---------------------------------------------------------
     // Re-runs the chosen pre-labeler on one trial (after the model changed).
     bool prelabel_trial(int64_t trial, std::string* error);
+    // Changes the pre-labeler for the next load() / prelabel_trial() calls.
+    // LastTrained uses the model saved by the latest save_trained_model().
+    void set_prelabeler(Prelabeler p, const std::string& model_bin);
+    Prelabeler prelabeler() const;
 
  private:
     struct Impl;

@@ -11,6 +11,7 @@
 #include <fstream>
 #include <random>
 #include <sstream>
+#include <thread>
 
 #include "eyelive/annotation.hpp"         // agreement() is declared in the frozen contract
 #include "eyelive/calib.hpp"
@@ -480,6 +481,18 @@ std::vector<Mark> OfflineSession::prelabels(int64_t trial) const {
     return out;
 }
 
+bool OfflineSession::undo(int64_t trial) {
+    std::lock_guard<std::mutex> l(impl_->mu);
+    if (trial < 0 || size_t(trial) >= impl_->trials.size()) return false;
+    return impl_->trials[size_t(trial)].labels.undo();
+}
+
+bool OfflineSession::redo(int64_t trial) {
+    std::lock_guard<std::mutex> l(impl_->mu);
+    if (trial < 0 || size_t(trial) >= impl_->trials.size()) return false;
+    return impl_->trials[size_t(trial)].labels.redo();
+}
+
 double OfflineSession::reviewed_seconds() const {
     std::lock_guard<std::mutex> l(impl_->mu);
     double s = 0;
@@ -526,6 +539,10 @@ bool OfflineSession::start_training(const TrainRequest& req, std::function<void(
 
 void OfflineSession::cancel_training() { impl_->trainer->cancel(); }
 bool OfflineSession::training_running() const { return impl_->trainer->running(); }
+
+void OfflineSession::wait_training_done() const {
+    while (impl_->trainer->running()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+}
 
 bool OfflineSession::save_trained_model(const std::string& path, std::string* error) {
     if (!impl_->trainer->save_model(path, error)) return false;
@@ -596,5 +613,13 @@ bool OfflineSession::prelabel_trial(int64_t trial, std::string* error) {
     if (trial < 0 || size_t(trial) >= impl_->trials.size()) { if (error) *error = "trial index out of range"; return false; }
     return impl_->prelabel(impl_->trials[size_t(trial)], error);
 }
+
+void OfflineSession::set_prelabeler(Prelabeler p, const std::string& model_bin) {
+    std::lock_guard<std::mutex> l(impl_->mu);
+    impl_->prelabeler = p;
+    if (!model_bin.empty()) impl_->model_bin = model_bin;
+}
+
+Prelabeler OfflineSession::prelabeler() const { std::lock_guard<std::mutex> l(impl_->mu); return impl_->prelabeler; }
 
 }  // namespace offline
