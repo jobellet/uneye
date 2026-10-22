@@ -39,6 +39,10 @@ object TraceFiles {
 
     fun read(file: File): Trace = file.inputStream().use { read(it, file.name) }
 
+    /** Reads every variable of a `.mat` file (name -> rows x cols, row-major). */
+    fun readAll(bytes: ByteArray): Map<String, Array<DoubleArray>> =
+        MatReader.readAll(bytes)
+
     /** Two CSV files (X axis, Y axis), each trials x time or a single column. */
     fun readCsvPair(xText: String, yText: String): Trace = CsvParser.parsePair(xText, yText)
 }
@@ -87,6 +91,14 @@ object CsvParser {
 object MatReader {
 
     fun read(bytes: ByteArray): TraceFiles.Trace {
+        val vars = readAll(bytes)
+        val x = vars["X"] ?: throw IllegalArgumentException("MAT file has no variable 'X'")
+        val y = vars["Y"] ?: throw IllegalArgumentException("MAT file has no variable 'Y'")
+        return TraceFiles.Trace(x.toList(), y.toList())
+    }
+
+    /** Reads every numeric real variable of a MAT v5 file (name -> rows x cols). */
+    fun readAll(bytes: ByteArray): Map<String, Array<DoubleArray>> {
         if (bytes.size < 128) throw IllegalArgumentException("not a MAT v5 file (too short)")
         val header = bytes.copyOfRange(0, 128)
         val endian = String(header, 126, 2, Charsets.US_ASCII)
@@ -96,7 +108,7 @@ object MatReader {
             else -> throw IllegalArgumentException("not a MAT v5 file (bad endian indicator '$endian')")
         }
         val buf = ByteBuffer.wrap(bytes).order(if (little) ByteOrder.LITTLE_ENDIAN else ByteOrder.BIG_ENDIAN)
-        val vars = HashMap<String, MatVar>()
+        val vars = HashMap<String, Array<DoubleArray>>()
         var pos = 128
         while (pos + 8 <= bytes.size) {
             val type = buf.getInt(pos).toLong() and 0xFFFFFFFFL
@@ -104,13 +116,15 @@ object MatReader {
             if (type == 0L || size <= 0 || pos + 8 + size > bytes.size) break
             if (type == MI_MATRIX) {
                 val v = parseMatrix(bytes, pos + 8, size.toInt(), little)
-                if (v != null) vars[v.name] = v
+                if (v != null) {
+                    // column-major storage -> row-major rows
+                    val rows = Array(v.rows) { r -> DoubleArray(v.cols) { c -> v.data[c * v.rows + r] } }
+                    vars[v.name] = rows
+                }
             }
             pos += (8 + size + ((8 - size % 8) % 8)).toInt()
         }
-        val x = vars["X"] ?: throw IllegalArgumentException("MAT file has no variable 'X'")
-        val y = vars["Y"] ?: throw IllegalArgumentException("MAT file has no variable 'Y'")
-        return TraceFiles.Trace(toRows(x), toRows(y))
+        return vars
     }
 
     private const val MI_MATRIX = 14L
@@ -124,17 +138,6 @@ object MatReader {
     private const val MX_DOUBLE = 6
 
     private class MatVar(val name: String, val rows: Int, val cols: Int, val data: DoubleArray)
-
-    private fun toRows(v: MatVar): List<DoubleArray> {
-        // column-major storage -> row-major rows
-        val rows = ArrayList<DoubleArray>(v.rows)
-        for (r in 0 until v.rows) {
-            val row = DoubleArray(v.cols)
-            for (c in 0 until v.cols) row[c] = v.data[c * v.rows + r]
-            rows.add(row)
-        }
-        return rows
-    }
 
     /** Parses one miMATRIX element body; returns null for unsupported variables. */
     private fun parseMatrix(bytes: ByteArray, off: Int, len: Int, little: Boolean): MatVar? {

@@ -1,16 +1,21 @@
 package com.uneye.offline
 
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * The two-pass labeling screen (phase 2).
@@ -150,6 +155,10 @@ class LabelingScreen : AppCompatActivity() {
 
         findViewById<Button>(R.id.metricsBtn).setOnClickListener { showMetricsDialog() }
 
+        // phase 5: the SAF launchers must be registered before STARTED
+        exportHelper = ExportHelper(this)
+        findViewById<Button>(R.id.exportBtn).setOnClickListener { showExportDialog() }
+
         updatePassUi()
         refresh()
         refreshConvergence()
@@ -158,6 +167,69 @@ class LabelingScreen : AppCompatActivity() {
     // --- phase 4: convergence flag + metrics -------------------------------------------
 
     private var convergenceAlertShown = false
+
+    // --- phase 5: export ------------------------------------------------------------
+
+    private lateinit var exportHelper: ExportHelper
+
+    private fun showExportDialog() {
+        if (!session.loaded.value) return
+        val baseName = session.recordingName.ifBlank { "recording" }
+        val hasModel = session.lastTrainedModel().let { it.isNotEmpty() && File(it).exists() }
+        val dialog = layoutInflater.inflate(R.layout.dialog_export, null)
+        val matBox = dialog.findViewById<CheckBox>(R.id.matBox)
+        val modelBox = dialog.findViewById<CheckBox>(R.id.modelBox)
+        val shareBox = dialog.findViewById<CheckBox>(R.id.shareBox)
+        modelBox.isEnabled = hasModel
+        if (!hasModel) modelBox.isChecked = false
+        AlertDialog.Builder(this)
+            .setTitle(R.string.export_dialog_title)
+            .setView(dialog)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(R.string.export_pick_destination) { _, _ ->
+                // SAF CREATE_DOCUMENT: one single file. The .mat carries
+                // everything (X, Y, Sacc); without it, export the labels CSV.
+                if (matBox.isChecked) {
+                    exportHelper.exportTo("application/octet-stream", "$baseName.mat",
+                        write = { out -> Exporter.writeMat(out, session) },
+                        onDone = { ok, uri -> toastExportResult(ok, uri) })
+                } else {
+                    exportHelper.exportTo("text/csv", "${baseName}_L.csv",
+                        write = { out -> Exporter.writeLabelsCsv(out, Exporter.labelsMatrix(session)) },
+                        onDone = { ok, uri -> toastExportResult(ok, uri) })
+                }
+            }
+            .setPositiveButton(R.string.export) { _, _ ->
+                val includeMat = matBox.isChecked
+                val includeModel = modelBox.isChecked && hasModel
+                val share = shareBox.isChecked
+                Toast.makeText(this, R.string.export_running, Toast.LENGTH_SHORT).show()
+                lifecycleScope.launch {
+                    val root = getExternalFilesDir("exports") ?: filesDir
+                    val dir = File(root, baseName).apply { mkdirs() }
+                    val files = exportHelper.exportAll(session, dir, baseName, includeMat, includeModel)
+                    if (files.isEmpty()) {
+                        Toast.makeText(this@LabelingScreen, R.string.export_failed, Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
+                    if (share) {
+                        exportHelper.shareFiles(files, listOf("text/csv", "application/octet-stream"))
+                    }
+                    Toast.makeText(this@LabelingScreen,
+                        getString(R.string.export_done, dir.absolutePath), Toast.LENGTH_LONG).show()
+                }
+            }
+            .show()
+    }
+
+    private fun toastExportResult(ok: Boolean, uri: Uri?) {
+        val msg = when {
+            uri == null -> getString(R.string.export_cancelled)
+            ok -> getString(R.string.export_done, uri.toString())
+            else -> getString(R.string.export_failed)
+        }
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+    }
 
     private fun refreshConvergence() {
         val app = application as UneyeApp

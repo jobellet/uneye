@@ -83,6 +83,10 @@ class Session(private val filesDir: File) {
     var degPerUnit: Double = 1.0
         private set
 
+    /** Display name of the loaded recording (for export file names). */
+    var recordingName: String = "recording"
+        private set
+
     private var testTrials: Set<Long> = emptySet()
     private var lastPrelabels: List<MarkUi> = emptyList()
 
@@ -106,7 +110,8 @@ class Session(private val filesDir: File) {
      */
     fun load(
         trace: TraceFiles.Trace, rateHz: Double, degPerUnit: Double, estimateScale: Boolean,
-        prelabeler: Int, modelBin: String, onDone: (ok: Boolean, error: String) -> Unit,
+        prelabeler: Int, modelBin: String, recordingName: String = "recording",
+        onDone: (ok: Boolean, error: String) -> Unit,
     ) {
         Thread {
             val res = native.load(
@@ -133,6 +138,7 @@ class Session(private val filesDir: File) {
                 _nTrials.value = nT
                 trialSamples = if (nT > 0) per else 1000
                 this.degPerUnit = res.degPerUnit
+                this.recordingName = recordingName
                 _loaded.value = res.ok
                 _reviewedSeconds.value = native.reviewedSeconds()
                 onDone(res.ok, if (res.ok) "" else res.error.ifEmpty { res.prelabelerError })

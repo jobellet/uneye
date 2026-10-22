@@ -48,6 +48,18 @@
     <string name="metrics_blink">Clignement</string>
     <string name="convergence_collecting">Encore : %1$d/%2$d saccades, %3$d/%4$d clignements dans le test</string>
     <string name="convergence_converged">Convergé — F1 sac %1$.2f (κ %2$.2f), F1 cli %3$.2f (κ %4$.2f)</string>
+    <string name="export">Exporter</string>
+    <string name="export_pick_destination">Choisir la destination…</string>
+    <string name="export_dialog_title">Exporter les données</string>
+    <string name="export_hint">Étiquettes (CSV UnEye : 0/1/2, non revu = NaN) + positions X/Y en degrés. Choisissez la destination (stockage local, Drive…).</string>
+    <string name="export_mat">Inclure le fichier MATLAB (.mat : X, Y, Sacc)</string>
+    <string name="export_model">Inclure le dernier modèle entraîné (.bin + .json)</string>
+    <string name="export_share_after">Partager aussi les fichiers (feuille de partage)</string>
+    <string name="export_share_title">Partager les exports UnEye</string>
+    <string name="export_running">Export en cours…</string>
+    <string name="export_done">Exporté : %1$s</string>
+    <string name="export_failed">Échec de l\u2019export</string>
+    <string name="export_cancelled">Export annulé</string>
     <string name="convergence_alert_title">Convergence atteinte</string>
     <string name="convergence_alert_message">Le modèle ne s’améliore plus sur votre ground truth (test set) : F1 saccade %1$.2f, kappa %2$.2f. Vous avez étiqueté suffisamment de données.</string>
 </resources>

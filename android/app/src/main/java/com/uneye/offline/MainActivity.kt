@@ -149,7 +149,8 @@ class MainActivity : AppCompatActivity() {
             val modelPath = if (prelabeler == Native.PRELABELER_SHIPPED_MODEL && modelBin.isEmpty())
                 app.shippedModelPath() else modelBin
             var result: Pair<Boolean, String>? = null
-            session.load(trace, rateHz, degPerUnit, estimateScale, prelabeler, modelPath) { ok, err ->
+            session.load(trace, rateHz, degPerUnit, estimateScale, prelabeler, modelPath,
+                recordingName = displayName(mat).substringBeforeLast('.')) { ok, err ->
                 result = ok to err
             }
             // session.load posts onDone on the main thread; wait for it

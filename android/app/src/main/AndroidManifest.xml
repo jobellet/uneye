@@ -44,6 +44,17 @@
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
 
+        <!-- export (phase 5): share exported files through the system share sheet -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- background training (phase 3) -->
         <provider
             android:name="androidx.startup.InitializationProvider"
