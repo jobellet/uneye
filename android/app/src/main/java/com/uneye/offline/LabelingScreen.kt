@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -142,10 +143,75 @@ class LabelingScreen : AppCompatActivity() {
             } else {
                 getString(R.string.training_idle)
             }
+            // phase 4: a finished round appends to the convergence history ->
+            // re-evaluate the flag and refresh the badge / metrics
+            if (ui.finished || ui.failed) refreshConvergence()
         }
+
+        findViewById<Button>(R.id.metricsBtn).setOnClickListener { showMetricsDialog() }
 
         updatePassUi()
         refresh()
+        refreshConvergence()
+    }
+
+    // --- phase 4: convergence flag + metrics -------------------------------------------
+
+    private var convergenceAlertShown = false
+
+    private fun refreshConvergence() {
+        val app = application as UneyeApp
+        val rounds = app.convergenceStore.rounds()
+        val flag = ConvergenceFlag.evaluate(rounds)
+        val badge = findViewById<TextView>(R.id.convergenceBadge)
+        when (flag.state) {
+            ConvergenceFlag.State.SILENT -> {
+                badge.visibility = View.GONE
+                badge.text = ""
+            }
+            ConvergenceFlag.State.COLLECTING -> {
+                badge.visibility = View.VISIBLE
+                badge.setBackgroundColor(0xFFFFB300.toInt())
+                badge.text = getString(R.string.convergence_collecting,
+                    flag.nSaccades, ConvergenceFlag.MIN_SACCADES, flag.nBlinks, ConvergenceFlag.MIN_BLINKS)
+            }
+            ConvergenceFlag.State.CONVERGED -> {
+                badge.visibility = View.VISIBLE
+                badge.setBackgroundColor(0xFF2E7D32.toInt())
+                badge.text = getString(R.string.convergence_converged,
+                    flag.f1Saccade, flag.kappaSaccade, flag.f1Blink, flag.kappaBlink)
+                if (!convergenceAlertShown) {
+                    convergenceAlertShown = true
+                    AlertDialog.Builder(this)
+                        .setTitle(R.string.convergence_alert_title)
+                        .setMessage(getString(R.string.convergence_alert_message,
+                            flag.f1Saccade, flag.kappaSaccade))
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
+            }
+        }
+    }
+
+    private fun showMetricsDialog() {
+        val app = application as UneyeApp
+        val rounds = app.convergenceStore.rounds()
+        val flag = ConvergenceFlag.evaluate(rounds)
+        val view = MetricsView(this)
+        view.setSeries(rounds, flag.state == ConvergenceFlag.State.CONVERGED)
+        val heightPx = (360 * resources.displayMetrics.density).toInt()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.metrics_title)
+            .setView(view, 0, 0, 0, 0)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+        // the dialog measures the view after show(); force a fixed height so
+        // onDraw always has a canvas
+        view.post {
+            view.layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT, heightPx)
+            view.requestLayout()
+        }
     }
 
     // --- pass switching ---------------------------------------------------------------

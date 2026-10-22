@@ -68,3 +68,21 @@ epoch is reviewed only when scanned AND all its marks are refined.
 - Pre-labeler: HMM (default), the shipped `combined.bin`, the last trained
   model, or none. After the first training the user's model becomes the
   default for new data (phase 3).
+
+## Phase 3+4: background training & convergence
+
+- `TrainingWorker` (WorkManager): runs the C++ training cycle via the facade
+  on a background worker (foreground notification, dataSync type), saves the
+  model, swaps the pre-labeler to it, re-prelabels the unreviewed parts
+  (`apply_auto_labels`: expert events and reviewed ranges are never touched),
+  appends a round to the convergence history. Triggered by
+  `TrainingScheduler` after every 20 newly labeled seconds (charging
+  constraint only above 120 s reviewed) or manually ("Train now").
+- `ConvergenceStore`: JSON history of rounds (labeled seconds, epochs, biased
+  val F1/kappa for reference, test F1/kappa per class, expert event counts).
+- `ConvergenceFlag`: the flag rule — SILENT until the fixed test set has
+  >= 100 saccades and >= 20 blinks, then CONVERGED when the mean gain of the
+  saccade test F1 over the last 3 rounds is inside its bootstrap 95% CI
+  (2000 resamples). The trainer's val F1 is biased and never used.
+- `MetricsView`: learning curves — test F1 and kappa per class vs reviewed
+  seconds, with a marker where the flag fired. Shown in a dialog ("Metrics").
