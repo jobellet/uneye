@@ -27,8 +27,8 @@
     <string name="wider">Plus large</string>
     <string name="switch_pass">Changer de passe</string>
     <string name="save">Sauvegarder</string>
-    <string name="reviewed_seconds">Revu : %.1f s</string>
-    <string name="status_marks">Essai %1$d/%2$d — %3$d événements experts, %4$d marques — revu %.1f s</string>
+    <string name="reviewed_seconds">Revu : %1$.1f s</string>
+    <string name="status_marks">Essai %1$d/%2$d — %3$d événements experts, %4$d marques — revu %5$.1f s</string>
     <string name="invalid_span">Plage invalide</string>
     <string name="all_marks_refined">Toutes les marques sont raffinées</string>
     <string name="labels_saved">Étiquettes sauvegardées</string>

@@ -26,6 +26,10 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".LabelingScreen"
+            android:exported="true" />
+
         <!-- background training (phase 3) -->
         <provider
             android:name="androidx.startup.InitializationProvider"

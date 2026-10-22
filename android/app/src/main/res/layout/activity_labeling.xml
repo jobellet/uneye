@@ -21,17 +21,19 @@
 
         <Button
             android:id="@+id/classToggle"
-            android:layout_width="140dp"
+            android:layout_width="wrap_content"
             android:layout_height="56dp"
+            android:minWidth="120dp"
             android:text="Saccade"
-            android:textSize="16sp" />
+            android:textSize="15sp" />
 
         <Button
             android:id="@+id/undoBtn"
-            android:layout_width="100dp"
+            android:layout_width="wrap_content"
             android:layout_height="56dp"
+            android:minWidth="100dp"
             android:text="@string/undo"
-            android:textSize="16sp" />
+            android:textSize="15sp" />
     </LinearLayout>
 
     <com.uneye.offline.TraceView

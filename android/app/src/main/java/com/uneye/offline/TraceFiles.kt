@@ -106,21 +106,21 @@ object MatReader {
                 val v = parseMatrix(bytes, pos + 8, size.toInt(), little)
                 if (v != null) vars[v.name] = v
             }
-            pos += 8 + size + ((8 - size % 8) % 8)
+            pos += (8 + size + ((8 - size % 8) % 8)).toInt()
         }
         val x = vars["X"] ?: throw IllegalArgumentException("MAT file has no variable 'X'")
         val y = vars["Y"] ?: throw IllegalArgumentException("MAT file has no variable 'Y'")
         return TraceFiles.Trace(toRows(x), toRows(y))
     }
 
-    private const val MI_MATRIX = 14
-    private const val MI_COMPRESSED = 15
-    private const val MI_DOUBLE = 9
-    private const val MI_SINGLE = 7
-    private const val MI_INT32 = 5
-    private const val MI_INT16 = 3
-    private const val MI_INT8 = 2
-    private const val MI_UINT8 = 1
+    private const val MI_MATRIX = 14L
+    private const val MI_COMPRESSED = 15L
+    private const val MI_DOUBLE = 9L
+    private const val MI_SINGLE = 7L
+    private const val MI_INT32 = 5L
+    private const val MI_INT16 = 3L
+    private const val MI_INT8 = 2L
+    private const val MI_UINT8 = 1L
     private const val MX_DOUBLE = 6
 
     private class MatVar(val name: String, val rows: Int, val cols: Int, val data: DoubleArray)
@@ -151,7 +151,7 @@ object MatReader {
                 p += 8                      // 4-byte tag + 4 bytes of padded data
             } else {
                 name = String(bytes, p + 8, s.toInt(), Charsets.US_ASCII)
-                p += 8 + s + ((8 - s % 8) % 8)
+                p += (8 + s + ((8 - s % 8) % 8)).toInt()
             }
         }
         // array flags (miUINT32, 8 bytes): class in the low byte of the first word

@@ -12,6 +12,7 @@ plugins {
 android {
     namespace = "com.uneye.offline"
     compileSdk = 35
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "com.uneye.offline"

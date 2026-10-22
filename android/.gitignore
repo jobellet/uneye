@@ -1,1 +1,7 @@
 build*/
+
+.gradle/
+.cxx/
+local.properties
+*.apk
+

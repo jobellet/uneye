@@ -124,7 +124,7 @@ class Session(private val filesDir: File) {
             uiHandler.post {
                 _nTrials.value = nT
                 trialSamples = if (nT > 0) per else 1000
-                degPerUnit = res.degPerUnit
+                this.degPerUnit = res.degPerUnit
                 _loaded.value = res.ok
                 _reviewedSeconds.value = native.reviewedSeconds()
                 onDone(res.ok, if (res.ok) "" else res.error.ifEmpty { res.prelabelerError })
