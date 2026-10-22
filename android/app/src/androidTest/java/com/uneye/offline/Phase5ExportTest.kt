@@ -82,8 +82,16 @@ class Phase5ExportTest {
         return Triple(x, y, lab)
     }
 
+    private fun parseCsvDouble(s: String): Double {
+        if (s.equals("nan", ignoreCase = true)) return Double.NaN
+        if (s.equals("inf", ignoreCase = true) || s.equals("+inf", ignoreCase = true)) return Double.POSITIVE_INFINITY
+        if (s.equals("-inf", ignoreCase = true)) return Double.NEGATIVE_INFINITY
+        return s.toDouble()
+    }
+
     @Test
-    fun testExportAllWritesReadableFiles() = kotlinx.coroutines.runBlocking {
+    fun testExportAllWritesReadableFiles() {
+        kotlinx.coroutines.runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val app = context.applicationContext as UneyeApp
         val session = app.session
@@ -170,7 +178,7 @@ class Phase5ExportTest {
             val vals = row.split(",")
             assertEquals(1000, vals.size)                // 1 s per trial at 1 kHz
             for (v in vals) {
-                val d = v.toDouble()
+                val d = parseCsvDouble(v)
                 assertTrue("label out of convention: $v",
                     d.isNaN() || d == 0.0 || d == 1.0 || d == 2.0)
             }
@@ -183,7 +191,7 @@ class Phase5ExportTest {
         // --- X CSV: degrees, round-trip against the session trace --------------
         val xText = File(dir, "export_test_X.csv").readText().trim().split("\n")
         assertEquals(4, xText.size)
-        val xRow0 = xText[0].split(",").map { it.toDouble() }
+        val xRow0 = xText[0].split(",").map { parseCsvDouble(it) }
         assertEquals(1000, xRow0.size)
         val (sx, _) = session.trace(0, 0, 999)
         for (i in 0 until 1000) {
@@ -202,7 +210,7 @@ class Phase5ExportTest {
         // labels match the CSV (NaN stays NaN)
         var nSacc = 0
         for (r in 0 until 4) for (c in 0 until 1000) {
-            val csv = rows[r].split(",")[c].toDouble()
+            val csv = parseCsvDouble(rows[r].split(",")[c])
             val m = sacc[r][c]
             if (csv.isNaN()) assertTrue("mat should be NaN at $r,$c", m.isNaN())
             else assertEquals(csv, m, 0.0)
@@ -220,4 +228,5 @@ class Phase5ExportTest {
         modelFile.delete()
         File(app.modelsDir(), "model_round.json").delete()
     }
+}
 }
