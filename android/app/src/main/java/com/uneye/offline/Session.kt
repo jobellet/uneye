@@ -60,6 +60,13 @@ class Session(private val filesDir: File) {
     private val _reviewedSeconds = MutableStateFlow(0.0)
     val reviewedSeconds: StateFlow<Double> = _reviewedSeconds.asStateFlow()
 
+    /** Seconds reviewed at the last training round (phase 3 scheduler baseline). */
+    var reviewedAtLastTraining: Double = 0.0
+        private set
+
+    /** Marks the current reviewed-seconds value as the baseline for the next training trigger. */
+    fun markTrainingBaseline() { reviewedAtLastTraining = _reviewedSeconds.value }
+
     private val _train = MutableStateFlow(TrainUi())
     val train: StateFlow<TrainUi> = _train.asStateFlow()
 

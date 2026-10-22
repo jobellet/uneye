@@ -11,6 +11,14 @@ class UneyeApp : Application() {
 
     val session: Session by lazy { Session(filesDir) }
 
+    /** Live training progress (phase 3), posted by the TrainingWorker. */
+    val trainingState = kotlinx.coroutines.flow.MutableStateFlow(Session.TrainUi())
+
+    /** The convergence history (phase 4): one JSON file in filesDir. */
+    val convergenceStore: ConvergenceStore by lazy {
+        ConvergenceStore(File(filesDir, "convergence.json"))
+    }
+
     /** Directory for the trained models of this app. */
     fun modelsDir(): File = session.appDir("models")
 

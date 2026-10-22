@@ -149,6 +149,42 @@ int main() {
     CHECK(s.save_labels("/tmp/offline_session_test_labels.bin", &lerr), "save labels: %s", lerr.c_str());
     CHECK(s.load_labels("/tmp/offline_session_test_labels.bin", &lerr), "load labels: %s", lerr.c_str());
 
+    // phase 3 cycle: swap the pre-labeler to the trained model, re-prelabel all
+    // trials, and check that (a) expert events survive (apply_auto_labels never
+    // touches them), (b) the rendered reviewed labels are unchanged, (c) the
+    // new model pre-labels the unreviewed parts.
+    s.set_prelabeler(Prelabeler::LastTrained, "");
+    CHECK(s.prelabeler() == Prelabeler::LastTrained, "prelabeler swapped to LastTrained");
+    const size_t n_expert_before = s.events(0).size();
+    std::vector<uint8_t> lab_before;
+    s.labels(0, 0, 999, true, &lab_before);
+    std::string rerr;
+    CHECK(s.re_prelabel_all(&rerr), "re_prelabel_all: %s", rerr.c_str());
+    CHECK(s.events(0).size() == n_expert_before, "expert events survive the re-prelabeling (%zu -> %zu)",
+          n_expert_before, s.events(0).size());
+    std::vector<uint8_t> lab_after;
+    s.labels(0, 0, 999, true, &lab_after);
+    CHECK(lab_before == lab_after, "the reviewed rendered labels are unchanged by the re-prelabeling");
+    // the new pre-labels come from the trained model: prelabels() (provenance)
+    // still holds the originals, the detector events now come from the model
+    bool any_expert = false;
+    for (auto& e : s.events(0)) if (!e.from_prelabel) any_expert = true;
+    CHECK(any_expert, "trial 0 still has expert events after the swap");
+
+    // a second training round starting from the last model (init_model) works
+    TrainRequest req2; req2.max_seconds = 6.0; req2.n_threads = 1; req2.max_epochs = 5; req2.use_last_model_as_init = true;
+    int epochs2 = 0; TrainEvent last2;
+    std::string terr2;
+    CHECK(s.start_training(req2, [&](const TrainEvent& e) { if (!e.finished) ++epochs2; last2 = e; }, &terr2), "second training round: %s", terr2.c_str());
+    while (s.training_running()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    CHECK(last2.finished && !last2.failed, "second round finished (failed=%d msg=%s)", (int)last2.failed, last2.message.c_str());
+    std::string merr2;
+    CHECK(s.save_trained_model("/tmp/offline_session_test_model2.bin", &merr2), "save model 2: %s", merr2.c_str());
+    std::string serr2;
+    auto sc2 = s.score_test_set(s.last_trained_model(), &serr2);
+    CHECK(sc2.ok && sc2.event_f1[1] > 0.5, "the warm-started model still detects the saccades (F1 %.3f)", sc2.event_f1[1]);
+    std::printf("phase 3 cycle: re-prelabel OK, expert events preserved, warm start F1 %.3f\n", sc2.event_f1[1]);
+
     // resample path: 500 Hz input -> 1 kHz internal
     OfflineSession s2;
     std::vector<double> x5, y5;

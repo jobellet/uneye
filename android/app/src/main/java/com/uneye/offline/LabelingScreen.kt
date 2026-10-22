@@ -116,11 +116,32 @@ class LabelingScreen : AppCompatActivity() {
 
         findViewById<Button>(R.id.switchPassBtn).setOnClickListener { switchPass() }
         findViewById<Button>(R.id.saveBtn).setOnClickListener { saveLabels() }
+        findViewById<Button>(R.id.trainNowBtn).setOnClickListener {
+            TrainingScheduler.scheduleNow(this)
+            Toast.makeText(this, R.string.training_scheduled, Toast.LENGTH_SHORT).show()
+        }
 
         session.trial.observeState(this) { refresh() }
         session.pass.observeState(this) { updatePassUi() }
-        session.reviewedSeconds.observeState(this) {
-            statusText.text = getString(R.string.reviewed_seconds, it)
+        session.reviewedSeconds.observeState(this) { seconds ->
+            statusText.text = getString(R.string.reviewed_seconds, seconds)
+            // phase 3: schedule a background training round after every N newly
+            // labeled seconds
+            val app = application as UneyeApp
+            val newSeconds = seconds - session.reviewedAtLastTraining
+            TrainingScheduler.maybeSchedule(this, seconds, newSeconds)
+        }
+        (application as UneyeApp).trainingState.observeState(this) { ui ->
+            val trainStatus = findViewById<TextView>(R.id.trainStatusText)
+            trainStatus.text = if (ui.running) {
+                getString(R.string.training_progress, ui.epoch, ui.trainLoss, ui.valLoss)
+            } else if (ui.finished) {
+                getString(R.string.training_done, ui.epoch)
+            } else if (ui.failed) {
+                getString(R.string.training_failed, ui.message)
+            } else {
+                getString(R.string.training_idle)
+            }
         }
 
         updatePassUi()

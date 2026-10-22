@@ -197,6 +197,13 @@ object Native {
     // --- pre-labeling -----------------------------------------------------------------
 
     fun prelabelTrial(trial: Long): Boolean = nativePrelabelTrial(h(), trial)
+
+    /**
+     * Re-runs the current pre-labeler on every trial (phase 3 swap). Reviewed
+     * ranges and expert events are never touched (apply_auto_labels); only the
+     * automatic labels of the unreviewed parts are replaced.
+     */
+    fun rePrelabelAll(): Boolean = nativeRePrelabelAll(h())
     fun setPrelabeler(prelabeler: Int, modelBin: String) = nativeSetPrelabeler(h(), prelabeler, modelBin)
     fun prelabeler(): Int = nativePrelabeler(h())
 
@@ -245,6 +252,7 @@ object Native {
     private external fun nativeScoreTestSet(handle: Long, modelBin: String): DoubleArray
     private external fun nativeScoreTestSetEventCounts(handle: Long, modelBin: String): IntArray
     private external fun nativePrelabelTrial(handle: Long, trial: Long): Boolean
+    private external fun nativeRePrelabelAll(handle: Long): Boolean
     private external fun nativeSetPrelabeler(handle: Long, prelabeler: Int, modelBin: String)
     private external fun nativePrelabeler(handle: Long): Int
 }

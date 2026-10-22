@@ -33,4 +33,11 @@
     <string name="all_marks_refined">Toutes les marques sont raffinées</string>
     <string name="labels_saved">Étiquettes sauvegardées</string>
     <string name="labels_save_failed">Échec de la sauvegarde</string>
+    <string name="train_now">Entraîner</string>
+    <string name="training_scheduled">Entraînement planifié</string>
+    <string name="training_running">Entraînement en cours…</string>
+    <string name="training_idle">Entraînement : inactif</string>
+    <string name="training_progress">Entraînement : époque %1$d — train %.3f, val %.3f</string>
+    <string name="training_done">Entraînement terminé (%1$d époques)</string>
+    <string name="training_failed">Entraînement échoué : %1$s</string>
 </resources>

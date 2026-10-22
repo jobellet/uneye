@@ -474,6 +474,14 @@ Java_com_uneye_offline_Native_nativePrelabelTrial(JNIEnv* env, jclass, jlong han
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_uneye_offline_Native_nativeRePrelabelAll(JNIEnv* env, jclass, jlong handle) {
+    std::string err;
+    const bool ok = sess(handle)->re_prelabel_all(&err);
+    if (!ok) env->ThrowNew(env->FindClass("java/lang/RuntimeException"), err.c_str());
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL
 Java_com_uneye_offline_Native_nativeSetPrelabeler(JNIEnv* env, jclass, jlong handle,
                                                   jint prelabeler, jstring model_bin) {

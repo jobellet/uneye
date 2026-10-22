@@ -192,6 +192,32 @@ struct OfflineSession::Impl {
         return true;
     }
 
+    // Re-runs the current pre-labeler after a training round (phase 3 swap).
+    // Uses ExpertLabels::apply_auto_labels: the reviewed ranges and every
+    // expert event are never touched, so the user's work is preserved; only
+    // the automatic (detector) labels of the unreviewed parts are replaced.
+    // The original pre-labels stay in prelabels() (provenance).
+    bool re_prelabel(Trial& t, std::string* error) {
+        if (prelabeler == Prelabeler::None) return true;
+        std::string err;
+        auto det = make_prelabeler(&err);
+        if (!det) { if (error) *error = err; return false; }
+        const eyelive::SessionInfo si = session_info();
+        eyelive::VectorTrace tr = trace_view(t);
+        det->reset(si);
+        det->set_scale(deg_per_unit);
+        std::vector<eyelive::Event> ev;
+        det->detect_all(tr, ev);
+        for (auto& e : ev) { e.provisional = false; e.origin = eyelive::EventOrigin::Detector; }
+        ev.erase(std::remove_if(ev.begin(), ev.end(), [](const eyelive::Event& e) { return e.cls == 2; }), ev.end());
+        auto blinks = blink_events(t);
+        ev.insert(ev.end(), blinks.begin(), blinks.end());
+        std::sort(ev.begin(), ev.end(), [](const eyelive::Event& a, const eyelive::Event& b) { return a.onset < b.onset; });
+        const int64_t n = int64_t(t.x.size());
+        t.labels.apply_auto_labels(ev, 0, n - 1);
+        return true;
+    }
+
     // Training traces from the reviewed ranges of the given trials (the engine
     // glue: render(only_reviewed=true), stretches >= 0.25 s, most recent first).
     // Blink / lost samples are filled with noise at 3x the local fixation
@@ -612,6 +638,16 @@ bool OfflineSession::prelabel_trial(int64_t trial, std::string* error) {
     std::lock_guard<std::mutex> l(impl_->mu);
     if (trial < 0 || size_t(trial) >= impl_->trials.size()) { if (error) *error = "trial index out of range"; return false; }
     return impl_->prelabel(impl_->trials[size_t(trial)], error);
+}
+
+bool OfflineSession::re_prelabel_all(std::string* error) {
+    std::lock_guard<std::mutex> l(impl_->mu);
+    if (impl_->trials.empty()) { if (error) *error = "no recording loaded"; return false; }
+    for (auto& t : impl_->trials) {
+        std::string err;
+        if (!impl_->re_prelabel(t, &err)) { if (error) *error = err; return false; }
+    }
+    return true;
 }
 
 void OfflineSession::set_prelabeler(Prelabeler p, const std::string& model_bin) {

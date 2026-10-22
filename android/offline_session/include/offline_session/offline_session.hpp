@@ -164,6 +164,12 @@ class OfflineSession {
     // --- pre-labeling ---------------------------------------------------------
     // Re-runs the chosen pre-labeler on one trial (after the model changed).
     bool prelabel_trial(int64_t trial, std::string* error);
+    // Re-runs the current pre-labeler on EVERY trial after a training round
+    // (phase 3 swap). Uses ExpertLabels::apply_auto_labels: reviewed ranges
+    // and expert events are never touched; only the automatic (detector)
+    // labels of the unreviewed parts are replaced. The original pre-labels
+    // stay in prelabels() (provenance).
+    bool re_prelabel_all(std::string* error);
     // Changes the pre-labeler for the next load() / prelabel_trial() calls.
     // LastTrained uses the model saved by the latest save_trained_model().
     void set_prelabeler(Prelabeler p, const std::string& model_bin);
