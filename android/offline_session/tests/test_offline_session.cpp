@@ -120,7 +120,7 @@ int main() {
     // training on the reviewed data (train trials only). The synthetic saccades
     // are identical in every trial, so the model can actually learn them and
     // the loop closes with a non-zero test F1.
-    TrainRequest req; req.max_seconds = 6.0; req.n_threads = 2; req.max_epochs = 15; req.use_last_model_as_init = false;
+    TrainRequest req; req.max_seconds = 6.0; req.n_threads = 1; req.max_epochs = 15; req.use_last_model_as_init = false;
     int epochs = 0; TrainEvent last;
     std::string terr;
     CHECK(s.start_training(req, [&](const TrainEvent& e) { if (!e.finished) ++epochs; last = e; }, &terr), "start_training: %s", terr.c_str());
