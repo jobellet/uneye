@@ -41,4 +41,6 @@ data/archive 2.zip
 data/DTB70/
 data/DeepGazeKit/
 /build-host/
+/build-android/
+/android/build-android-ndk
 /cpp/build*/
