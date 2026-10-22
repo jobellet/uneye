@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">U’n’Eye Offline Labeler</string>
+    <string name="main_title">Fichiers de traces oculaires</string>
+    <string name="no_file_picked">Aucun fichier sélectionné</string>
+    <string name="open_mat">Ouvrir .mat</string>
+    <string name="open_x">Ouvrir X (csv)</string>
+    <string name="open_y">Ouvrir Y (csv)</string>
+    <string name="start_labeling">Commencer le labellisation</string>
+    <string name="known_files">Fichiers connus</string>
+    <string name="no_known_files">Aucun fichier enregistré</string>
+    <string name="load_dialog_title">Charger une trace</string>
+    <string name="rate_hz">Fréquence d’échantillonnage (Hz)</string>
+    <string name="deg_per_unit">Degrés par unité</string>
+    <string name="estimate_scale">Estimer l’échelle (select_scale vs HMM)</string>
+    <string name="prelabeler">Pré-étiqueteur</string>
+    <string name="model_path">Modèle (.bin, optionnel)</string>
+    <string name="model_path_hint">combined.bin ou dernier modèle entraîné</string>
+    <string name="load">Charger</string>
+    <string name="loading">Chargement…</string>
+    <string name="load_failed">Échec du chargement</string>
+    <string name="load_failed_arg">Échec du chargement : %1$s</string>
+    <string name="undo">Annuler</string>
+    <string name="next_epoch">Suivant</string>
+    <string name="not_an_event">Pas un événement</string>
+    <string name="back">Retour</string>
+    <string name="wider">Plus large</string>
+    <string name="switch_pass">Changer de passe</string>
+    <string name="save">Sauvegarder</string>
+    <string name="reviewed_seconds">Revu : %.1f s</string>
+    <string name="status_marks">Essai %1$d/%2$d — %3$d événements experts, %4$d marques — revu %.1f s</string>
+    <string name="invalid_span">Plage invalide</string>
+    <string name="all_marks_refined">Toutes les marques sont raffinées</string>
+    <string name="labels_saved">Étiquettes sauvegardées</string>
+    <string name="labels_save_failed">Échec de la sauvegarde</string>
+</resources>

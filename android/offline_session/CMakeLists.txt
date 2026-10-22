@@ -10,9 +10,14 @@ if(NOT MSVC)
 endif()
 
 if(ANDROID OR UNEYE_ANDROID_JNI)
+  # The NDK default is -fno-exceptions; the code base is exception-free by
+  # contract (every error is a return value), so keep exceptions off to match.
   add_library(offline_session_jni SHARED jni/offline_session_jni.cpp)
   target_link_libraries(offline_session_jni PRIVATE offline_session)
   set_target_properties(offline_session_jni PROPERTIES OUTPUT_NAME offline_session)
+  if(NOT MSVC)
+    target_compile_options(offline_session_jni PRIVATE -fno-exceptions -fno-rtti -Wall -Wextra)
+  endif()
 endif()
 
 file(GLOB OS_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_*.cpp)
