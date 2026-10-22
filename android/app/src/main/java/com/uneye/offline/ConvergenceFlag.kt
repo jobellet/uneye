@@ -65,21 +65,27 @@ object ConvergenceFlag {
         val windowGains = gains.takeLast(WINDOW)
         val gain = windowGains.average()
         // 3. bootstrap CI of the mean gain over the window
-        val ciHalf = bootstrapCiHalfWidth(windowGains, N_BOOT, CI, seed)
+        val ci = bootstrapCi(windowGains, N_BOOT, CI, seed)
+        val ciHalf = ci.halfWidth
         // 4. converged when the gain is inside the interval (the interval of the
-        //    mean gain contains 0 <=> |gain| <= ciHalf)
-        val state = if (abs(gain) <= ciHalf) State.CONVERGED else State.COLLECTING
+        //    mean gain contains 0 <=> |gain| <= ciHalf, or CI straddles 0, or gain is negligible)
+        val state = if ((ci.lo <= 0.0 && ci.hi >= 0.0) || abs(gain) <= ciHalf || abs(gain) < 1e-4) {
+            State.CONVERGED
+        } else {
+            State.COLLECTING
+        }
         return Result(state, last.nSaccades, last.nBlinks, gain, ciHalf,
             last.testF1Saccade, last.testKappaSaccade, last.testF1Blink, last.testKappaBlink, rounds.size)
     }
 
+    data class Ci(val lo: Double, val hi: Double, val halfWidth: Double)
+
     /**
-     * Bootstrap CI half-width of the mean of [gains]: resample with
-     * replacement [nBoot] times, the CI is the central [ci] interval of the
-     * resampled means, the half-width is (upper - lower) / 2.
+     * Bootstrap CI of the mean of [gains]: resample with replacement [nBoot]
+     * times, the CI is the central [ci] interval of the resampled means.
      */
-    internal fun bootstrapCiHalfWidth(gains: List<Double>, nBoot: Int, ci: Double, seed: Long): Double {
-        if (gains.isEmpty()) return 0.0
+    internal fun bootstrapCi(gains: List<Double>, nBoot: Int, ci: Double, seed: Long): Ci {
+        if (gains.isEmpty()) return Ci(0.0, 0.0, 0.0)
         val rng = Random(seed)
         val n = gains.size
         val means = DoubleArray(nBoot)
@@ -92,6 +98,9 @@ object ConvergenceFlag {
         val alpha = (1.0 - ci) / 2.0
         val lo = means[(alpha * nBoot).toInt().coerceIn(0, nBoot - 1)]
         val hi = means[((1.0 - alpha) * nBoot).toInt().coerceIn(0, nBoot - 1)]
-        return (hi - lo) / 2.0
+        return Ci(lo, hi, (hi - lo) / 2.0)
     }
+
+    internal fun bootstrapCiHalfWidth(gains: List<Double>, nBoot: Int, ci: Double, seed: Long): Double =
+        bootstrapCi(gains, nBoot, ci, seed).halfWidth
 }

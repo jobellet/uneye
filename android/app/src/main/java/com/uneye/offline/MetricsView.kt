@@ -47,35 +47,59 @@ class MetricsView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         invalidate()
     }
 
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val defaultH = (320 * resources.displayMetrics.density).toInt()
+        val h = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY) {
+            MeasureSpec.getSize(heightMeasureSpec)
+        } else {
+            defaultH
+        }
+        setMeasuredDimension(w, h)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (width <= 0 || height <= 0) return
         val midX = width / 2f
         drawGrid(canvas, 0f, midX)
         drawGrid(canvas, midX, width.toFloat())
+
+        paintText.color = Color.DKGRAY
+        paintText.textSize = 26f
         canvas.drawText(context.getString(R.string.metrics_f1), 16f, 34f, paintText)
         canvas.drawText(context.getString(R.string.metrics_kappa), midX + 16f, 34f, paintText)
-        canvas.drawText(context.getString(R.string.metrics_saccade), 16f, height - 12f, paintText.apply { color = 0xFF1565C0.toInt() })
-        canvas.drawText(context.getString(R.string.metrics_blink), midX + 16f, height - 12f, paintText.apply { color = 0xFFC62828.toInt() })
+
+        paintText.color = 0xFF1565C0.toInt()
+        canvas.drawText(context.getString(R.string.metrics_saccade), 16f, height - 12f, paintText)
+        paintText.color = 0xFFC62828.toInt()
+        canvas.drawText(context.getString(R.string.metrics_blink), midX + 16f, height - 12f, paintText)
+
         drawSeries(canvas, f1Saccade, 0f, midX, paintSaccade)
         drawSeries(canvas, f1Blink, 0f, midX, paintBlink)
         drawSeries(canvas, kappaSaccade, midX, width.toFloat(), paintSaccade)
         drawSeries(canvas, kappaBlink, midX, width.toFloat(), paintBlink)
+
         if (convergedAtSeconds >= 0) {
             val all = listOfNotNull(f1Saccade, f1Blink, kappaSaccade, kappaBlink)
             val sMax = all.flatMap { it.seconds.toList() }.maxOrNull() ?: 1.0
-            val px = (convergedAtSeconds / sMax.coerceAtLeast(1e-9)).toFloat() * width
-            canvas.drawLine(px, 40f, px, height - 40f, paintMarker)
+            val frac = (convergedAtSeconds / sMax.coerceAtLeast(1e-9)).toFloat().coerceIn(0f, 1f)
+            val pxLeft = frac * midX
+            val pxRight = midX + frac * (width - midX)
+            canvas.drawLine(pxLeft, 48f, pxLeft, height - 44f, paintMarker)
+            canvas.drawLine(pxRight, 48f, pxRight, height - 44f, paintMarker)
         }
     }
 
     private fun drawGrid(canvas: Canvas, left: Float, right: Float) {
         val top = 48f; val bottom = height - 44f
         canvas.drawRect(left, top, right, bottom, paintGrid)
+        paintText.textSize = 20f
+        paintText.color = Color.GRAY
         for (f in 0..4) {
             val y = top + (bottom - top) * f / 4f
             canvas.drawLine(left, y, right, y, paintGrid)
-            canvas.drawText(String.format("%.1f", 1.0 - 0.25 * f), left + 4, y - 4, paintText.apply { textSize = 20f })
+            canvas.drawText(String.format(java.util.Locale.US, "%.1f", 1.0 - 0.25 * f), left + 4, y - 4, paintText)
         }
         canvas.drawLine((left + right) / 2, top, (left + right) / 2, bottom, paintGrid)
     }

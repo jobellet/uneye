@@ -202,7 +202,7 @@ class LabelingScreen : AppCompatActivity() {
         val heightPx = (360 * resources.displayMetrics.density).toInt()
         AlertDialog.Builder(this)
             .setTitle(R.string.metrics_title)
-            .setView(view, 0, 0, 0, 0)
+            .setView(view)
             .setPositiveButton(android.R.string.ok, null)
             .show()
         // the dialog measures the view after show(); force a fixed height so
