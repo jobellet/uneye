@@ -1,49 +1,147 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Saccade Labeler</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="U'n'Eye">
+    <meta name="theme-color" content="#1565C0">
+    <title>U'n'Eye — Offline Saccade Labeler</title>
     <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link rel="icon" href="logo.jpeg">
+    <link rel="apple-touch-icon" href="logo.jpeg">
 </head>
 <body>
-    <div id="app-container">
-        <div id="controls-panel">
-            <div>
-                <label for="file-input">Load Eye Data (CSV/TXT/DAT):</label>
-                <input type="file" id="file-input" accept=".csv,.txt,.dat">
+    <div id="app">
+        <!-- Top Navigation / Action Bar -->
+        <header id="top-bar">
+            <div class="bar-left">
+                <span class="app-logo">U’n’Eye</span>
+                <span id="passIndicator" class="badge pass-badge">Pass 1 : Marquer</span>
+                <span id="convergenceBadge" class="badge conv-badge hidden">En attente</span>
             </div>
-            <hr>
-            <div>
-                <input type="checkbox" id="enable-smoothing">
-                <label for="enable-smoothing">Enable Smoothing</label>
+
+            <div class="bar-center">
+                <button id="classToggle" class="btn btn-class saccade">Saccade</button>
+                <button id="undoBtn" class="btn btn-secondary">Annuler</button>
             </div>
-            <div>
-                <label for="smoothing-window">Window Size:</label>
-                <input type="number" id="smoothing-window" value="5" min="3" step="2" style="width: 50px;">
+
+            <div class="bar-right">
+                <button id="demoBtn" class="btn btn-accent">⚡ Démo</button>
+                <button id="openBtn" class="btn btn-secondary">Ouvrir…</button>
+                <button id="metricsBtn" class="btn btn-secondary">Métriques</button>
+                <button id="trainNowBtn" class="btn btn-train">Entraîner</button>
+                <button id="exportBtn" class="btn btn-success">Exporter</button>
             </div>
-            <hr>
-            <div>
-                <button id="mark-saccade-mode">Enter Saccade Marking Mode</button>
+        </header>
+
+        <!-- Main Interactive Canvas View -->
+        <main id="canvas-container">
+            <canvas id="traceCanvas"></canvas>
+            <div id="loupeLabel" class="loupe-info hidden"></div>
+        </main>
+
+        <!-- Bottom Controls & Status Bar -->
+        <footer id="bottom-bar">
+            <div class="status-row">
+                <span id="trialStatus">Essai 1/1</span>
+                <span id="reviewedStatus">Revu : 0.0 s</span>
+                <span id="eventsStatus">0 saccades, 0 clignements</span>
+                <span id="trainStatus" class="train-idle">Entraînement : inactif</span>
             </div>
-            <div>
-                <button id="clear-last-saccade">Clear Last Saccade</button>
+
+            <div class="controls-row">
+                <!-- Navigation -->
+                <div class="control-group">
+                    <button id="prevTrialBtn" class="btn btn-nav">◀ Essai préc.</button>
+                    <button id="nextTrialBtn" class="btn btn-nav">Essai suiv. ▶</button>
+                </div>
+
+                <!-- Pass 2 specific controls -->
+                <div id="pass2Controls" class="control-group hidden">
+                    <button id="notEventBtn" class="btn btn-danger">Pas un événement</button>
+                    <button id="widerBtn" class="btn btn-secondary">Plus large</button>
+                    <button id="acceptPreBtn" class="btn btn-accent">Accepter pré-label</button>
+                </div>
+
+                <!-- Pass 1 specific controls -->
+                <div id="pass1Controls" class="control-group">
+                    <button id="nextEpochBtn" class="btn btn-primary">Époque suivante ⏭</button>
+                </div>
+
+                <!-- Mode Switch -->
+                <div class="control-group">
+                    <button id="switchPassBtn" class="btn btn-mode">Changer de passe ⇄</button>
+                </div>
             </div>
-            <div>
-                <button id="clear-all-saccades">Clear All Saccades</button>
+        </footer>
+
+        <!-- Hidden file inputs -->
+        <input type="file" id="fileInput" accept=".csv,.mat,.txt,.dat" style="display: none;">
+        <input type="file" id="filePairInput" accept=".csv,.txt,.dat" multiple style="display: none;">
+
+        <!-- Load Dialog Modal -->
+        <div id="loadModal" class="modal hidden">
+            <div class="modal-card">
+                <h3>Charger une trace oculaire</h3>
+                <div class="form-row">
+                    <label>Fichier sélectionné :</label>
+                    <span id="modalFileName" class="filename-display">-</span>
+                </div>
+                <div class="form-row">
+                    <label for="rateInput">Fréquence d'échantillonnage (Hz) :</label>
+                    <input type="number" id="rateInput" value="1000" min="50" max="2000" step="50">
+                </div>
+                <div class="form-row">
+                    <label for="scaleInput">Degrés par unité :</label>
+                    <input type="number" id="scaleInput" value="1.0" min="0.001" max="100" step="0.1">
+                </div>
+                <div class="form-row">
+                    <label for="prelabelerSelect">Pré-étiqueteur automatique :</label>
+                    <select id="prelabelerSelect">
+                        <option value="hmm">HMM (accéléré)</option>
+                        <option value="velocity">Seuil de vitesse (30°/s)</option>
+                        <option value="none">Aucun</option>
+                    </select>
+                </div>
+                <div class="modal-buttons">
+                    <button id="modalCancelBtn" class="btn btn-secondary">Annuler</button>
+                    <button id="modalConfirmBtn" class="btn btn-primary">Valider & Charger</button>
+                </div>
             </div>
-            <hr>
-            <div>
-                <button id="save-labels-button">Save Labels</button>
-            </div>
-            <!-- Other controls will go here -->
         </div>
-        <div id="plots-area">
-            <div id="position-plot"></div>
-            <div id="velocity-plot"></div>
+
+        <!-- Metrics Modal -->
+        <div id="metricsModal" class="modal hidden">
+            <div class="modal-card modal-large">
+                <div class="modal-header">
+                    <h3>Courbes d'apprentissage (Test Set)</h3>
+                    <button id="metricsCloseBtn" class="btn-close">&times;</button>
+                </div>
+                <div class="metrics-canvas-wrap">
+                    <canvas id="metricsCanvas"></canvas>
+                </div>
+                <div id="metricsLegend" class="metrics-legend">
+                    <span class="legend-item"><span class="dot sac"></span> Saccade (Bleu)</span>
+                    <span class="legend-item"><span class="dot blink"></span> Clignement (Rouge)</span>
+                    <span class="legend-item"><span class="line conv"></span> Seuil de convergence</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Convergence Alert Modal -->
+        <div id="alertModal" class="modal hidden">
+            <div class="modal-card">
+                <h3 class="success-title">🎉 Convergence atteinte !</h3>
+                <p id="alertMessage">Le modèle on-device a convergé vers votre ground truth.</p>
+                <div class="modal-buttons">
+                    <button id="alertOkBtn" class="btn btn-primary">Continuer</button>
+                </div>
+            </div>
         </div>
     </div>
+
     <script src="app.js"></script>
 </body>
 </html>

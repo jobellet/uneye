@@ -1,121 +1,391 @@
-/* Basic Reset / Box Sizing */
+/* ==========================================================================
+   U'n'Eye — Offline Saccade Labeler (Web / iPad / Touch)
+   Clean, modern, Tufte-inspired scientific UI optimized for iPad M1 & touch.
+   ========================================================================== */
+
+:root {
+    --primary: #1565C0;
+    --primary-dark: #0D47A1;
+    --danger: #C62828;
+    --danger-dark: #B71C1C;
+    --speed: #7E57C2;
+    --accent: #E65100;
+    --success: #2E7D32;
+    --warning: #F57F17;
+    --bg-main: #FAFAFA;
+    --bg-card: #FFFFFF;
+    --border: #E0E0E0;
+    --text-main: #212121;
+    --text-muted: #616161;
+    --font-stack: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-    line-height: 1.6;
-    background-color: #f4f7f6;
-    color: #333;
-    padding: 10px;
-}
-
-#app-container {
-    display: flex;
-    flex-direction: row; /* Arrange controls and plots side-by-side */
-    gap: 20px; /* Space between controls panel and plots area */
-    min-height: calc(100vh - 20px); /* Full viewport height minus body padding */
-}
-
-#controls-panel {
-    flex-basis: 280px; /* Fixed width for the control panel */
-    flex-shrink: 0; /* Prevent shrinking */
-    padding: 15px;
-    background-color: #ffffff;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    overflow-y: auto; /* Allow scrolling if content overflows */
-}
-
-#controls-panel > div {
-    margin-bottom: 15px; /* Space between control groups */
-}
-#controls-panel > hr {
-    margin-top: 15px;
-    margin-bottom: 15px;
-    border: 0;
-    border-top: 1px solid #eee;
-}
-
-
-#controls-panel label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: bold;
-    color: #555;
-}
-
-#controls-panel input[type="file"],
-#controls-panel input[type="number"],
-#controls-panel button {
+html, body {
     width: 100%;
-    padding: 10px;
-    margin-top: 5px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 1em;
+    height: 100%;
+    overflow: hidden;
+    font-family: var(--font-stack);
+    background-color: var(--bg-main);
+    color: var(--text-main);
 }
 
-#controls-panel input[type="checkbox"] {
-    margin-right: 5px;
-    vertical-align: middle;
-}
-#controls-panel label[for="enable-smoothing"] {
-    display: inline; /* Keep checkbox and label on same line */
-    font-weight: normal;
-}
-
-
-#controls-panel button {
-    background-color: #007bff;
-    color: white;
-    border: none;
-    cursor: pointer;
-    transition: background-color 0.2s ease-in-out;
-}
-
-#controls-panel button:hover {
-    background-color: #0056b3;
-}
-
-#controls-panel button#mark-saccade-mode.active { /* Special style for active marking mode */
-    background-color: #28a745; /* Green */
-}
-#controls-panel button#mark-saccade-mode.active:hover {
-    background-color: #1e7e34;
-}
-
-
-#plots-area {
-    flex-grow: 1; /* Take remaining space */
+#app {
     display: flex;
-    flex-direction: column; /* Stack plots vertically */
-    gap: 15px; /* Space between plots */
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
 }
 
-#plots-area .js-plotly-plot,
-#plots-area .plotly { /* Target Plotly's generated elements */
-    width: 100% !important; /* Ensure plots take full width of their container */
-    height: 100% !important; /* Ensure plots take full height */
+/* --- Top Navigation Bar --- */
+#top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background-color: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    min-height: 56px;
+    gap: 12px;
+    z-index: 10;
 }
 
+.bar-left, .bar-center, .bar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
 
-#position-plot,
-#velocity-plot {
-    flex-grow: 1; /* Each plot takes equal available space in the column */
-    background-color: #ffffff;
+.app-logo {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--primary);
+}
+
+/* Badges */
+.badge {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+}
+
+.pass-badge {
+    background-color: #E3F2FD;
+    color: var(--primary);
+    border: 1px solid #BBDEFB;
+}
+
+.conv-badge {
+    background-color: #FFF8E1;
+    color: #F57F17;
+    border: 1px solid #FFE082;
+}
+
+.conv-badge.converged {
+    background-color: #E8F5E9;
+    color: var(--success);
+    border: 1px solid #A5D6A7;
+}
+
+/* Buttons */
+.btn {
+    height: 44px;
+    padding: 0 16px;
     border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    min-height: 300px; /* Minimum height for visibility */
+    border: 1px solid transparent;
+    font-size: 0.95rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease-in-out;
 }
 
-/* Style for the horizontal rule if used for visual separation */
-hr {
-    border: 0;
-    height: 1px;
-    background-color: #ddd;
-    margin: 20px 0;
+.btn:active {
+    transform: scale(0.97);
+}
+
+.btn-primary {
+    background-color: var(--primary);
+    color: #FFF;
+}
+.btn-primary:active { background-color: var(--primary-dark); }
+
+.btn-secondary {
+    background-color: #F5F5F5;
+    color: var(--text-main);
+    border-color: var(--border);
+}
+.btn-secondary:active { background-color: #EEEEEE; }
+
+.btn-accent {
+    background-color: #FFF3E0;
+    color: var(--accent);
+    border-color: #FFE0B2;
+}
+
+.btn-train {
+    background-color: #7B1FA2;
+    color: #FFF;
+}
+
+.btn-success {
+    background-color: var(--success);
+    color: #FFF;
+}
+
+.btn-danger {
+    background-color: #FFEBEE;
+    color: var(--danger);
+    border-color: #FFCDD2;
+}
+
+.btn-class {
+    min-width: 130px;
+    color: #FFF;
+}
+.btn-class.saccade {
+    background-color: var(--primary);
+}
+.btn-class.blink {
+    background-color: var(--danger);
+}
+
+.btn-nav {
+    background-color: #ECEFF1;
+    color: #37474F;
+    border-color: #CFD8DC;
+}
+
+.btn-mode {
+    background-color: #E8EAF6;
+    color: #283593;
+    border-color: #C5CAE9;
+}
+
+/* --- Main Canvas Container --- */
+#canvas-container {
+    flex: 1;
+    position: relative;
+    width: 100%;
+    background-color: #FFFFFF;
+    overflow: hidden;
+    touch-action: none; /* Crucial for multi-touch on iPad */
+}
+
+#traceCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.loupe-info {
+    position: absolute;
+    pointer-events: none;
+    background: rgba(33, 33, 33, 0.85);
+    color: #FFF;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    z-index: 5;
+}
+
+/* --- Bottom Status & Control Bar --- */
+#bottom-bar {
+    background-color: var(--bg-card);
+    border-top: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 90px;
+    z-index: 10;
+}
+
+.status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.train-idle { color: var(--text-muted); }
+.train-active { color: #7B1FA2; font-weight: 600; }
+.train-done { color: var(--success); font-weight: 600; }
+
+.controls-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* --- Modals --- */
+.modal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.modal-card {
+    background: #FFFFFF;
+    border-radius: 12px;
+    padding: 24px;
+    width: 90%;
+    max-width: 480px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.modal-large {
+    max-width: 800px;
+    width: 95%;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.btn-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.form-row label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.form-row input, .form-row select {
+    height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 1rem;
+    font-family: inherit;
+    background: #FAFAFA;
+}
+
+.filename-display {
+    font-family: monospace;
+    color: var(--primary);
+    font-size: 0.95rem;
+}
+
+.modal-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.success-title {
+    color: var(--success);
+}
+
+/* Metrics modal canvas */
+.metrics-canvas-wrap {
+    width: 100%;
+    height: 320px;
+    background: #FAFAFA;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+#metricsCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.metrics-legend {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+.dot.sac { background-color: var(--primary); }
+.dot.blink { background-color: var(--danger); }
+.line.conv {
+    width: 16px;
+    height: 2px;
+    border-top: 2px dashed var(--success);
+}
+
+/* Utilities */
+.hidden {
+    display: none !important;
+}
+
+/* Responsiveness for iPad Portrait / Small screens */
+@media (max-width: 900px) {
+    #top-bar {
+        flex-wrap: wrap;
+        padding: 8px 12px;
+    }
+    .btn {
+        padding: 0 12px;
+        font-size: 0.88rem;
+    }
+    .controls-row {
+        flex-wrap: wrap;
+    }
 }
