@@ -217,6 +217,10 @@
 
         updateStatus();
         render();
+        requestAnimationFrame(() => {
+            syncCanvasDimensions();
+            render();
+        });
     }
 
     // --- Savitzky-Golay (Cubic, scipy mode="interp") Kinematics Engine ---
@@ -398,6 +402,10 @@
         setPass(PASS_ONE);
         updateStatus();
         render();
+        requestAnimationFrame(() => {
+            syncCanvasDimensions();
+            render();
+        });
     }
 
     // --- Adaptive High-Accuracy Pre-labeler (Savitzky-Golay + Engbert-Kliegl λ·σ) ---
@@ -545,6 +553,10 @@
         }
         updateStatus();
         render();
+        requestAnimationFrame(() => {
+            syncCanvasDimensions();
+            render();
+        });
     }
 
     function addPointMark(trialIdx, at, cls) {
@@ -696,6 +708,10 @@
         }
         updateStatus();
         render();
+        requestAnimationFrame(() => {
+            syncCanvasDimensions();
+            render();
+        });
     }
 
     function buildRefineQueue() {
@@ -811,16 +827,34 @@
     }
 
     // --- High-DPI Canvas Rendering Engine ---
-    function resizeCanvas() {
+    function syncCanvasDimensions() {
         const dpr = window.devicePixelRatio || 1;
         const rect = elements.canvasContainer.getBoundingClientRect();
-        elements.canvas.width = Math.floor(rect.width * dpr);
-        elements.canvas.height = Math.floor(rect.height * dpr);
+        const targetW = Math.max(1, Math.floor(rect.width * dpr));
+        const targetH = Math.max(1, Math.floor(rect.height * dpr));
+
+        if (elements.canvas.width !== targetW || elements.canvas.height !== targetH) {
+            elements.canvas.width = targetW;
+            elements.canvas.height = targetH;
+        }
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.scale(dpr, dpr);
+        return { width: rect.width, height: rect.height };
+    }
+
+    function resizeCanvas() {
+        syncCanvasDimensions();
         render();
     }
 
     window.addEventListener('resize', resizeCanvas);
+    if (window.ResizeObserver) {
+        const ro = new ResizeObserver(() => {
+            syncCanvasDimensions();
+            render();
+        });
+        ro.observe(elements.canvasContainer);
+    }
 
     function sampleToPx(s, width) {
         if (state.toSample <= state.fromSample) return 0;
@@ -834,11 +868,10 @@
     }
 
     function render() {
-        const rect = elements.canvasContainer.getBoundingClientRect();
-        const width = rect.width;
-        const height = rect.height;
+        const { width, height } = syncCanvasDimensions();
         if (width <= 0 || height <= 0) return;
 
+        // Clear entire viewport cleanly
         ctx.clearRect(0, 0, width, height);
 
         const tr = state.trials[state.currentTrialIdx];
@@ -847,18 +880,20 @@
             return;
         }
 
-        // Layout lanes (3 lanes: X, Y, Speed)
-        const laneH = height / 3;
-        const xLane = { top: 0, bottom: laneH };
-        const yLane = { top: laneH, bottom: 2 * laneH };
-        const speedLane = { top: 2 * laneH, bottom: height };
+        // Layout lanes (3 lanes: X, Y, Speed) with top margin in Pass 2 so header never collides with X trace
+        const topMargin = state.pass === PASS_TWO ? 26 : 0;
+        const availH = height - topMargin;
+        const laneH = availH / 3;
+        const xLane = { top: topMargin, bottom: topMargin + laneH };
+        const yLane = { top: topMargin + laneH, bottom: topMargin + 2 * laneH };
+        const speedLane = { top: topMargin + 2 * laneH, bottom: height };
 
         // 1. Draw Grid & Lane Dividers
         ctx.strokeStyle = '#ECEFF1';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(0, laneH); ctx.lineTo(width, laneH);
-        ctx.moveTo(0, 2 * laneH); ctx.lineTo(width, 2 * laneH);
+        ctx.moveTo(0, xLane.bottom); ctx.lineTo(width, xLane.bottom);
+        ctx.moveTo(0, yLane.bottom); ctx.lineTo(width, yLane.bottom);
         ctx.stroke();
 
         // 2. Draw Label Bands & Reviewed Regions in Background
@@ -1369,6 +1404,10 @@
         }
         updateStatus();
         render();
+        requestAnimationFrame(() => {
+            syncCanvasDimensions();
+            render();
+        });
     }
 
     // --- UI Updates & Convergence Logic ---

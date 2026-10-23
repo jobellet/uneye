@@ -224,11 +224,11 @@ html, body {
 #bottom-bar {
     background-color: var(--bg-card);
     border-top: 1px solid var(--border);
-    padding: 10px 16px;
+    padding: 8px 12px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    min-height: 90px;
+    gap: 6px;
+    flex-shrink: 0;
     z-index: 10;
 }
 
@@ -236,7 +236,9 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 0.9rem;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    font-size: 0.85rem;
     color: var(--text-muted);
     font-weight: 500;
 }
@@ -249,13 +251,15 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 6px 8px;
 }
 
 .control-group {
     display: flex;
     align-items: center;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 6px;
 }
 
 /* --- Modals --- */
