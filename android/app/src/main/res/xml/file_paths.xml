@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Phase 5: paths the FileProvider may share with other apps (export sheet).
+     The exports are written under the app's external files dir. -->
+<paths>
+    <external-files-path name="exports" path="." />
+    <files-path name="app_files" path="." />
+</paths>

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/rate_hz" />
+
+    <EditText
+        android:id="@+id/rateEdit"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:inputType="numberDecimal"
+        android:text="1000"
+        android:textSize="18sp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/deg_per_unit" />
+
+    <EditText
+        android:id="@+id/unitEdit"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:inputType="numberDecimal"
+        android:text="1.0"
+        android:textSize="18sp" />
+
+    <CheckBox
+        android:id="@+id/estimateBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/estimate_scale" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/prelabeler" />
+
+    <Spinner
+        android:id="@+id/preSpinner"
+        android:layout_width="match_parent"
+        android:layout_height="56dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/model_path" />
+
+    <EditText
+        android:id="@+id/modelEdit"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:hint="@string/model_path_hint"
+        android:inputType="text"
+        android:textSize="16sp" />
+
+</LinearLayout>

@@ -1,25 +1,27 @@
 
 
-![alt text](https://raw.githubusercontent.com/berenslab/uneye/master/logo.jpeg?token=AcbomYi_PxlSK_8ua5zR3m60F5DL5UQJks5bPkWrwA%3D%3D)
+![U'n'Eye](logo.jpeg)
 
 # U'n'Eye: Deep neural network for the detection of saccades and other eye movements
 Bellet et al. 2018, **Human-level saccade and microsaccade detection with deep neural networks**
 ********
 > **Transparency (2026):** the real-time C++ engine (`cpp/`), the safety guard, the fault-injection and timing tools, the
-> label-free study (`free_saccade/`) and the documents in `docs/` were written with AI assistance (Claude Code). Every number in
+> label-free study (`free_saccade/`), web labeling app, Android offline labeler, and documentation in `docs/` were written with AI assistance. Every number in
 > those documents comes from a script in this repository that was run; see `docs/ROADMAP.md` and `docs/safety/hazards.md`.
 
 ## Latest Updates:
-- [web service](http://uneye.berenslab.org) available
-- kernel size of convolution and max pooling operations now definable by the user (thus longer or shorter time windows will be seen by U'n'Eye)
+- **[Web Labeling Interface](https://jobellet.github.io/uneye/)**: Client-side touch-optimized web application for tablets (e.g. iPad Air / iPad Pro with Apple Pencil / touch) and desktops. Implements two-pass labeling with automated event centering ([-50 ms, +50 ms]) and local export.
+- **[Android Offline Labeler](android/README.md)**: Native Android app with two-pass saccade and blink labeling, background on-device U-Net training, convergence detection via bootstrap confidence intervals, and UnEye CSV / MATLAB v5 export for Google Colab.
+- Configurable convolution and max pooling kernel sizes (`ks`, `mp`) to adjust the network's temporal receptive field.
 
 ------------------
 
-### <i>Train your own eye movement detection network in 10 minutes and label your data. [Get started now](#installation)</i>
-### <i>Try out our [web service](http://uneye.berenslab.org).
+### <i>Train your own eye movement detection network in 10 minutes and label your data on tablet, mobile, or desktop. [Get started now](#installation)</i>
+### <i>Try the [client-side web labeler](https://jobellet.github.io/uneye/) or the [Android app](android/README.md).</i>
 
 ## <a name="content">Content</a> 
 - [Overview](#overview)
+- [Web & Mobile Labeling Tools](#labeling-apps)
 - [Installation](#installation)
 - [Usage](#usage)
 	- [jupyter notebook](#jupyter)
@@ -28,17 +30,36 @@ Bellet et al. 2018, **Human-level saccade and microsaccade detection with deep n
 - [Further use](#further)
 
 ## <a name="overview">Overview</a> 
-U'n'Eye is a Python 3 package, that uses [PyTorch](http://pytorch.org) for the neural network implementation.
+U'n'Eye is a Python 3 package that uses [PyTorch](http://pytorch.org) for neural network training and inference.
 
 For a description of the algorithm, see [our preprint](https://www.biorxiv.org/content/early/2018/06/29/359018).
-For any questions regarding this repository please contact [marie-estelle.bellet@student.uni-tuebingen.de](mailto:marie-estelle.bellet@student.uni-tuebingen.de) or [philipp.berens@uni-tuebingen.de](philipp.berens@uni-tuebingen.de).
 
-We provide network weights that were learned on different datasets, described in [the paper](https://www.biorxiv.org/content/early/2018/06/29/359018). The weights can be found in the folder **training** and the corresponding datasets will be available in the folder **data** after publication. For instructions on how to use pretrained networks, please see below.
+Pretrained network weights learned on diverse datasets (described in the paper) are available in the folder **training**, and corresponding datasets are provided in the folder **data**.
 
-**Users can train their own network to obtain optimal performance.** Please see the module description below and the example jupyter notebook **UnEye.ipynb** for instructions.
+**Users can easily train their own network on custom datasets to obtain optimal performance.** Please see the module description below and the example jupyter notebook **UnEye.ipynb** for instructions.
 
-We provide a [docker](http://docker.com) container for platform-independent use that is recommended for Windows users.
+We provide a [docker](http://docker.com) container for platform-independent use.
 
+[back to start](#content)
+
+## <a name="labeling-apps">Web & Mobile Labeling Tools</a>
+
+### 1. Web Labeling Interface (iPad / Tablets / Desktops)
+- **URL**: [https://jobellet.github.io/uneye/](https://jobellet.github.io/uneye/)
+- Runs 100% client-side in the browser (HTML5 Canvas + vanilla JS).
+- Two-pass labeling workflow:
+  - **Pass 1**: Rapid 1-tap event marking with auto-advance.
+  - **Pass 2**: Automated event centering with a strict `[-50 ms, +50 ms]` window around putative onsets/offsets (`[onset - 50ms, offset + 50ms]`) for fine-grained boundary refinement.
+- Touch- and stylus-friendly controls for Apple Pencil / iPad.
+- Export to UnEye CSV conventions (`L.csv`, `X.csv`, `Y.csv`).
+
+### 2. Android Offline Labeler
+- **Directory**: [`android/`](android/README.md)
+- Native Android application (Kotlin + C++ JNI via `liboffline_session.so`).
+- Real-time on-device U-Net background training via Android `WorkManager`.
+- Automated convergence detection using bootstrap confidence intervals (flags when gains over rounds stabilize).
+- Export to UnEye CSV and MATLAB v5 (`.mat` with `X`, `Y`, `Sacc`) formats for training on Google Colab or desktop workstations.
+- See the [Android documentation](android/README.md) for architecture, build instructions, and benchmark figures.
 
 [back to start](#content)
 
@@ -53,15 +74,12 @@ In the following, all commands written in boxes need to be entered into your ter
 	python3 --version
 If not found, download and install python3 [here](https://www.python.org/downloads/release/python-364/). 
 
-**2)** Clone the GitHub repository into your local directory and make sure you are using pip3 (see below for possible error message on Mac).
+**2)** Clone the repository into your local directory:
 
-	git clone https://github.com/berenslab/uneye
-	alias pip=pip3
-**3)** Now the last step: go into the new uneye folder in your GitHub folder and install the package. In this example on a Mac, the GitHub folder is located in the Documents folder of the user. Find out the absolute path of that folder and type the following:
+	git clone https://github.com/jobellet/uneye.git
+	cd uneye
 
-	cd /Users/yourusername/Documents/GitHub/uneye
-	
-Then, use one of the following commands for installation, depending on your platform:
+**3)** Install the package and dependencies:
 
 For Mac:
 
