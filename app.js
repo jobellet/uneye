@@ -70,6 +70,19 @@
         convergenceAlertShown: false,
         testTrials: new Set(),
         reviewedAtLastTraining: 0.0,
+
+        // Signal Filtering & Preprocessing (Savitzky-Golay + Adaptive Engbert/HMM Threshold)
+        filterSettings: {
+            enabled: true,
+            filterType: 'savitzky_golay',
+            windowMs: 21,
+            polyOrder: 3,
+            lambda: 6.0,          // adaptive threshold multiplier (Engbert-Kliegl lambda)
+            minPeakVel: 50.0,      // min peak speed (deg/s) to reject noise
+            minAmplitude: 0.20,    // min amplitude (deg)
+            minDurationMs: 10.0,   // min duration (ms)
+            mergeGapMs: 20.0       // merge events closer than this gap
+        },
     };
 
     // --- DOM Elements ---
@@ -82,6 +95,7 @@
         undoBtn: document.getElementById('undoBtn'),
         demoBtn: document.getElementById('demoBtn'),
         openBtn: document.getElementById('openBtn'),
+        filterBtn: document.getElementById('filterBtn'),
         metricsBtn: document.getElementById('metricsBtn'),
         trainNowBtn: document.getElementById('trainNowBtn'),
         exportBtn: document.getElementById('exportBtn'),
@@ -106,9 +120,19 @@
         modalFileName: document.getElementById('modalFileName'),
         rateInput: document.getElementById('rateInput'),
         scaleInput: document.getElementById('scaleInput'),
+        modalSgWindow: document.getElementById('modalSgWindow'),
         prelabelerSelect: document.getElementById('prelabelerSelect'),
         modalConfirmBtn: document.getElementById('modalConfirmBtn'),
         modalCancelBtn: document.getElementById('modalCancelBtn'),
+        filterModal: document.getElementById('filterModal'),
+        filterCloseBtn: document.getElementById('filterCloseBtn'),
+        filterCancelBtn: document.getElementById('filterCancelBtn'),
+        filterApplyBtn: document.getElementById('filterApplyBtn'),
+        enableSg: document.getElementById('enableSg'),
+        sgWindowMs: document.getElementById('sgWindowMs'),
+        lambdaThreshold: document.getElementById('lambdaThreshold'),
+        minPeakVel: document.getElementById('minPeakVel'),
+        minAmplitude: document.getElementById('minAmplitude'),
         metricsModal: document.getElementById('metricsModal'),
         metricsCanvas: document.getElementById('metricsCanvas'),
         metricsCloseBtn: document.getElementById('metricsCloseBtn'),
@@ -195,6 +219,144 @@
         render();
     }
 
+    // --- Savitzky-Golay (Cubic, scipy mode="interp") Kinematics Engine ---
+    function makeSavitzkyGolay(w) {
+        const h = Math.floor((w - 1) / 2);
+        const n = 4; // cubic fit: 1, x, x^2, x^3
+        const VtV = Array.from({ length: 4 }, () => new Float64Array(4));
+        const V = Array.from({ length: w }, () => new Float64Array(4));
+        for (let i = 0; i < w; i++) {
+            const x = i - h;
+            V[i][0] = 1; V[i][1] = x; V[i][2] = x * x; V[i][3] = x * x * x;
+        }
+        for (let a = 0; a < n; a++) {
+            for (let b = 0; b < n; b++) {
+                for (let i = 0; i < w; i++) VtV[a][b] += V[i][a] * V[i][b];
+            }
+        }
+        const M = Array.from({ length: 4 }, (v, r) => {
+            const row = new Float64Array(8);
+            for (let c = 0; c < 4; c++) row[c] = VtV[r][c];
+            row[4 + r] = 1.0;
+            return row;
+        });
+        for (let c = 0; c < n; c++) {
+            let p = c;
+            for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+            const tmp = M[c]; M[c] = M[p]; M[p] = tmp;
+            const d = M[c][c];
+            for (let k = 0; k < 8; k++) M[c][k] /= d;
+            for (let r = 0; r < n; r++) {
+                if (r !== c) {
+                    const f = M[r][c];
+                    for (let k = 0; k < 8; k++) M[r][k] -= f * M[c][k];
+                }
+            }
+        }
+        const P = Array.from({ length: 4 }, () => new Float64Array(w));
+        for (let a = 0; a < n; a++) {
+            for (let i = 0; i < w; i++) {
+                let acc = 0;
+                for (let b = 0; b < n; b++) acc += M[a][4 + b] * V[i][b];
+                P[a][i] = acc;
+            }
+        }
+        return { w, h, P };
+    }
+
+    function applySavitzkyGolay(data, valid, fs, sg) {
+        const T = data.length;
+        const smooth = new Float32Array(T), d1 = new Float32Array(T), d2 = new Float32Array(T);
+        const w = sg.w, h = sg.h;
+        const y = new Float64Array(T);
+        let lastVal = 0.0;
+        for (let i = 0; i < T; i++) {
+            if (valid[i] && !isNaN(data[i]) && isFinite(data[i])) { lastVal = data[i]; y[i] = data[i]; }
+            else y[i] = lastVal;
+        }
+        for (let i = 0; i < T; i++) {
+            const s0 = Math.min(Math.max(i - h, 0), T - w);
+            let c0 = 0, c1 = 0, c2 = 0, c3 = 0;
+            for (let j = 0; j < w; j++) {
+                const val = y[s0 + j];
+                c0 += sg.P[0][j] * val; c1 += sg.P[1][j] * val; c2 += sg.P[2][j] * val; c3 += sg.P[3][j] * val;
+            }
+            const u = i - (s0 + h);
+            smooth[i] = c0 + c1 * u + c2 * u * u + c3 * u * u * u;
+            d1[i] = (c1 + 2 * c2 * u + 3 * c3 * u * u) * fs;
+            d2[i] = (2 * c2 + 6 * c3 * u) * fs * fs;
+        }
+        return { smooth, d1, d2 };
+    }
+
+    function computeRobustSigma(arr, valid) {
+        const vals = [];
+        for (let i = 0; i < arr.length; i++) if (valid[i]) vals.push(Math.abs(arr[i]));
+        if (vals.length === 0) return 1.0;
+        vals.sort((a, b) => a - b);
+        const med = vals[Math.floor(vals.length / 2)];
+        return Math.max(med / 0.6745, 1e-4);
+    }
+
+    function preprocessTrial(trialIdx) {
+        const tr = state.trials[trialIdx];
+        if (!tr) return;
+        const n = tr.x.length;
+        const fs = state.rateHz;
+        const cfg = state.filterSettings;
+
+        if (!cfg.enabled) {
+            tr.smoothX = tr.x;
+            tr.smoothY = tr.y;
+            tr.vx = new Float32Array(n);
+            tr.vy = new Float32Array(n);
+            tr.speed = new Float32Array(n);
+            tr.tangentialAccel = new Float32Array(n);
+            const dt = 1.0 / fs;
+            for (let i = 1; i < n; i++) {
+                if (tr.valid[i] && tr.valid[i - 1]) {
+                    const dx = (tr.x[i] - tr.x[i - 1]) * state.degPerUnit;
+                    const dy = (tr.y[i] - tr.y[i - 1]) * state.degPerUnit;
+                    tr.vx[i] = dx / dt; tr.vy[i] = dy / dt;
+                    tr.speed[i] = Math.sqrt(dx * dx + dy * dy) / dt;
+                }
+            }
+            return;
+        }
+
+        let w = Math.round(cfg.windowMs * fs / 1000.0);
+        if (w % 2 === 0) w += 1;
+        w = Math.max(5, Math.min(w, Math.floor((n / 2) * 2 - 1)));
+
+        const sg = makeSavitzkyGolay(w);
+        const rx = applySavitzkyGolay(tr.x, tr.valid, fs, sg);
+        const ry = applySavitzkyGolay(tr.y, tr.valid, fs, sg);
+
+        tr.smoothX = rx.smooth;
+        tr.smoothY = ry.smooth;
+        tr.vx = new Float32Array(n);
+        tr.vy = new Float32Array(n);
+        tr.speed = new Float32Array(n);
+        tr.tangentialAccel = new Float32Array(n);
+
+        const sc = state.degPerUnit;
+        for (let i = 0; i < n; i++) {
+            if (tr.valid[i]) {
+                const vx = rx.d1[i] * sc, vy = ry.d1[i] * sc;
+                const sp = Math.sqrt(vx * vx + vy * vy);
+                tr.vx[i] = vx; tr.vy[i] = vy; tr.speed[i] = sp;
+                const ax = rx.d2[i] * sc, ay = ry.d2[i] * sc;
+                tr.tangentialAccel[i] = sp > 1e-6 ? (vx * ax + vy * ay) / sp : 0;
+            }
+        }
+    }
+
+    function preprocessAllTrials() {
+        for (let t = 0; t < state.trials.length; t++) {
+            preprocessTrial(t);
+        }
+    }
+
     // --- Dataset Loader & State Initializer ---
     function loadDataset(trials, rateHz = 1000.0, degPerUnit = 1.0, prelabeler = 'hmm') {
         state.trials = trials;
@@ -220,7 +382,10 @@
             state.testTrials.add(t);
         }
 
-        // Run Pre-labeler
+        // 1. Preprocess all trials with Savitzky-Golay
+        preprocessAllTrials();
+
+        // 2. Run Pre-labeler
         for (let t = 0; t < n; t++) {
             runPrelabeler(t, prelabeler);
         }
@@ -235,12 +400,17 @@
         render();
     }
 
-    // --- Fast Pre-labeler (Velocity + Invalid sample blink runs) ---
+    // --- Adaptive High-Accuracy Pre-labeler (Savitzky-Golay + Engbert-Kliegl λ·σ) ---
     function runPrelabeler(trialIdx, mode) {
-        if (mode === 'none') return;
+        if (mode === 'none') {
+            state.prelabels[trialIdx] = [];
+            return;
+        }
         const tr = state.trials[trialIdx];
         if (!tr) return;
         const n = tr.x.length;
+        const fs = state.rateHz;
+        const cfg = state.filterSettings;
         const pre = [];
 
         // 1. Detect Blinks from invalid runs (>= 3 samples)
@@ -258,36 +428,92 @@
             }
         }
 
-        // 2. Velocity-based Saccade Detection
-        const vel = new Float32Array(n);
-        const dt = 1.0 / state.rateHz;
-        for (let i = 1; i < n; i++) {
-            if (tr.valid[i] && tr.valid[i - 1]) {
-                const dx = (tr.x[i] - tr.x[i - 1]) * state.degPerUnit;
-                const dy = (tr.y[i] - tr.y[i - 1]) * state.degPerUnit;
-                vel[i] = Math.sqrt(dx * dx + dy * dy) / dt;
-            } else {
-                vel[i] = 0;
+        // Ensure kinematics are computed
+        if (!tr.speed) preprocessTrial(trialIdx);
+
+        // 2. Robust Noise Estimation on Detrended/Smoothed Velocity (matching C++ dsp.hpp)
+        const sigmaX = computeRobustSigma(tr.vx, tr.valid);
+        const sigmaY = computeRobustSigma(tr.vy, tr.valid);
+        const noiseSigma = Math.max(0.5 * (sigmaX + sigmaY), 0.5);
+        tr.noiseSigma = noiseSigma;
+
+        // Adaptive threshold = lambda * sigma_v (e.g. 6.0 * sigma)
+        const threshold = Math.max(cfg.lambda * noiseSigma, 12.0);
+        tr.currentThreshold = threshold;
+
+        const minDurSamples = Math.max(4, Math.round(cfg.minDurationMs * fs / 1000.0));
+        const mergeGapSamples = Math.round(cfg.mergeGapMs * fs / 1000.0);
+
+        // Find candidate runs above threshold
+        const rawSaccades = [];
+        let sacStart = -1;
+        for (let i = 0; i <= n; i++) {
+            const isSac = i < n && tr.valid[i] && tr.speed[i] >= threshold;
+            if (isSac && sacStart === -1) {
+                sacStart = i;
+            } else if (!isSac && sacStart !== -1) {
+                const sacEnd = i - 1;
+                if (sacEnd - sacStart + 1 >= minDurSamples) {
+                    rawSaccades.push({ start: sacStart, end: sacEnd });
+                }
+                sacStart = -1;
             }
         }
 
-        // Thresholding
-        const threshold = 30.0; // 30 deg/sec
-        let sacStart = -1;
-        for (let i = 0; i <= n; i++) {
-            const isSaccade = i < n && vel[i] >= threshold && tr.valid[i];
-            if (isSaccade && sacStart === -1) {
-                sacStart = Math.max(0, i - 2); // padding onset
-            } else if (!isSaccade && sacStart !== -1) {
-                const sacEnd = Math.min(n - 1, i + 2);
-                if (sacEnd - sacStart >= 8) { // min 8ms duration
-                    // Ensure not overlapping a blink
-                    const overlapsBlink = pre.some(b => b.cls === CLS_BLINK && !(sacEnd < b.onset || sacStart > b.offset));
-                    if (!overlapsBlink) {
-                        pre.push({ onset: sacStart, offset: sacEnd, cls: CLS_SACCADE });
-                    }
-                }
-                sacStart = -1;
+        // Merge adjacent sub-events separated by less than mergeGap (e.g. 20 ms)
+        const merged = [];
+        for (const ev of rawSaccades) {
+            if (merged.length > 0 && ev.start - merged[merged.length - 1].end <= mergeGapSamples) {
+                merged[merged.length - 1].end = ev.end;
+            } else {
+                merged.push({ start: ev.start, end: ev.end });
+            }
+        }
+
+        // Refine boundaries and apply high-precision acceptance criteria
+        const marginSamples = Math.round(25.0 * fs / 1000.0);
+        const floorSpeed = 2.5 * noiseSigma;
+
+        for (const ev of merged) {
+            const s = ev.start, e = ev.end;
+
+            // Find peak speed in candidate
+            let pk = s, maxSp = tr.speed[s];
+            for (let t = s; t <= e; t++) {
+                if (tr.speed[t] > maxSp) { maxSp = tr.speed[t]; pk = t; }
+            }
+
+            // CRITERION 1: High Accuracy filter — must reach minPeakVel (50 deg/s) & 1.5 * threshold
+            if (maxSp < Math.max(cfg.minPeakVel, 1.5 * threshold)) continue;
+
+            // Boundary refinement via tangential acceleration zero-crossing
+            const lo = Math.max(0, s - marginSamples);
+            const hi = Math.min(n - 1, e + marginSamples);
+
+            // Onset: walk backward while acceleration > 0
+            let j = pk - 1;
+            while (j >= lo && tr.tangentialAccel[j] > 0) j--;
+            const on = Math.min(Math.max(lo, j + 1), pk);
+
+            // Offset: walk forward until speed drops below floor, then zero crossing
+            let lastAbove = pk;
+            for (let t = pk; t <= hi; t++) {
+                if (tr.speed[t] >= floorSpeed) lastAbove = t;
+            }
+            j = lastAbove;
+            while (j <= hi && tr.tangentialAccel[j] < 0) j++;
+            const off = Math.min(hi, Math.max(pk, j));
+
+            // CRITERION 2: Minimum Amplitude (rejects tremor / drift jitters)
+            const dx = (tr.smoothX[off] - tr.smoothX[on]) * state.degPerUnit;
+            const dy = (tr.smoothY[off] - tr.smoothY[on]) * state.degPerUnit;
+            const amp = Math.sqrt(dx * dx + dy * dy);
+            if (amp < cfg.minAmplitude) continue;
+
+            // CRITERION 3: Do not overlap blinks
+            const overlapsBlink = pre.some(b => b.cls === CLS_BLINK && !(off < b.onset || on > b.offset));
+            if (!overlapsBlink) {
+                pre.push({ onset: on, offset: off, cls: CLS_SACCADE });
             }
         }
 
@@ -638,9 +864,11 @@
         // 2. Draw Label Bands & Reviewed Regions in Background
         drawLabelBands(width, height);
 
-        // 3. Draw Position X & Y Traces
-        drawTrace(tr.x, tr.valid, xLane, '#1E88E5', 'Position X (°)', width);
-        drawTrace(tr.y, tr.valid, yLane, '#43A047', 'Position Y (°)', width);
+        // 3. Draw Position X & Y Traces (Smooth if filter enabled)
+        const traceX = (state.filterSettings.enabled && tr.smoothX) ? tr.smoothX : tr.x;
+        const traceY = (state.filterSettings.enabled && tr.smoothY) ? tr.smoothY : tr.y;
+        drawTrace(traceX, tr.valid, xLane, '#1E88E5', 'Position X (°)', width);
+        drawTrace(traceY, tr.valid, yLane, '#43A047', 'Position Y (°)', width);
 
         // 4. Draw Velocity Lane
         drawVelocity(tr, speedLane, '#7E57C2', 'Velocity (°/s)', width);
@@ -768,17 +996,11 @@
         const h = bottom - top;
         const from = state.fromSample;
         const to = state.toSample;
-        const dt = 1.0 / state.rateHz;
 
         let maxSpeed = 50.0;
         const speeds = new Float32Array(to - from + 1);
         for (let i = from; i <= to && i < tr.x.length; i++) {
-            let s = 0;
-            if (i > 0 && tr.valid[i] && tr.valid[i - 1]) {
-                const dx = (tr.x[i] - tr.x[i - 1]) * state.degPerUnit;
-                const dy = (tr.y[i] - tr.y[i - 1]) * state.degPerUnit;
-                s = Math.sqrt(dx * dx + dy * dy) / dt;
-            }
+            const s = (tr.speed && tr.speed.length > i) ? tr.speed[i] : 0.0;
             speeds[i - from] = s;
             if (s > maxSpeed) maxSpeed = s;
         }
@@ -790,6 +1012,24 @@
         ctx.fillText(title, 16, lane.top + 24);
         ctx.textAlign = 'right';
         ctx.fillText(`${Math.round(maxSpeed)} °/s`, w - 16, lane.top + 24);
+
+        // Draw Adaptive Saccade Threshold Line if active
+        if (tr.currentThreshold && tr.currentThreshold > 0 && tr.currentThreshold <= maxSpeed) {
+            const threshY = bottom - (tr.currentThreshold / maxSpeed) * h;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(211, 47, 47, 0.65)';
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath();
+            ctx.moveTo(16, threshY);
+            ctx.lineTo(w - 16, threshY);
+            ctx.stroke();
+            ctx.fillStyle = '#D32F2F';
+            ctx.font = '500 11px var(--font-stack)';
+            ctx.textAlign = 'right';
+            ctx.fillText(`Threshold: ${tr.currentThreshold.toFixed(1)}°/s (${state.filterSettings.lambda}σ)`, w - 16, threshY - 4);
+            ctx.restore();
+        }
 
         ctx.strokeStyle = color;
         ctx.lineWidth = 2.0;
@@ -1358,6 +1598,9 @@
         const rate = parseFloat(elements.rateInput.value) || 1000.0;
         const scale = parseFloat(elements.scaleInput.value) || 1.0;
         const prelabeler = elements.prelabelerSelect.value;
+        const sgVal = parseInt(elements.modalSgWindow.value, 10);
+        state.filterSettings.enabled = sgVal > 0;
+        if (sgVal > 0) state.filterSettings.windowMs = sgVal;
 
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -1396,23 +1639,67 @@
         reader.readAsText(file);
     }
 
-    // --- CSV Export (UnEye convention) ---
-    function exportLabels() {
+    // --- CSV & Preprocessing Config Export (UnEye convention) ---
+    function exportDataset() {
         if (state.trials.length === 0) return;
-        let csvContent = "";
-        for (let t = 0; t < state.trials.length; t++) {
-            const lab = state.labels[t];
-            csvContent += Array.from(lab).join(",") + "\n";
-        }
+        const nTrials = state.trials.length;
 
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        // 1. Labels CSV (L.csv) - NaN for unreviewed samples
+        let lCsv = "";
+        for (let t = 0; t < nTrials; t++) {
+            const row = [];
+            const lab = state.labels[t];
+            const rev = state.reviewedRanges[t];
+            for (let i = 0; i < lab.length; i++) {
+                const isRev = rev.some(([s, e]) => s <= i && i <= e);
+                row.push(isRev ? lab[i] : "nan");
+            }
+            lCsv += row.join(",") + "\n";
+        }
+        downloadFile("L.csv", lCsv, "text/csv");
+
+        // 2. Positions CSV (X.csv, Y.csv) - smooth positions for reproducibility
+        let xCsv = "", yCsv = "";
+        for (let t = 0; t < nTrials; t++) {
+            const tr = state.trials[t];
+            const px = (state.filterSettings.enabled && tr.smoothX) ? tr.smoothX : tr.x;
+            const py = (state.filterSettings.enabled && tr.smoothY) ? tr.smoothY : tr.y;
+            xCsv += Array.from(px).map(v => isNaN(v) ? "nan" : v.toFixed(5)).join(",") + "\n";
+            yCsv += Array.from(py).map(v => isNaN(v) ? "nan" : v.toFixed(5)).join(",") + "\n";
+        }
+        downloadFile("X.csv", xCsv, "text/csv");
+        downloadFile("Y.csv", yCsv, "text/csv");
+
+        // 3. Preprocessing Config & Python Code (uneye_config.json)
+        const cfg = {
+            uneye_version: "1.0",
+            export_date: new Date().toISOString(),
+            sampling_rate_hz: state.rateHz,
+            deg_per_unit: state.degPerUnit,
+            preprocessing: {
+                filter: state.filterSettings.enabled ? state.filterSettings.filterType : "none",
+                savgol_window_ms: state.filterSettings.windowMs,
+                savgol_window_samples: Math.round(state.filterSettings.windowMs * state.rateHz / 1000.0) | 1,
+                savgol_poly_order: state.filterSettings.polyOrder,
+                adaptive_threshold_lambda: state.filterSettings.lambda,
+                min_peak_velocity_deg_s: state.filterSettings.minPeakVel,
+                min_amplitude_deg: state.filterSettings.minAmplitude
+            },
+            python_preprocessing_code: `# Preprocessing pipeline matching web labeler:\nimport scipy.signal\nimport numpy as np\n\n# Apply Savitzky-Golay filter to test traces before passing to UnEye:\nwindow_samples = int(round(${state.filterSettings.windowMs} * ${state.rateHz} / 1000.0)) | 1\nX_clean = scipy.signal.savgol_filter(X, window_length=window_samples, polyorder=3, mode="interp", axis=-1)\nY_clean = scipy.signal.savgol_filter(Y, window_length=window_samples, polyorder=3, mode="interp", axis=-1)\n`
+        };
+        downloadFile("uneye_config.json", JSON.stringify(cfg, null, 2), "application/json");
+    }
+
+    function downloadFile(filename, content, type) {
+        const blob = new Blob([content], { type: `${type};charset=utf-8;` });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.setAttribute("href", url);
-        link.setAttribute("download", "L.csv");
+        link.setAttribute("download", filename);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
     // --- Setup UI Listeners ---
@@ -1443,7 +1730,53 @@
         elements.metricsCloseBtn.addEventListener('click', () => elements.metricsModal.classList.add('hidden'));
 
         elements.trainNowBtn.addEventListener('click', runTrainingRound);
-        elements.exportBtn.addEventListener('click', exportLabels);
+        elements.exportBtn.addEventListener('click', exportDataset);
+
+        // Filter Settings Dialog
+        elements.filterBtn.addEventListener('click', () => {
+            elements.enableSg.checked = state.filterSettings.enabled;
+            elements.sgWindowMs.value = String(state.filterSettings.windowMs);
+            elements.lambdaThreshold.value = String(state.filterSettings.lambda);
+            elements.minPeakVel.value = String(state.filterSettings.minPeakVel);
+            elements.minAmplitude.value = String(state.filterSettings.minAmplitude);
+            elements.filterModal.classList.remove('hidden');
+        });
+
+        elements.filterCloseBtn.addEventListener('click', () => elements.filterModal.classList.add('hidden'));
+        elements.filterCancelBtn.addEventListener('click', () => elements.filterModal.classList.add('hidden'));
+
+        elements.filterApplyBtn.addEventListener('click', () => {
+            state.filterSettings.enabled = elements.enableSg.checked;
+            state.filterSettings.windowMs = parseInt(elements.sgWindowMs.value, 10) || 21;
+            state.filterSettings.lambda = parseFloat(elements.lambdaThreshold.value) || 6.0;
+            state.filterSettings.minPeakVel = parseFloat(elements.minPeakVel.value) || 50.0;
+            state.filterSettings.minAmplitude = parseFloat(elements.minAmplitude.value) || 0.20;
+
+            // Re-preprocess all trials and re-run prelabeling
+            preprocessAllTrials();
+            for (let t = 0; t < state.trials.length; t++) {
+                runPrelabeler(t, 'hmm');
+            }
+
+            // If in Pass 1, refresh pointMarks so user immediately sees the refined events
+            if (state.pass === PASS_ONE) {
+                for (let t = 0; t < state.trials.length; t++) {
+                    state.pointMarks[t] = [];
+                    for (const p of state.prelabels[t]) {
+                        state.pointMarks[t].push({ at: Math.round((p.onset + p.offset) / 2), cls: p.cls });
+                    }
+                    state.pointMarks[t].sort((a, b) => a.at - b.at);
+                }
+            } else if (state.pass === PASS_TWO) {
+                buildRefineQueue();
+                state.refineIdx = 0;
+                focusCurrentMark();
+            }
+
+            elements.filterModal.classList.add('hidden');
+            updateStatus();
+            render();
+        });
 
         elements.alertOkBtn.addEventListener('click', () => elements.alertModal.classList.add('hidden'));
 

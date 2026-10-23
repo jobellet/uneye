@@ -30,6 +30,7 @@
             <div class="bar-right">
                 <button id="demoBtn" class="btn btn-accent">⚡ Demo</button>
                 <button id="openBtn" class="btn btn-secondary">Open…</button>
+                <button id="filterBtn" class="btn btn-secondary">⚙ Filter</button>
                 <button id="metricsBtn" class="btn btn-secondary">Metrics</button>
                 <button id="trainNowBtn" class="btn btn-train">Train</button>
                 <button id="exportBtn" class="btn btn-success">Export</button>
@@ -101,16 +102,67 @@
                     <input type="number" id="scaleInput" value="1.0" min="0.001" max="100" step="0.1">
                 </div>
                 <div class="form-row">
+                    <label for="modalSgWindow">Savitzky-Golay filter:</label>
+                    <select id="modalSgWindow">
+                        <option value="21" selected>21 ms (standard / recommended)</option>
+                        <option value="11">11 ms (light)</option>
+                        <option value="31">31 ms (medium)</option>
+                        <option value="51">51 ms (strong)</option>
+                        <option value="0">Off (raw trace)</option>
+                    </select>
+                </div>
+                <div class="form-row">
                     <label for="prelabelerSelect">Automatic pre-labeler:</label>
                     <select id="prelabelerSelect">
-                        <option value="hmm">HMM (fast)</option>
-                        <option value="velocity">Velocity threshold (30°/s)</option>
-                        <option value="none">None</option>
+                        <option value="hmm" selected>Adaptive HMM / Engbert (λ·σ, High Accuracy)</option>
+                        <option value="none">None (manual)</option>
                     </select>
                 </div>
                 <div class="modal-buttons">
                     <button id="modalCancelBtn" class="btn btn-secondary">Cancel</button>
                     <button id="modalConfirmBtn" class="btn btn-primary">Load Trace</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter & Detection Settings Modal -->
+        <div id="filterModal" class="modal hidden">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Signal Filter & Detection Settings</h3>
+                    <button id="filterCloseBtn" class="btn-close">&times;</button>
+                </div>
+                <div class="form-row">
+                    <label for="enableSg">Savitzky-Golay Smoothing:</label>
+                    <input type="checkbox" id="enableSg" checked>
+                </div>
+                <div class="form-row">
+                    <label for="sgWindowMs">Window Length (ms):</label>
+                    <select id="sgWindowMs">
+                        <option value="11">11 ms (light smoothing)</option>
+                        <option value="21" selected>21 ms (standard / recommended)</option>
+                        <option value="31">31 ms (medium smoothing)</option>
+                        <option value="51">51 ms (heavy smoothing)</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="lambdaThreshold">Adaptive Saccade Threshold (λ · σ):</label>
+                    <input type="number" id="lambdaThreshold" value="6.0" min="3.0" max="15.0" step="0.5">
+                </div>
+                <div class="form-help">
+                    <span>Higher λ (e.g. 6.0–8.0) prioritizes accuracy by rejecting noise; lower λ increases recall.</span>
+                </div>
+                <div class="form-row">
+                    <label for="minPeakVel">Min Peak Velocity (°/s):</label>
+                    <input type="number" id="minPeakVel" value="50" min="15" max="250" step="5">
+                </div>
+                <div class="form-row">
+                    <label for="minAmplitude">Min Saccade Amplitude (°):</label>
+                    <input type="number" id="minAmplitude" value="0.20" min="0.05" max="2.0" step="0.05">
+                </div>
+                <div class="modal-buttons">
+                    <button id="filterCancelBtn" class="btn btn-secondary">Cancel</button>
+                    <button id="filterApplyBtn" class="btn btn-primary">Apply & Re-detect</button>
                 </div>
             </div>
         </div>
