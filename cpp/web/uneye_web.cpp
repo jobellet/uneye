@@ -203,8 +203,17 @@ public:
 
         ntr_ = ds_.train.n;
         nval_ = ds_.val.n;
-        iters_ = std::min(10, ntr_);
-        batch_ = std::max(1, ntr_ / iters_);
+        // 10 iterations per epoch as in the Python / native trainer, but never more than kMaxBatch windows per
+        // batch: a batch of ntr/10 windows grew with the amount of labels and ran the 512 MB wasm heap out of
+        // memory (RuntimeError: Aborted) from about 1600 training windows on.
+        constexpr int kMaxBatch = 32;
+        if (ntr_ <= 10 * kMaxBatch) {
+            iters_ = std::min(10, ntr_);
+            batch_ = std::max(1, ntr_ / iters_);
+        } else {
+            iters_ = (ntr_ + kMaxBatch - 1) / kMaxBatch;
+            batch_ = (ntr_ + iters_ - 1) / iters_;
+        }
         rng_.seed(cfg_.seed + 17);
         order_.resize(ntr_);
         std::iota(order_.begin(), order_.end(), 0);

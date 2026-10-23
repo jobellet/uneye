@@ -25,6 +25,9 @@
             <div class="bar-center">
                 <button id="classToggle" class="btn btn-class saccade">Saccade</button>
                 <button id="undoBtn" class="btn btn-secondary">Undo</button>
+                <button id="eraserBtn" class="btn btn-secondary" title="Eraser: drag between two times to delete every saccade, blink, mark and pre-label in between (a tap erases around the tap)">Eraser</button>
+                <button id="saveLabelsBtn" class="btn btn-secondary" title="Save my manual labels (marks, refined events, windows seen) to a file I can reload later">Save labels</button>
+                <button id="loadLabelsBtn" class="btn btn-secondary" title="Reload labels saved earlier (open the same eye traces first)">Load labels</button>
             </div>
 
             <div class="bar-right">
@@ -62,7 +65,7 @@
 
             <div class="controls-row">
                 <!-- Navigation -->
-                <div class="control-group">
+                <div id="trialNavGroup" class="control-group">
                     <button id="prevTrialBtn" class="btn btn-nav">◀ Prev Trial</button>
                     <button id="nextTrialBtn" class="btn btn-nav">Next Trial ▶</button>
                 </div>
@@ -79,7 +82,10 @@
 
                 <!-- Pass 1 specific controls -->
                 <div id="pass1Controls" class="control-group">
-                    <button id="nextEpochBtn" class="btn btn-primary">Next Epoch ⏭</button>
+                    <label for="winMsInput" class="win-label">Window (ms)</label>
+                    <input type="number" id="winMsInput" class="win-input" value="500" min="20" max="60000" step="50" title="Width of the visible window in pass 1; the next window overlaps by 10 %">
+                    <button id="prevEpochBtn" class="btn btn-nav">◀ Prev window</button>
+                    <button id="nextEpochBtn" class="btn btn-primary">Next window ▶</button>
                 </div>
 
                 <!-- Mode Switch -->
@@ -92,6 +98,7 @@
         <!-- Hidden file inputs -->
         <!-- no "accept" filter on purpose: iPadOS greys out every file whose extension has no registered type (.npz, .h5, .mat), so they could not be picked; the extension is checked in app.js -->
         <input type="file" id="fileInput" style="display: none;">
+        <input type="file" id="labelsInput" style="display: none;">
         <input type="file" id="filePairInput" accept=".csv,.txt,.dat" multiple style="display: none;">
 
         <!-- Load Dialog Modal -->
@@ -109,6 +116,10 @@
                 <div class="form-row">
                     <label for="scaleInput">Degrees per unit:</label>
                     <input type="number" id="scaleInput" value="1.0" min="0.001" max="100" step="0.1">
+                </div>
+                <div class="form-row">
+                    <label for="modalWinMs">Visible window in pass 1 (ms):</label>
+                    <input type="number" id="modalWinMs" value="500" min="20" max="60000" step="50">
                 </div>
                 <div class="form-row">
                     <label for="modalSgWindow">Savitzky-Golay filter:</label>
@@ -213,8 +224,8 @@
         </div>
     </div>
 
-    <script src="formats.js?v=2"></script>
-    <script src="app.js?v=2"></script>
+    <script src="formats.js?v=3"></script>
+    <script src="app.js?v=3"></script>
 <script>
     if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {

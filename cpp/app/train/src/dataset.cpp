@@ -26,10 +26,11 @@ Dataset make_dataset(const std::vector<TrainTrace>& traces, const TrainConfig& c
     const double lim = cfg.max_speed_deg_s > 0 ? cfg.max_speed_deg_s / d.rate_hz : 0.0;     // deg per sample (the trace positions are in degrees at this point)
     struct Win { const TrainTrace* tr; size_t s; };
     std::vector<Win> wins;
+    size_t used = 0;                                                                    // samples taken so far, over ALL traces (the budget is a total)
     for (auto it = traces.rbegin(); it != traces.rend(); ++it) {                       // most recent first, at most max_seconds_of_data
         const auto& tr = *it; if (tr.x.size() != tr.y.size() || tr.x.size() != tr.labels.size()) { d.error = "trace arrays differ in length"; return d; }
         const size_t budget = size_t(std::max(0.0, cfg.max_seconds_of_data) * tr.rate_hz);
-        size_t used = 0; size_t end = tr.x.size();
+        size_t end = tr.x.size();
         while (end >= size_t(W) && used + W <= budget + W / 2) { wins.push_back({&tr, end - W}); end -= W; used += W; }
         if (used >= budget) break;
     }

@@ -63,6 +63,16 @@
         showLoupe: false,
         lastTapTime: 0,
         lastTapSample: -1,
+        eraser: false,              // eraser tool: drag between two times to delete every event / mark / pre-label in between
+        gestureMulti: false,        // a second finger touched during this gesture (pinch zoom)
+        gestureIgnored: false,      // the gesture started inside the refractory period after a pinch
+        lastMultiTouchEnd: 0,
+
+        // Pass 1 viewing windows: winMs wide, 10 % overlap, one after the other inside each trial
+        winMs: 500,
+        winIdx: 0,
+        // scanWins[trial] = [from, to] windows that were displayed in pass 1 and left with Next (the only data that can ever be trained on)
+        scanWins: [],
 
         // Convergence & Training History
         convergenceHistory: [],
@@ -99,6 +109,14 @@
         convergenceBadge: document.getElementById('convergenceBadge'),
         classToggle: document.getElementById('classToggle'),
         undoBtn: document.getElementById('undoBtn'),
+        eraserBtn: document.getElementById('eraserBtn'),
+        saveLabelsBtn: document.getElementById('saveLabelsBtn'),
+        loadLabelsBtn: document.getElementById('loadLabelsBtn'),
+        labelsInput: document.getElementById('labelsInput'),
+        winMsInput: document.getElementById('winMsInput'),
+        modalWinMs: document.getElementById('modalWinMs'),
+        prevEpochBtn: document.getElementById('prevEpochBtn'),
+        trialNavGroup: document.getElementById('trialNavGroup'),
         demoBtn: document.getElementById('demoBtn'),
         openBtn: document.getElementById('openBtn'),
         filterBtn: document.getElementById('filterBtn'),
@@ -383,20 +401,75 @@
     function trialLenOf(i) { const t = state.trials[i]; return t ? t.x.length : 1000; }
     function curLen() { return trialLenOf(state.currentTrialIdx); }
 
+    const TOUCH_REFRACTORY_MS = 600;   // after a pinch zoom, touches within this time are not marks
+    const WIN_OVERLAP = 0.10;
+
+    function winSamples() { return Math.max(20, Math.round(state.winMs * state.rateHz / 1000)); }
+    function winStep() { return Math.max(1, Math.round(winSamples() * (1 - WIN_OVERLAP))); }
+    function numWindows(t) { const n = trialLenOf(t), w = winSamples(); return n <= w ? 1 : Math.ceil((n - w) / winStep()) + 1; }
+    function gridWindow(t, k) {
+        const n = trialLenOf(t), w = winSamples();
+        if (n <= w) return [0, n - 1];
+        let from = k * winStep();
+        if (from + w > n) from = n - w;
+        return [from, from + w - 1];
+    }
+    function applyGridWindow() {
+        state.winIdx = Math.max(0, Math.min(state.winIdx, numWindows(state.currentTrialIdx) - 1));
+        const [f, e] = gridWindow(state.currentTrialIdx, state.winIdx);
+        state.fromSample = f; state.toSample = e;
+    }
+
+    // Reviewed = displayed in pass 1 (scanned) AND without a point mark still waiting for its refinement in pass 2.
+    function recomputeReviewed(t, notify) {
+        const marks = state.pointMarks[t] || [];
+        const ok = (state.scanWins[t] || []).filter(([f, e]) => !marks.some(m => m.at >= f && m.at <= e)).map(r => r.slice()).sort((a, b) => a[0] - b[0]);
+        const merged = [];
+        for (const r of ok) {
+            const prev = merged[merged.length - 1];
+            if (prev && r[0] <= prev[1] + 1) prev[1] = Math.max(prev[1], r[1]); else merged.push(r);
+        }
+        state.reviewedRanges[t] = merged;
+        if (notify) {
+            saveToIndexedDB();
+            const totRev = totalReviewedSeconds();
+            if (!state.isTraining && (totRev - state.reviewedAtLastTraining >= 20.0)) runTrainingRound();
+        }
+    }
+
+    function scanCurrentWindow() {
+        const t = state.currentTrialIdx;
+        if (state.pass !== PASS_ONE || !state.scanWins[t]) return;
+        let [f, e] = gridWindow(t, state.winIdx);
+        if (state.fromSample <= f && state.toSample >= e) { f = Math.max(0, state.fromSample); e = Math.min(trialLenOf(t) - 1, state.toSample); }   // zoomed out: all of it was seen
+        if (!state.scanWins[t].some(r => r[0] === f && r[1] === e)) state.scanWins[t].push([f, e]);
+        recomputeReviewed(t, true);
+    }
+
+    function inScanned(t, at) { return (state.scanWins[t] || []).some(([f, e]) => at >= f && at <= e); }
+
+    // labels of the human only: the refined events. Automatic pre-labels never count as ground truth.
+    function humanLabels(t) {
+        const out = new Uint8Array(trialLenOf(t));
+        for (const e of state.expertEvents[t]) for (let i = e.onset; i <= e.offset && i < out.length; i++) out[i] = e.cls;
+        return out;
+    }
+
     function loadDataset(trials, rateHz = 1000.0, degPerUnit = 1.0, prelabeler = 'hmm') {
         state.trials = trials;
         state.rateHz = rateHz;
         state.degPerUnit = degPerUnit;
         state.currentTrialIdx = 0;
         state.trialLength = trials[0] ? trials[0].x.length : 1000;
-        state.fromSample = 0;
-        state.toSample = Math.min(curLen() - 1, 499);
+        state.winIdx = 0;
+        applyGridWindow();
 
         // Clear and initialize per-trial annotation arrays
         const n = trials.length;
         state.labels = Array.from({ length: n }, (_, t) => new Uint8Array(trials[t].x.length));      // trials may have different durations
         state.trialNames = trials.map(t => t.name || '');
         state.reviewedRanges = Array.from({ length: n }, () => []);
+        state.scanWins = Array.from({ length: n }, () => []);
         state.pointMarks = Array.from({ length: n }, () => []);
         state.expertEvents = Array.from({ length: n }, () => []);
         state.prelabels = Array.from({ length: n }, () => []);
@@ -556,7 +629,6 @@
         state.undoStack[trialIdx].push({
             pointMarks: JSON.parse(JSON.stringify(state.pointMarks[trialIdx])),
             expertEvents: JSON.parse(JSON.stringify(state.expertEvents[trialIdx])),
-            reviewedRanges: JSON.parse(JSON.stringify(state.reviewedRanges[trialIdx])),
         });
         if (state.undoStack[trialIdx].length > 30) state.undoStack[trialIdx].shift();
     }
@@ -567,7 +639,7 @@
         const prev = stack.pop();
         state.pointMarks[trialIdx] = prev.pointMarks;
         state.expertEvents[trialIdx] = prev.expertEvents;
-        state.reviewedRanges[trialIdx] = prev.reviewedRanges;
+        recomputeReviewed(trialIdx, false);
         syncRenderedLabels(trialIdx);
         if (state.pass === PASS_TWO) {
             buildRefineQueue();
@@ -587,6 +659,7 @@
         const existingIdx = state.pointMarks[trialIdx].findIndex(m => Math.abs(m.at - at) <= 15);
         if (existingIdx !== -1) {
             state.pointMarks[trialIdx].splice(existingIdx, 1);
+            recomputeReviewed(trialIdx, false);
             return;
         }
 
@@ -601,6 +674,7 @@
 
         state.pointMarks[trialIdx].push({ at: snappedAt, cls });
         state.pointMarks[trialIdx].sort((a, b) => a.at - b.at);
+        recomputeReviewed(trialIdx, false);
     }
 
     function refineMark(trialIdx, at, onset, offset, cls) {
@@ -623,7 +697,26 @@
         state.expertEvents[trialIdx].sort((a, b) => a.onset - b.onset);
 
         syncRenderedLabels(trialIdx);
+        recomputeReviewed(trialIdx, true);
         return true;
+    }
+
+    // Eraser: removes every event (saccade or blink), point mark and automatic pre-label that overlaps [a, b]
+    function eraseRange(trialIdx, a, b) {
+        saveUndo(trialIdx);
+        if (a > b) { const x = a; a = b; b = x; }
+        state.pointMarks[trialIdx] = state.pointMarks[trialIdx].filter(m => m.at < a || m.at > b);
+        state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => e.offset < a || e.onset > b);
+        state.prelabels[trialIdx] = state.prelabels[trialIdx].filter(p => p.offset < a || p.onset > b);
+        syncRenderedLabels(trialIdx);
+        recomputeReviewed(trialIdx, true);
+        if (state.pass === PASS_TWO) {
+            buildRefineQueue();
+            state.refineIdx = Math.min(state.refineIdx, state.refineQueue.length);
+            focusCurrentMark();
+        }
+        updateStatus();
+        render();
     }
 
     function deleteMarkAt(trialIdx, at) {
@@ -631,42 +724,7 @@
         state.pointMarks[trialIdx] = state.pointMarks[trialIdx].filter(m => Math.abs(m.at - at) > 25);
         state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => !(e.onset <= at && at <= e.offset));
         syncRenderedLabels(trialIdx);
-    }
-
-    function markEpochReviewed(trialIdx, from, to) {
-        // Reviewed only if scanned AND all point marks in window are refined
-        const hasUnrefined = state.pointMarks[trialIdx].some(m => m.at >= from && m.at <= to);
-        if (hasUnrefined) return;
-
-        from = Math.max(0, from);
-        to = Math.min(trialLenOf(trialIdx) - 1, to);
-
-        // Merge contiguous ranges
-        const current = state.reviewedRanges[trialIdx];
-        current.push([from, to]);
-        current.sort((a, b) => a[0] - b[0]);
-
-        const merged = [];
-        for (const r of current) {
-            if (merged.length === 0) {
-                merged.push([...r]);
-            } else {
-                const prev = merged[merged.length - 1];
-                if (r[0] <= prev[1] + 1) {
-                    prev[1] = Math.max(prev[1], r[1]);
-                } else {
-                    merged.push([...r]);
-                }
-            }
-        }
-        state.reviewedRanges[trialIdx] = merged;
-        syncRenderedLabels(trialIdx);
-        saveToIndexedDB();
-        // Auto-train after every 20s of newly reviewed data
-        const totRev = totalReviewedSeconds();
-        if (!state.isTraining && (totRev - state.reviewedAtLastTraining >= 20.0)) {
-            runTrainingRound();
-        }
+        recomputeReviewed(trialIdx, true);
     }
 
     function syncRenderedLabels(trialIdx) {
@@ -712,6 +770,7 @@
 
     // --- Pass Switching & Navigation ---
     function setPass(newPass) {
+        if (state.pass === PASS_ONE && newPass === PASS_TWO) scanCurrentWindow();     // the window on screen has been seen
         state.pass = newPass;
         state.zoomMultiplier = 1.0;
         if (newPass === PASS_ONE) {
@@ -720,15 +779,17 @@
             elements.pass1Controls.classList.remove('hidden');
             elements.pass2Controls.classList.add('hidden');
             elements.classToggle.classList.remove('hidden');
+            if (elements.trialNavGroup) elements.trialNavGroup.classList.remove('hidden');
 
-            state.fromSample = 0;
-            state.toSample = Math.min(curLen() - 1, 499);
+            state.winIdx = Math.floor(Math.max(0, state.fromSample) / winStep());
+            applyGridWindow();
         } else {
             elements.passIndicator.textContent = "Pass 2: Refine (Onset / Offset)";
             elements.passIndicator.className = "badge pass-badge pass-two";
             elements.pass1Controls.classList.add('hidden');
             elements.pass2Controls.classList.remove('hidden');
             elements.classToggle.classList.add('hidden');
+            if (elements.trialNavGroup) elements.trialNavGroup.classList.add('hidden');
 
             buildRefineQueue();
             state.refineIdx = 0;
@@ -742,17 +803,18 @@
         });
     }
 
-    function buildRefineQueue() {
-        const trialIdx = state.currentTrialIdx;
-        // If no point marks in current trial, but prelabels exist, seed marks from prelabels
-        if (state.pointMarks[trialIdx].length === 0 && state.prelabels[trialIdx].length > 0) {
-            for (const p of state.prelabels[trialIdx]) {
-                const mid = Math.round((p.onset + p.offset) / 2);
-                state.pointMarks[trialIdx].push({ at: mid, cls: p.cls });
-            }
-        }
-        state.pointMarks[trialIdx].sort((a, b) => a.at - b.at);
-        state.refineQueue = [...state.pointMarks[trialIdx]];
+    // Pass 2 only shows the marks that lie in windows displayed in pass 1
+    function trialQueue(t) { return state.pointMarks[t].filter(m => inScanned(t, m.at)).sort((a, b) => a.at - b.at); }
+    function buildRefineQueue() { state.refineQueue = trialQueue(state.currentTrialIdx); }
+    function findTrialWithEvents(from, dir) {
+        for (let t = from + dir; t >= 0 && t < state.trials.length; t += dir) if (trialQueue(t).length > 0) return t;
+        return -1;
+    }
+    function enterTrialForRefine(t, atEnd) {
+        state.currentTrialIdx = t;
+        state.zoomMultiplier = 1.0;
+        buildRefineQueue();
+        state.refineIdx = atEnd ? Math.max(0, state.refineQueue.length - 1) : 0;
     }
 
     /**
@@ -763,6 +825,8 @@
     function focusCurrentMark() {
         const trialIdx = state.currentTrialIdx;
         if (state.refineQueue.length === 0) {
+            const nt = findTrialWithEvents(trialIdx, 1);
+            if (nt >= 0) { enterTrialForRefine(nt, false); focusCurrentMark(); return; }
             state.currentMarkAt = -1;
             state.currentPutativeOnset = -1;
             state.currentPutativeOffset = -1;
@@ -774,9 +838,10 @@
 
         if (state.refineIdx < 0) state.refineIdx = 0;
         if (state.refineIdx >= state.refineQueue.length) {
-            // All events in this trial reviewed
+            // end of this trial: the next event is the first one of the next trial that has some
+            const nt = findTrialWithEvents(trialIdx, 1);
+            if (nt >= 0) { enterTrialForRefine(nt, false); focusCurrentMark(); return; }
             state.currentMarkAt = -1;
-            markEpochReviewed(trialIdx, 0, trialLenOf(trialIdx) - 1);
             if (elements.eventCounterBadge) {
                 elements.eventCounterBadge.textContent = "All Reviewed ✓";
             }
@@ -833,25 +898,36 @@
         }
     }
 
+    // Pass 1: next window of the same trial (10 % overlap), then the first window of the next trial
     function nextEpoch() {
-        const span = state.toSample - state.fromSample + 1;
-        const nextFrom = state.toSample + 1;
-        if (nextFrom < curLen()) {
-            markEpochReviewed(state.currentTrialIdx, state.fromSample, state.toSample);
-            state.fromSample = nextFrom;
-            state.toSample = Math.min(curLen() - 1, nextFrom + span - 1);
-            updateStatus();
-            render();
-        } else {
-            // Reached end of trial, offer next trial
-            if (state.currentTrialIdx < state.trials.length - 1) {
-                state.currentTrialIdx++;
-                state.fromSample = 0;
-                state.toSample = Math.min(curLen() - 1, span - 1);
-                updateStatus();
-                render();
-            }
-        }
+        scanCurrentWindow();
+        const t = state.currentTrialIdx;
+        if (state.winIdx + 1 < numWindows(t)) state.winIdx++;
+        else if (t < state.trials.length - 1) { state.currentTrialIdx++; state.winIdx = 0; }
+        state.zoomMultiplier = 1.0;
+        applyGridWindow();
+        updateStatus();
+        render();
+    }
+
+    function prevEpoch() {
+        const t = state.currentTrialIdx;
+        if (state.winIdx > 0) state.winIdx--;
+        else if (t > 0) { state.currentTrialIdx--; state.winIdx = numWindows(t - 1) - 1; }
+        else return;
+        applyGridWindow();
+        updateStatus();
+        render();
+    }
+
+    function setWinMs(ms) {
+        if (!(ms >= 20)) return;
+        state.winMs = ms;
+        state.winIdx = Math.floor(Math.max(0, state.fromSample) / winStep());
+        try { localStorage.setItem('uneye_winMs', String(ms)); } catch (e) { }
+        if (elements.winMsInput) elements.winMsInput.value = String(ms);
+        if (state.pass === PASS_ONE) { applyGridWindow(); render(); }
+        updateStatus();
     }
 
     // --- High-DPI Canvas Rendering Engine ---
@@ -1007,6 +1083,9 @@
         const pad = Math.max(0.2, (maxV - minV) * 0.15);
         minV -= pad;
         maxV += pad;
+        // never zoom in beyond 1 degree (plus a margin), so that the 1-degree scale bar always fits
+        const oneDeg = 1 / (state.degPerUnit || 1);
+        if (maxV - minV < 1.25 * oneDeg) { const c = (minV + maxV) / 2; minV = c - 0.625 * oneDeg; maxV = c + 0.625 * oneDeg; }
 
         // Title and floating scale bar
         ctx.fillStyle = '#78909C';
@@ -1014,7 +1093,19 @@
         ctx.textAlign = 'left';
         ctx.fillText(title, 16, lane.top + 24);
         ctx.textAlign = 'right';
-        ctx.fillText(`${(maxV - minV).toFixed(1)}°`, w - 16, lane.top + 24);
+        ctx.fillText(`${((maxV - minV) * state.degPerUnit).toFixed(1)}°`, w - 16, lane.top + 24);
+
+        // 1-degree scale bar at the right edge: tells a microsaccade from a large saccade whatever the automatic zoom
+        const barH = (oneDeg / (maxV - minV)) * h;
+        ctx.strokeStyle = '#000000';
+        ctx.fillStyle = '#000000';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(w - 10, bottom); ctx.lineTo(w - 10, bottom - barH);
+        ctx.stroke();
+        ctx.font = '600 12px var(--font-stack)';
+        ctx.textAlign = 'right';
+        ctx.fillText('1°', w - 17, bottom - barH / 2 + 4);
 
         // Draw Line Trace
         ctx.strokeStyle = color;
@@ -1160,10 +1251,10 @@
             const x2 = sampleToPx(offset, w);
             const color = state.activeClass === CLS_SACCADE ? '#1565C0' : '#C62828';
 
-            ctx.fillStyle = state.activeClass === CLS_SACCADE ? 'rgba(21, 101, 192, 0.22)' : 'rgba(198, 40, 40, 0.22)';
+            ctx.fillStyle = state.eraser ? 'rgba(0, 0, 0, 0.22)' : (state.activeClass === CLS_SACCADE ? 'rgba(21, 101, 192, 0.22)' : 'rgba(198, 40, 40, 0.22)');
             ctx.fillRect(x1, 0, Math.max(2, x2 - x1), h);
 
-            ctx.strokeStyle = color;
+            ctx.strokeStyle = state.eraser ? '#000000' : color;
             ctx.lineWidth = 2.5;
             ctx.strokeRect(x1, 6, Math.max(4, x2 - x1), h - 12);
         }
@@ -1281,7 +1372,12 @@
 
         canvas.addEventListener('pointerdown', (e) => {
             canvas.setPointerCapture(e.pointerId);
+            if (state.pointers.size === 0) {
+                state.gestureMulti = false;
+                state.gestureIgnored = (performance.now() - state.lastMultiTouchEnd) < TOUCH_REFRACTORY_MS;   // refractory period after a pinch
+            }
             state.pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+            if (state.pointers.size >= 2) state.gestureMulti = true;
 
             if (state.pointers.size === 1) {
                 // 1 Finger / Apple Pencil
@@ -1308,7 +1404,7 @@
             if (!state.pointers.has(e.pointerId)) return;
             state.pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
 
-            if (state.pointers.size === 1 && state.pointerDown) {
+            if (state.pointers.size === 1 && state.pointerDown && !state.gestureMulti && !state.gestureIgnored) {
                 state.dragPointerPos = { x: e.offsetX, y: e.offsetY };
                 const sample = pxToSample(e.offsetX, canvas.clientWidth);
                 state.dragCurrentSample = sample;
@@ -1339,12 +1435,20 @@
         canvas.addEventListener('pointerup', (e) => {
             canvas.releasePointerCapture(e.pointerId);
             state.pointers.delete(e.pointerId);
+            if (state.gestureMulti) state.lastMultiTouchEnd = performance.now();
 
             if (state.pointers.size === 0 && state.pointerDown) {
                 state.pointerDown = false;
                 state.showLoupe = false;
 
-                if (!state.isDraggingSpan) {
+                if (state.gestureMulti || state.gestureIgnored) {
+                    // end of a pinch zoom (or a touch right after one): never a mark
+                    state.isDraggingSpan = false;
+                } else if (state.eraser) {
+                    const a = state.isDraggingSpan ? Math.min(state.dragStartSample, state.dragCurrentSample) : state.dragStartSample - 8;
+                    const b = state.isDraggingSpan ? Math.max(state.dragStartSample, state.dragCurrentSample) : state.dragStartSample + 8;
+                    eraseRange(state.currentTrialIdx, a, b);
+                } else if (!state.isDraggingSpan) {
                     // Tap Event
                     handleTap(state.dragStartSample);
                 } else {
@@ -1371,6 +1475,7 @@
 
         canvas.addEventListener('pointercancel', (e) => {
             canvas.releasePointerCapture(e.pointerId);
+            if (state.gestureMulti) state.lastMultiTouchEnd = performance.now();
             state.pointers.clear();
             state.pointerDown = false;
             state.isDraggingSpan = false;
@@ -1441,7 +1546,7 @@
     // --- UI Updates & Convergence Logic ---
     function updateStatus() {
         const nTrials = state.trials.length;
-        elements.trialStatus.textContent = `Trial ${state.currentTrialIdx + 1}/${Math.max(1, nTrials)}${state.testTrials.has(state.currentTrialIdx) ? ' (Test)' : ''}${(state.trialNames && state.trialNames[state.currentTrialIdx]) ? ' · ' + state.trialNames[state.currentTrialIdx] : ''}`;
+        elements.trialStatus.textContent = `Trial ${state.currentTrialIdx + 1}/${Math.max(1, nTrials)}${state.testTrials.has(state.currentTrialIdx) ? ' (Test)' : ''}${(state.trialNames && state.trialNames[state.currentTrialIdx]) ? ' · ' + state.trialNames[state.currentTrialIdx] : ''}${state.pass === PASS_ONE && nTrials ? ' · window ' + (state.winIdx + 1) + '/' + numWindows(state.currentTrialIdx) + (state.currentTrialIdx === nTrials - 1 && state.winIdx >= numWindows(state.currentTrialIdx) - 1 ? ' (end)' : '') : ''}`;
         elements.reviewedStatus.textContent = `Reviewed: ${totalReviewedSeconds().toFixed(1)} s`;
 
         const counts = totalExpertEventCounts();
@@ -1511,10 +1616,10 @@
             const tr = state.trials[t];
             const rev = state.reviewedRanges[t];
             if (!rev || rev.length === 0) continue;
-            const lab = new Uint8Array(tr.x.length).fill(255); // 255 = ignore
+            const lab = new Uint8Array(tr.x.length).fill(255); const hl = humanLabels(t); // 255 = ignore
             for (const [s, e] of rev) {
                 for (let i = s; i <= e && i < lab.length; i++) {
-                    lab[i] = state.labels[t][i];
+                    lab[i] = hl[i];
                 }
             }
             traces.push({
@@ -1531,10 +1636,10 @@
             const tr = state.trials[t];
             const rev = state.reviewedRanges[t];
             if (!rev || rev.length === 0) continue;
-            const lab = new Uint8Array(tr.x.length).fill(255);
+            const lab = new Uint8Array(tr.x.length).fill(255); const hl = humanLabels(t);
             for (const [s, e] of rev) {
                 for (let i = s; i <= e && i < lab.length; i++) {
-                    lab[i] = state.labels[t][i];
+                    lab[i] = hl[i];
                 }
             }
             testTrials.push({
@@ -1569,12 +1674,14 @@
         const worker = getTrainWorker();
         const trainId = Date.now();
 
+        let lastEpoch = 0;
         worker.onmessage = async function(evt) {
             const msg = evt.data;
             if (msg.id !== trainId) return;
 
             if (msg.type === 'PROGRESS') {
                 const p = msg.data;
+                lastEpoch = p.epoch;
                 const etaStr = p.eta_s > 0 ? ` · ETA ${p.eta_s.toFixed(0)}s` : '';
                 elements.trainStatus.className = 'train-active';
                 elements.trainStatus.textContent = `Epoch ${p.epoch}/60 · Loss: ${p.train_loss.toFixed(3)} · Val F1: ${p.val_event_f1.toFixed(2)}${etaStr}`;
@@ -1592,7 +1699,7 @@
                 const round = {
                     atMs: Date.now(),
                     labeledSeconds: reviewedS,
-                    epochs: 15,
+                    epochs: lastEpoch,
                     valF1: m.testF1Saccade || 0.0,
                     testF1Saccade: m.testF1Saccade || 0.0,
                     testF1Blink: m.testF1Blink || 0.0,
@@ -1631,7 +1738,7 @@
             data: {
                 config: {
                     n_classes: 3,
-                    max_seconds_of_data: 50.0,
+                    max_seconds_of_data: 3600.0,        // all the reviewed labels (the budget is a total over the traces)
                     rotation_aug: true,
                     rotations: 4,
                     val_fraction: 0.2,
@@ -1725,6 +1832,8 @@
                 trials: state.trials.map(tr => ({ x: Array.from(tr.x), y: Array.from(tr.y), name: tr.name })),
                 labels: state.labels.map(l => Array.from(l)),
                 reviewedRanges: state.reviewedRanges,
+                scanWins: state.scanWins,
+                winMs: state.winMs,
                 expertEvents: state.expertEvents,
                 pointMarks: state.pointMarks,
                 prelabels: state.prelabels,
@@ -1761,6 +1870,9 @@
                 state.reviewedRanges = data.reviewedRanges || Array.from({ length: n }, () => []);
                 state.expertEvents = data.expertEvents || Array.from({ length: n }, () => []);
                 state.pointMarks = data.pointMarks || Array.from({ length: n }, () => []);
+                state.scanWins = data.scanWins || state.reviewedRanges.map(r => r.map(x => x.slice()));
+                state.currentTrialIdx = 0; state.winIdx = 0;
+                applyGridWindow();
                 state.prelabels = data.prelabels || Array.from({ length: n }, () => []);
                 state.rateHz = data.rateHz || 1000.0;
                 state.scale = data.scale || 1.0;
@@ -1771,6 +1883,7 @@
                 state.testTrials = new Set();
                 for (let t = 0; t < n; t += 4) state.testTrials.add(t);
 
+                for (let t = 0; t < n; t++) recomputeReviewed(t, false);
                 preprocessAllTrials();
                 updateStatus();
                 render();
@@ -1943,8 +2056,9 @@
 
     function handleFile(file) {
         const ext = (file.name.split('.').pop() || '').toLowerCase();
+        if (ext === 'json') { loadLabelsFile(file); return; }
         if (!['csv', 'txt', 'dat', 'mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {
-            alert('Unsupported file type ".' + ext + '". Open a .csv, .txt, .mat, .npz or .h5 file.');
+            alert('Unsupported file type ".' + ext + '". Open a .csv, .txt, .mat, .npz or .h5 file (or a saved labels .json file).');
             return;
         }
         pendingFileToLoad = file;
@@ -1959,6 +2073,7 @@
         const rate = parseFloat(elements.rateInput.value) || 1000.0;
         const scale = parseFloat(elements.scaleInput.value) || 1.0;
         const prelabeler = elements.prelabelerSelect.value;
+        if (elements.modalWinMs) setWinMs(parseFloat(elements.modalWinMs.value) || state.winMs);
         const sgVal = parseInt(elements.modalSgWindow.value, 10);
         state.filterSettings.enabled = sgVal > 0;
         if (sgVal > 0) state.filterSettings.windowMs = sgVal;
@@ -2052,7 +2167,7 @@
                 let j = i; while (j + 1 < n && L[j + 1] === c) j++;
                 events.push({ onset: i, offset: j, cls: c, fromPrelabel: false }); i = j + 1;
             }
-            state.reviewedRanges[t] = reviewed; state.expertEvents[t] = events; state.pointMarks[t] = [];
+            state.scanWins[t] = reviewed.map(r => r.slice()); state.expertEvents[t] = events; state.pointMarks[t] = []; recomputeReviewed(t, false);
             syncRenderedLabels(t);
         }
         updateStatus();
@@ -2062,7 +2177,7 @@
     // positions (raw, so that the index of a label is the index of the sample in the file) and labels (-1 = not reviewed) in .npz / .mat / .h5
     async function exportBinary(fmt) {
         const labels = state.trials.map((tr, t) => {
-            const out = new Int8Array(tr.x.length).fill(-1), lab = state.labels[t];
+            const out = new Int8Array(tr.x.length).fill(-1), lab = humanLabels(t);
             for (const [s, e] of state.reviewedRanges[t]) for (let i = s; i <= e && i < out.length; i++) out[i] = lab[i];
             return out;
         });
@@ -2075,6 +2190,59 @@
         } catch (err) {
             alert('Cannot write the ' + fmt + ' file: ' + err.message);
         }
+    }
+
+    // --- Save / load the manual labels (a session file: marks, refined events, windows seen) ---
+    function saveLabelsJson() {
+        if (state.trials.length === 0) return;
+        const payload = {
+            format: 'uneye-labels-v1',
+            saved: new Date().toISOString(),
+            rateHz: state.rateHz,
+            winMs: state.winMs,
+            trialNames: state.trials.map((tr, i) => (state.trialNames && state.trialNames[i]) || tr.name || ''),
+            trialLengths: state.trials.map(tr => tr.x.length),
+            trials: state.trials.map((tr, t) => ({
+                scanWins: state.scanWins[t],
+                expertEvents: state.expertEvents[t].map(e => ({ onset: e.onset, offset: e.offset, cls: e.cls })),
+                pointMarks: state.pointMarks[t],
+            })),
+        };
+        const d = new Date(), p = v => String(v).padStart(2, '0');
+        downloadFile(`uneye_labels_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.json`, JSON.stringify(payload), 'application/json');
+    }
+
+    function loadLabelsFile(file) {
+        const r = new FileReader();
+        r.onload = e => { try { applyLabelsJson(JSON.parse(e.target.result)); } catch (err) { alert('Cannot read the labels file: ' + err.message); } };
+        r.readAsText(file);
+    }
+
+    function applyLabelsJson(obj) {
+        if (!obj || obj.format !== 'uneye-labels-v1' || !Array.isArray(obj.trials)) throw new Error('not a U\'n\'Eye labels file');
+        if (state.trials.length === 0) throw new Error('open the eye traces first, then load the labels');
+        const names = obj.trialNames || [], lens = obj.trialLengths || [];
+        const curNames = state.trials.map((tr, i) => (state.trialNames && state.trialNames[i]) || tr.name || '');
+        const byName = names.length && names.every(n => n) && curNames.every(n => n) && new Set(curNames).size === curNames.length;
+        let applied = 0, skipped = 0;
+        const hasWork = state.expertEvents.some(a => a.length) || state.scanWins.some(a => a.length);
+        if (hasWork && !confirm('Replace the labels currently in the page by the saved ones?')) return;
+        const index = new Map(); if (byName) names.forEach((n, i) => index.set(n, i));
+        for (let t = 0; t < state.trials.length; t++) {
+            const k = byName ? index.get(curNames[t]) : (t < obj.trials.length ? t : undefined);
+            if (k === undefined || lens[k] !== state.trials[t].x.length) { skipped++; continue; }
+            const src = obj.trials[k];
+            state.scanWins[t] = (src.scanWins || []).map(r => [r[0], r[1]]);
+            state.expertEvents[t] = (src.expertEvents || []).map(e => ({ onset: e.onset, offset: e.offset, cls: e.cls, fromPrelabel: false }));
+            state.pointMarks[t] = (src.pointMarks || []).map(m => ({ at: m.at, cls: m.cls }));
+            state.undoStack[t] = [];
+            recomputeReviewed(t, false);
+            syncRenderedLabels(t);
+            applied++;
+        }
+        if (state.pass === PASS_TWO) { buildRefineQueue(); state.refineIdx = 0; focusCurrentMark(); }
+        updateStatus(); render(); saveToIndexedDB();
+        alert(`Labels loaded for ${applied} trial(s)${skipped ? `; ${skipped} trial(s) skipped (name or length does not match)` : ''}.`);
     }
 
     // --- CSV & Preprocessing Config Export (UnEye convention) ---
@@ -2090,7 +2258,7 @@
             let lCsv = "";
             for (let t = 0; t < nTrials; t++) {
                 const row = [];
-                const lab = state.labels[t];
+                const lab = humanLabels(t);
                 const rev = state.reviewedRanges[t];
                 for (let i = 0; i < lab.length; i++) {
                     const isRev = rev.some(([s, e]) => s <= i && i <= e);
@@ -2156,6 +2324,17 @@
         });
 
         elements.undoBtn.addEventListener('click', () => undo(state.currentTrialIdx));
+        elements.eraserBtn.addEventListener('click', () => {
+            state.eraser = !state.eraser;
+            elements.eraserBtn.classList.toggle('active', state.eraser);
+            elements.eraserBtn.textContent = state.eraser ? 'Eraser ON' : 'Eraser';
+        });
+
+        elements.saveLabelsBtn.addEventListener('click', saveLabelsJson);
+        elements.loadLabelsBtn.addEventListener('click', () => elements.labelsInput.click());
+        elements.labelsInput.addEventListener('change', e => { if (e.target.files && e.target.files[0]) loadLabelsFile(e.target.files[0]); e.target.value = ''; });
+        elements.winMsInput.addEventListener('change', e => setWinMs(parseFloat(e.target.value)));
+        elements.prevEpochBtn.addEventListener('click', prevEpoch);
 
         elements.demoBtn.addEventListener('click', () => generateDemoDataset());
 
@@ -2256,8 +2435,8 @@
                     state.refineIdx = 0;
                     focusCurrentMark();
                 } else {
-                    state.fromSample = 0;
-                    state.toSample = Math.min(curLen() - 1, 499);
+                    state.winIdx = 0;
+                    applyGridWindow();
                 }
                 updateStatus();
                 render();
@@ -2273,8 +2452,8 @@
                     state.refineIdx = 0;
                     focusCurrentMark();
                 } else {
-                    state.fromSample = 0;
-                    state.toSample = Math.min(curLen() - 1, 499);
+                    state.winIdx = 0;
+                    applyGridWindow();
                 }
                 updateStatus();
                 render();
@@ -2285,21 +2464,29 @@
         elements.prevEventBtn.addEventListener('click', () => {
             if (state.refineIdx > 0) {
                 state.refineIdx--;
-                state.zoomMultiplier = 1.0;
-                focusCurrentMark();
-                updateStatus();
-                render();
+            } else {
+                const pt = findTrialWithEvents(state.currentTrialIdx, -1);
+                if (pt < 0) return;
+                enterTrialForRefine(pt, true);
             }
+            state.zoomMultiplier = 1.0;
+            focusCurrentMark();
+            updateStatus();
+            render();
         });
 
         elements.nextEventBtn.addEventListener('click', () => {
             if (state.refineIdx < state.refineQueue.length - 1) {
                 state.refineIdx++;
-                state.zoomMultiplier = 1.0;
-                focusCurrentMark();
-                updateStatus();
-                render();
+            } else {
+                const nt = findTrialWithEvents(state.currentTrialIdx, 1);
+                if (nt < 0) return;                       // last event of the last trial
+                enterTrialForRefine(nt, false);
             }
+            state.zoomMultiplier = 1.0;
+            focusCurrentMark();
+            updateStatus();
+            render();
         });
 
         elements.notEventBtn.addEventListener('click', () => {
@@ -2335,6 +2522,9 @@
 
     // --- Init ---
     function init() {
+        try { const w = parseFloat(localStorage.getItem('uneye_winMs')); if (w >= 20) state.winMs = w; } catch (e) { }
+        if (elements.winMsInput) elements.winMsInput.value = String(state.winMs);
+        if (elements.modalWinMs) elements.modalWinMs.value = String(state.winMs);
         setupListeners();
         setupPointerEvents();
         resizeCanvas();
@@ -2350,6 +2540,10 @@
     }
 
     window.state = state;
+    window.nextEpoch = nextEpoch;
+    window.applyGridWindow = applyGridWindow;
+    window.humanLabels = humanLabels;
+    window.focusCurrentMark = focusCurrentMark;
     window.render = render;
     window.updateStatus = updateStatus;
     window.syncRenderedLabels = syncRenderedLabels;
