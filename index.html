@@ -24,29 +24,36 @@
 
             <div class="bar-center">
                 <button id="classToggle" class="btn btn-class saccade">Saccade</button>
-                <button id="undoBtn" class="btn btn-secondary">Undo</button>
                 <button id="eraserBtn" class="btn btn-secondary" title="Eraser: drag between two times to delete every saccade, blink, mark and pre-label in between (a tap erases around the tap)">Eraser</button>
-                <button id="saveLabelsBtn" class="btn btn-secondary" title="Save my manual labels (marks, refined events, windows seen) to a file I can reload later">Save labels</button>
-                <button id="loadLabelsBtn" class="btn btn-secondary" title="Reload labels saved earlier (open the same eye traces first)">Load labels</button>
+                <button id="undoBtn" class="btn btn-secondary">Undo</button>
             </div>
 
             <div class="bar-right">
-                <button id="demoBtn" class="btn btn-accent">⚡ Demo</button>
-                <button id="openBtn" class="btn btn-secondary">Open…</button>
-                <button id="filterBtn" class="btn btn-secondary">⚙ Filter</button>
-                <button id="metricsBtn" class="btn btn-secondary">Metrics</button>
-                <button id="trainNowBtn" class="btn btn-train">Train</button>
-                <button id="cancelTrainBtn" class="btn btn-danger hidden">Cancel</button>
-                <button id="downloadModelBtn" class="btn btn-secondary" title="Download model">Model</button>
-                <select id="exportFormat" class="btn btn-secondary" title="Export format: CSV (L, X, Y files) or one file with all trials, labels and names">
+                <button id="menuBtn" class="btn btn-secondary" title="Show / hide the settings, files, training and export buttons">☰</button>
+            </div>
+        </header>
+
+        <!-- Settings panel: hidden by default so that the traces get the whole screen -->
+        <section id="toolsPanel" class="tools-panel hidden">
+            <label for="winMsInput" class="win-label">Window (ms)</label>
+            <input type="number" id="winMsInput" class="win-input" value="500" min="20" max="60000" step="50" title="Width of the visible window in pass 1; the next window overlaps by 10 %">
+            <button id="demoBtn" class="btn btn-accent">⚡ Demo</button>
+            <button id="openBtn" class="btn btn-secondary">Open…</button>
+            <button id="saveLabelsBtn" class="btn btn-secondary" title="Save my manual labels (marks, refined events, windows seen) to a file I can reload later">Save labels</button>
+            <button id="loadLabelsBtn" class="btn btn-secondary" title="Reload labels saved earlier (open the same eye traces first)">Load labels</button>
+            <button id="filterBtn" class="btn btn-secondary">⚙ Filter</button>
+            <button id="metricsBtn" class="btn btn-secondary">Metrics</button>
+            <button id="trainNowBtn" class="btn btn-train">Train</button>
+            <button id="cancelTrainBtn" class="btn btn-danger hidden">Cancel</button>
+            <button id="downloadModelBtn" class="btn btn-secondary" title="Download model">Model</button>
+            <select id="exportFormat" class="btn btn-secondary" title="Export format: CSV (L, X, Y files) or one file with all trials, labels and names">
                     <option value="csv" selected>CSV</option>
                     <option value="npz">NumPy .npz</option>
                     <option value="mat">MATLAB .mat</option>
                     <option value="h5">HDF5 .h5</option>
                 </select>
-                <button id="exportBtn" class="btn btn-success">Export</button>
-            </div>
-        </header>
+            <button id="exportBtn" class="btn btn-success">Export</button>
+        </section>
 
         <!-- Main Interactive Canvas View -->
         <main id="canvas-container">
@@ -82,8 +89,6 @@
 
                 <!-- Pass 1 specific controls -->
                 <div id="pass1Controls" class="control-group">
-                    <label for="winMsInput" class="win-label">Window (ms)</label>
-                    <input type="number" id="winMsInput" class="win-input" value="500" min="20" max="60000" step="50" title="Width of the visible window in pass 1; the next window overlaps by 10 %">
                     <button id="prevEpochBtn" class="btn btn-nav">◀ Prev window</button>
                     <button id="nextEpochBtn" class="btn btn-primary">Next window ▶</button>
                 </div>

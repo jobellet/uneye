@@ -109,6 +109,8 @@
         convergenceBadge: document.getElementById('convergenceBadge'),
         classToggle: document.getElementById('classToggle'),
         undoBtn: document.getElementById('undoBtn'),
+        menuBtn: document.getElementById('menuBtn'),
+        toolsPanel: document.getElementById('toolsPanel'),
         eraserBtn: document.getElementById('eraserBtn'),
         saveLabelsBtn: document.getElementById('saveLabelsBtn'),
         loadLabelsBtn: document.getElementById('loadLabelsBtn'),
@@ -984,20 +986,17 @@
             return;
         }
 
-        // Layout lanes (3 lanes: X, Y, Speed) with top margin in Pass 2 so header never collides with X trace
+        // Layout lanes (2 lanes: position X and Y on the same axes, then speed) with top margin in Pass 2 so header never collides with the trace
         const topMargin = state.pass === PASS_TWO ? 26 : 0;
         const availH = height - topMargin;
-        const laneH = availH / 3;
-        const xLane = { top: topMargin, bottom: topMargin + laneH };
-        const yLane = { top: topMargin + laneH, bottom: topMargin + 2 * laneH };
-        const speedLane = { top: topMargin + 2 * laneH, bottom: height };
+        const posLane = { top: topMargin, bottom: topMargin + availH * 0.66 };
+        const speedLane = { top: posLane.bottom, bottom: height };
 
         // 1. Draw Grid & Lane Dividers
         ctx.strokeStyle = '#ECEFF1';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(0, xLane.bottom); ctx.lineTo(width, xLane.bottom);
-        ctx.moveTo(0, yLane.bottom); ctx.lineTo(width, yLane.bottom);
+        ctx.moveTo(0, posLane.bottom); ctx.lineTo(width, posLane.bottom);
         ctx.stroke();
 
         // 2. Draw Label Bands & Reviewed Regions in Background
@@ -1006,8 +1005,7 @@
         // 3. Draw Position X & Y Traces (Smooth if filter enabled)
         const traceX = (state.filterSettings.enabled && tr.smoothX) ? tr.smoothX : tr.x;
         const traceY = (state.filterSettings.enabled && tr.smoothY) ? tr.smoothY : tr.y;
-        drawTrace(traceX, tr.valid, xLane, '#1E88E5', 'Position X (°)', width);
-        drawTrace(traceY, tr.valid, yLane, '#43A047', 'Position Y (°)', width);
+        drawPositionLane(traceX, traceY, tr.valid, posLane, width);
 
         // 4. Draw Velocity Lane
         drawVelocity(tr, speedLane, '#7E57C2', 'Velocity (°/s)', width);
@@ -1063,7 +1061,9 @@
         }
     }
 
-    function drawTrace(arr, valid, lane, color, title, w) {
+    // X (blue) and Y (green) on the same axes, zoomed as much as possible on the extreme values of the visible window.
+    // The scale is never tighter than 1.25 degrees so that the 1-degree scale bar always fits.
+    function drawPositionLane(arrX, arrY, valid, lane, w) {
         const top = lane.top + 20;
         const bottom = lane.bottom - 12;
         const h = bottom - top;
@@ -1071,27 +1071,30 @@
         const from = state.fromSample;
         const to = state.toSample;
 
-        // Find min / max in visible window
         let minV = Infinity, maxV = -Infinity;
-        for (let i = from; i <= to && i < arr.length; i++) {
-            if (valid[i] && !isNaN(arr[i])) {
-                if (arr[i] < minV) minV = arr[i];
-                if (arr[i] > maxV) maxV = arr[i];
+        for (const arr of [arrX, arrY]) {
+            for (let i = from; i <= to && i < arr.length; i++) {
+                if (valid[i] && !isNaN(arr[i])) {
+                    if (arr[i] < minV) minV = arr[i];
+                    if (arr[i] > maxV) maxV = arr[i];
+                }
             }
         }
         if (minV === Infinity) { minV = -5.0; maxV = 5.0; }
-        const pad = Math.max(0.2, (maxV - minV) * 0.15);
+        const oneDeg = 1 / (state.degPerUnit || 1);
+        const pad = Math.max(0.02 * oneDeg, (maxV - minV) * 0.04);
         minV -= pad;
         maxV += pad;
-        // never zoom in beyond 1 degree (plus a margin), so that the 1-degree scale bar always fits
-        const oneDeg = 1 / (state.degPerUnit || 1);
         if (maxV - minV < 1.25 * oneDeg) { const c = (minV + maxV) / 2; minV = c - 0.625 * oneDeg; maxV = c + 0.625 * oneDeg; }
 
-        // Title and floating scale bar
-        ctx.fillStyle = '#78909C';
         ctx.font = '500 13px var(--font-stack)';
         ctx.textAlign = 'left';
-        ctx.fillText(title, 16, lane.top + 24);
+        ctx.fillStyle = '#1E88E5';
+        ctx.fillText('X', 16, lane.top + 24);
+        ctx.fillStyle = '#43A047';
+        ctx.fillText('Y', 32, lane.top + 24);
+        ctx.fillStyle = '#78909C';
+        ctx.fillText('Position (°)', 52, lane.top + 24);
         ctx.textAlign = 'right';
         ctx.fillText(`${((maxV - minV) * state.degPerUnit).toFixed(1)}°`, w - 16, lane.top + 24);
 
@@ -1107,32 +1110,26 @@
         ctx.textAlign = 'right';
         ctx.fillText('1°', w - 17, bottom - barH / 2 + 4);
 
-        // Draw Line Trace
-        ctx.strokeStyle = color;
+        // Line traces
         ctx.lineWidth = 2.0;
-        ctx.beginPath();
-        let started = false;
-        for (let i = from; i <= to && i < arr.length; i++) {
-            if (!valid[i] || isNaN(arr[i])) {
-                started = false;
-                continue;
+        for (const [arr, color] of [[arrX, '#1E88E5'], [arrY, '#43A047']]) {
+            ctx.strokeStyle = color;
+            ctx.beginPath();
+            let started = false;
+            for (let i = from; i <= to && i < arr.length; i++) {
+                if (!valid[i] || isNaN(arr[i])) { started = false; continue; }
+                const px = sampleToPx(i, w);
+                const py = bottom - ((arr[i] - minV) / (maxV - minV)) * h;
+                if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
             }
-            const px = sampleToPx(i, w);
-            const py = bottom - ((arr[i] - minV) / (maxV - minV)) * h;
-            if (!started) {
-                ctx.moveTo(px, py);
-                started = true;
-            } else {
-                ctx.lineTo(px, py);
-            }
+            ctx.stroke();
         }
-        ctx.stroke();
 
-        // Draw invalid / blink gap markers
+        // Invalid / blink gap markers
         ctx.fillStyle = 'rgba(198, 40, 40, 0.25)';
         let invalidStart = -1;
         for (let i = from; i <= to + 1; i++) {
-            const isInv = i <= to && (!valid[i] || isNaN(arr[i]));
+            const isInv = i <= to && (!valid[i] || isNaN(arrX[i]) || isNaN(arrY[i]));
             if (isInv && invalidStart === -1) {
                 invalidStart = i;
             } else if (!isInv && invalidStart !== -1) {
@@ -2324,6 +2321,11 @@
         });
 
         elements.undoBtn.addEventListener('click', () => undo(state.currentTrialIdx));
+        elements.menuBtn.addEventListener('click', () => {
+            elements.toolsPanel.classList.toggle('hidden');
+            elements.menuBtn.classList.toggle('active', !elements.toolsPanel.classList.contains('hidden'));
+            requestAnimationFrame(() => { syncCanvasDimensions(); render(); });
+        });
         elements.eraserBtn.addEventListener('click', () => {
             state.eraser = !state.eraser;
             elements.eraserBtn.classList.toggle('active', state.eraser);

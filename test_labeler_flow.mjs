@@ -10,7 +10,7 @@ const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 page.on('dialog', async d => { await d.accept(); });
-await page.setViewport({ width: 1180, height: 820 });
+await page.setViewport({ width: 1024, height: 620 });
 await page.evaluateOnNewDocument(() => {
   Element.prototype.setPointerCapture = () => {}; Element.prototype.releasePointerCapture = () => {};
   const blobs = new Map(), orig = URL.createObjectURL.bind(URL);
@@ -98,7 +98,11 @@ await page.click('#eraserBtn');
 
 // --- save / reload labels
 await ev(() => { state.expertEvents[0] = [{ onset: 190, offset: 215, cls: 1, fromPrelabel: false }]; });
+check(await ev(() => document.getElementById('toolsPanel').classList.contains('hidden')), 'the settings panel is hidden by default');
+await page.click('#menuBtn');
+check(!(await ev(() => document.getElementById('toolsPanel').classList.contains('hidden'))), 'the menu button shows the settings panel');
 await page.click('#saveLabelsBtn'); await sleep(300);
+await page.click('#menuBtn');
 const saved = JSON.parse(await ev(() => (window.__dl.find(d => /uneye_labels_.*\.json$/.test(d.name)) || { text: 'null' }).text));
 check(saved && saved.format === 'uneye-labels-v1' && saved.trials[0].expertEvents.length >= 1, 'Save labels downloads a json file with the refined events and the windows seen');
 await ev(() => { state.expertEvents[0] = []; state.scanWins[0] = []; });

@@ -431,3 +431,15 @@ html, body {
 #top-bar { flex-wrap: wrap; row-gap: 6px; }
 .bar-left, .bar-center, .bar-right { flex-wrap: wrap; }
 #top-bar .btn { padding-left: 10px; padding-right: 10px; font-size: 13px; }
+
+/* header kept to the annotation tools; the rest is in the settings panel (menu button) */
+#top-bar { min-height: 0; padding: 4px 10px; flex-wrap: nowrap; gap: 8px; }
+#top-bar .btn { padding: 6px 10px; }
+.bar-center, .bar-right { flex-wrap: nowrap; }
+#menuBtn { font-size: 18px; line-height: 1; padding: 4px 12px; }
+#menuBtn.active { background: #212121; color: #fff; border-color: #212121; }
+.tools-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 10px; background: var(--bg-card); border-bottom: 1px solid var(--border); z-index: 10; }
+.tools-panel.hidden { display: none; }
+#bottom-bar { padding: 4px 10px; gap: 3px; }
+.status-row { font-size: 0.78rem; }
+#bottom-bar .btn { padding: 6px 10px; min-height: 0; }
