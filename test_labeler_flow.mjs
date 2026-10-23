@@ -96,11 +96,21 @@ const er = await ev(() => [state.expertEvents[0].map(e => e.onset).join(), state
 check(er[0] === '800' && er[1] === 0 && er[2] === '900', `eraser removed saccade, blink, mark and pre-label between the two times, kept the rest: ${er}`);
 // Switching class while eraser is active must automatically turn eraser off
 check(await ev(() => state.eraser), 'eraser is on');
+await page.click('#blinkBtn');
+check(!(await ev(() => state.eraser)), 'clicking blinkBtn automatically deactivates eraser');
+check(await ev(() => state.activeClass === 2), 'class switched to blink via blinkBtn');
+check(await ev(() => document.getElementById('blinkBtn').classList.contains('active')), 'blinkBtn is active');
+check(await ev(() => document.getElementById('saccadeBtn').classList.contains('inactive')), 'saccadeBtn is greyed out/inactive');
+
+await page.click('#saccadeBtn');
+check(await ev(() => state.activeClass === 1), 'class switched to saccade via saccadeBtn');
+check(await ev(() => document.getElementById('saccadeBtn').classList.contains('active')), 'saccadeBtn is active');
+check(await ev(() => document.getElementById('blinkBtn').classList.contains('inactive')), 'blinkBtn is greyed out/inactive');
+
 await page.click('#classToggle');
-check(!(await ev(() => state.eraser)), 'clicking classToggle automatically deactivates eraser');
-check(await ev(() => state.activeClass === 2), 'class switched to blink');
+check(await ev(() => state.activeClass === 2), 'class switched to blink via classToggle');
 await page.click('#classToggle');
-check(await ev(() => state.activeClass === 1), 'class switched back to saccade');
+check(await ev(() => state.activeClass === 1), 'class switched back to saccade via classToggle');
 
 // --- save / reload labels
 await ev(() => { state.expertEvents[0] = [{ onset: 190, offset: 215, cls: 1, fromPrelabel: false }]; });
@@ -108,9 +118,14 @@ check(await ev(() => document.getElementById('toolsPanel').classList.contains('h
 await page.click('#menuBtn');
 check(!(await ev(() => document.getElementById('toolsPanel').classList.contains('hidden'))), 'the menu button shows the settings panel');
 await page.click('#saveLabelsBtn'); await sleep(300);
-await page.click('#menuBtn');
 const saved = JSON.parse(await ev(() => (window.__dl.find(d => /uneye_labels_.*\.json$/.test(d.name)) || { text: 'null' }).text));
 check(saved && saved.format === 'uneye-labels-v1' && saved.trials[0].expertEvents.length >= 1, 'Save labels downloads a json file with the refined events and the windows seen');
+check(saved && Array.isArray(saved.observedPeriods), 'saved labels JSON includes observedPeriods variable');
+
+await page.click('#exportBtn'); await sleep(300);
+const obsDl = await ev(() => window.__dl.find(d => d.name === 'observed.csv'));
+check(obsDl && obsDl.text && obsDl.text.length > 0, 'exportDataset exports observed.csv alongside labels');
+await page.click('#menuBtn');
 await ev(() => { state.expertEvents[0] = []; state.scanWins[0] = []; });
 fs.writeFileSync('/tmp/uneye_labels_test.json', JSON.stringify(saved));
 await (await page.$('#labelsInput')).uploadFile('/tmp/uneye_labels_test.json'); await sleep(500);

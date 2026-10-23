@@ -92,4 +92,7 @@
     <string name="tool_blink">Blink</string>
     <string name="tool_eraser">Eraser</string>
     <string name="window_ms_hint">Window (ms)</string>
+    <string name="browse">Browse…</string>
+    <string name="labels_path">Previous labels (optional)</string>
+    <string name="labels_path_hint">.json, .mat, .csv or .bin</string>
 </resources>

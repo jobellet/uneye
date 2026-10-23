@@ -84,6 +84,16 @@ object Exporter {
         }
     }
 
+    /** Observed mask CSV: 1 for reviewed/observed samples, 0 for unreviewed. */
+    fun writeObservedCsv(stream: OutputStream, labels: Array<DoubleArray>) {
+        stream.bufferedWriter(Charsets.UTF_8).use { w ->
+            for (row in labels) {
+                w.write(row.joinToString(",") { if (it.isNaN()) "0" else "1" })
+                w.newLine()
+            }
+        }
+    }
+
     /** X or Y CSV: trials x time matrix. */
     fun writePositionsCsv(stream: OutputStream, positions: Array<DoubleArray>) {
         stream.bufferedWriter(Charsets.UTF_8).use { w ->
@@ -96,14 +106,20 @@ object Exporter {
 
     // --- MATLAB v5 ---------------------------------------------------------------
 
-    /** One .mat file with X, Y (positions) and Sacc (labels; NaN = not reviewed). */
+    /** One .mat file with X, Y (positions), Sacc (labels; NaN = not reviewed), and observed/reviewed masks. */
     fun writeMat(stream: OutputStream, session: Session) {
         val labels = labelsMatrix(session)
         val (xs, ys) = positionsMatrix(session)
+        val observed = Array(labels.size) { k ->
+            DoubleArray(labels[k].size) { i -> if (labels[k][i].isNaN()) 0.0 else 1.0 }
+        }
         MatWriter.writeTo(stream, mapOf(
             "X" to xs,
             "Y" to ys,
             "Sacc" to labels,
+            "labels" to labels,
+            "observed" to observed,
+            "reviewed" to observed,
         ))
     }
 

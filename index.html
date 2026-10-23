@@ -23,7 +23,11 @@
             </div>
 
             <div class="bar-center">
-                <button id="classToggle" class="btn btn-class saccade">Saccade</button>
+                <div class="class-btn-group">
+                    <button id="saccadeBtn" class="btn-class-opt saccade active" title="Select Saccade tool">Saccade</button>
+                    <button id="blinkBtn" class="btn-class-opt blink inactive" title="Select Blink tool">Blink</button>
+                </div>
+                <button id="classToggle" style="opacity: 0.01; width: 1px; height: 1px; position: absolute; left: 0; top: 0; z-index: -1;" aria-hidden="true"></button>
                 <button id="eraserBtn" class="btn btn-secondary" title="Eraser: drag between two times to delete every saccade, blink, mark and pre-label in between (a tap erases around the tap)">Eraser</button>
                 <button id="undoBtn" class="btn btn-secondary">Undo</button>
             </div>
@@ -111,8 +115,11 @@
             <div class="modal-card">
                 <h3>Load Eye Trace</h3>
                 <div class="form-row">
-                    <label>Selected file:</label>
-                    <span id="modalFileName" class="filename-display">-</span>
+                    <label>Selected eye trace:</label>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 60%;">
+                        <span id="modalFileName" class="filename-display" style="flex: 1;">-</span>
+                        <button id="modalChangeTraceBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
+                    </div>
                 </div>
                 <div class="form-row">
                     <label for="rateInput">Sampling rate (Hz):</label>
@@ -137,16 +144,34 @@
                     </select>
                 </div>
                 <div class="form-row">
-                    <label for="initialModelSelect">Initial model weights:</label>
+                    <label for="initialModelSelect">Model weights:</label>
                     <select id="initialModelSelect">
                         <option value="pretrained" selected>Pretrained (combined.bin)</option>
+                        <option value="local">Custom local weights (.bin)…</option>
                         <option value="scratch">From scratch (random)</option>
                     </select>
+                </div>
+                <div id="localModelRow" class="form-row hidden">
+                    <label>Local weights file:</label>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 60%;">
+                        <span id="modalModelFileName" class="filename-display" style="flex: 1;">No file chosen</span>
+                        <button id="modalPickModelBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
+                    </div>
+                    <input type="file" id="modalModelFile" accept=".bin" style="display: none;">
+                </div>
+                <div class="form-row">
+                    <label>Previous labels (optional):</label>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 60%;">
+                        <span id="modalLabelsFileName" class="filename-display" style="flex: 1;">(none)</span>
+                        <button id="modalPickLabelsBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
+                    </div>
+                    <input type="file" id="modalLabelsFile" accept=".json,.mat,.csv,.bin" style="display: none;">
                 </div>
                 <div class="form-row">
                     <label for="prelabelerSelect">Automatic pre-labeler:</label>
                     <select id="prelabelerSelect">
                         <option value="hmm" selected>Adaptive HMM / Engbert (λ·σ, High Accuracy)</option>
+                        <option value="model">Neural Network (selected weights)</option>
                         <option value="none">None (manual)</option>
                     </select>
                 </div>

@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -34,6 +35,22 @@ class MainActivity : AppCompatActivity() {
     private var pendingX: Uri? = null
     private var pendingY: Uri? = null
     private var pendingMat: Uri? = null
+    private var pendingModelUri: Uri? = null
+    private var pendingLabelsUri: Uri? = null
+    private var modelEditRef: EditText? = null
+    private var labelsEditRef: EditText? = null
+
+    private val pickModelFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        pendingModelUri = uri
+        modelEditRef?.setText(displayName(uri))
+    }
+
+    private val pickLabelsFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        pendingLabelsUri = uri
+        labelsEditRef?.setText(displayName(uri))
+    }
 
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -102,7 +119,23 @@ class MainActivity : AppCompatActivity() {
         val unitEdit = dialog.findViewById<EditText>(R.id.unitEdit)
         val preSpinner = dialog.findViewById<Spinner>(R.id.preSpinner)
         val modelEdit = dialog.findViewById<EditText>(R.id.modelEdit)
+        val browseModelBtn = dialog.findViewById<Button>(R.id.browseModelBtn)
+        val labelsEdit = dialog.findViewById<EditText>(R.id.labelsEdit)
+        val browseLabelsBtn = dialog.findViewById<Button>(R.id.browseLabelsBtn)
         val estimateBox = dialog.findViewById<android.widget.CheckBox>(R.id.estimateBox)
+
+        modelEditRef = modelEdit
+        labelsEditRef = labelsEdit
+        pendingModelUri = null
+        pendingLabelsUri = null
+
+        browseModelBtn.setOnClickListener {
+            pickModelFile.launch(arrayOf("*/*", "application/octet-stream"))
+        }
+        browseLabelsBtn.setOnClickListener {
+            pickLabelsFile.launch(arrayOf("*/*", "application/octet-stream", "application/json", "text/*"))
+        }
+
         preSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
             listOf(
                 getString(R.string.prelabeler_hmm),
@@ -123,14 +156,14 @@ class MainActivity : AppCompatActivity() {
                     else -> Native.PRELABELER_NONE
                 }
                 val modelBin = modelEdit.text.toString().trim()
-                loadFile(mat, y, rate, unit, estimateBox.isChecked, prelabeler, modelBin)
+                loadFile(mat, y, rate, unit, estimateBox.isChecked, prelabeler, modelBin, pendingModelUri, pendingLabelsUri)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
     private fun loadFile(mat: Uri, y: Uri?, rateHz: Double, degPerUnit: Double, estimateScale: Boolean,
-                         prelabeler: Int, modelBin: String) {
+                         prelabeler: Int, modelBin: String, modelUri: Uri?, labelsUri: Uri?) {
         val session = app.session
         Toast.makeText(this, R.string.loading, Toast.LENGTH_SHORT).show()
         lifecycleScope.launch {
@@ -151,8 +184,19 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this@MainActivity, R.string.load_failed, Toast.LENGTH_LONG).show()
                 return@launch
             }
-            val modelPath = if (prelabeler == Native.PRELABELER_SHIPPED_MODEL && modelBin.isEmpty())
-                app.shippedModelPath() else modelBin
+            val modelPath = withContext(Dispatchers.IO) {
+                if (modelUri != null) {
+                    val tmp = File(cacheDir, "chosen_model.bin")
+                    contentResolver.openInputStream(modelUri)?.use { input ->
+                        tmp.outputStream().use { input.copyTo(it) }
+                    }
+                    tmp.absolutePath
+                } else if (prelabeler == Native.PRELABELER_SHIPPED_MODEL && modelBin.isEmpty()) {
+                    app.shippedModelPath()
+                } else {
+                    modelBin
+                }
+            }
             var result: Pair<Boolean, String>? = null
             session.load(trace, rateHz, degPerUnit, estimateScale, prelabeler, modelPath,
                 recordingName = displayName(mat).substringBeforeLast('.')) { ok, err ->
@@ -162,6 +206,34 @@ class MainActivity : AppCompatActivity() {
             while (result == null) kotlinx.coroutines.delay(20)
             val (ok, err) = result!!
             if (ok) {
+                // If previous labels were selected, import them into the session
+                if (labelsUri != null) {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            val lName = displayName(labelsUri).lowercase()
+                            if (lName.endsWith(".mat")) {
+                                val b = contentResolver.openInputStream(labelsUri)?.use { it.readBytes() }
+                                if (b != null) {
+                                    val v = TraceFiles.readAll(b)
+                                    val arr = v["Sacc"] ?: v["labels"] ?: v["L"]
+                                    if (arr != null) session.importLabelsMatrix(arr)
+                                }
+                            } else if (lName.endsWith(".bin")) {
+                                val tmp = File(cacheDir, "chosen_labels.bin")
+                                contentResolver.openInputStream(labelsUri)?.use { input ->
+                                    tmp.outputStream().use { input.copyTo(it) }
+                                }
+                                session.loadLabels(tmp.absolutePath)
+                            } else {
+                                val txt = contentResolver.openInputStream(labelsUri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                                if (txt != null) session.importLabelsText(txt)
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Failed to import previous labels", e)
+                        }
+                    }
+                }
+
                 // the convergence test set is chosen per trial before pass 1
                 session.chooseTestSet(5, 2)
                 val dao = FileListDb.get(this@MainActivity).traceFiles()

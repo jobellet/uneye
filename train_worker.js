@@ -123,13 +123,19 @@ self.onmessage = async function(e) {
                 let allTruth = [];
                 for (const tt of testTrials) {
                     const p = trainer.predictTrial(tt.x, tt.y, tt.rateHz || 1000.0, config.max_speed_deg_s || 1300.0);
-                    allPred.push(...p);
-                    allTruth.push(...tt.labels);
+                    for (let i = 0; i < tt.labels.length; i++) {
+                        if (tt.labels[i] < 250) {
+                            allPred.push(p[i]);
+                            allTruth.push(tt.labels[i]);
+                        }
+                    }
                 }
-                const predArr = new Uint8Array(allPred);
-                const truthArr = new Uint8Array(allTruth);
-                const scoreJson = Module.WebTrainer.evaluateScoresJson(predArr, truthArr, config.n_classes || 3);
-                testMetrics = JSON.parse(scoreJson);
+                if (allTruth.length > 0) {
+                    const predArr = new Uint8Array(allPred);
+                    const truthArr = new Uint8Array(allTruth);
+                    const scoreJson = Module.WebTrainer.evaluateScoresJson(predArr, truthArr, config.n_classes || 3);
+                    testMetrics = JSON.parse(scoreJson);
+                }
             }
 
             const binModel = trainer.exportBin();

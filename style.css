@@ -180,6 +180,42 @@ html, body {
     background-color: var(--danger);
 }
 
+.class-btn-group {
+    display: inline-flex;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+.btn-class-opt {
+    border: none;
+    border-radius: 0;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.btn-class-opt.saccade.active {
+    background-color: var(--primary);
+    color: #FFF;
+    opacity: 1;
+}
+.btn-class-opt.saccade.inactive {
+    background-color: #ECEFF1;
+    color: #78909C;
+    opacity: 0.6;
+}
+.btn-class-opt.blink.active {
+    background-color: var(--danger);
+    color: #FFF;
+    opacity: 1;
+}
+.btn-class-opt.blink.inactive {
+    background-color: #ECEFF1;
+    color: #78909C;
+    opacity: 0.6;
+}
+
 .btn-nav {
     background-color: #ECEFF1;
     color: #37474F;

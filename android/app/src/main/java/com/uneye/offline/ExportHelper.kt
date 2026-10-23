@@ -112,6 +112,10 @@ class ExportHelper(private val activity: FragmentActivity) {
             val labelsFile = File(dir, "${baseName}_L.csv")
             labelsFile.outputStream().use { Exporter.writeLabelsCsv(it, labels) }
             out.add(labelsFile)
+            // observed mask CSV (1 = reviewed/observed, 0 = unreviewed)
+            val observedFile = File(dir, "${baseName}_observed.csv")
+            observedFile.outputStream().use { Exporter.writeObservedCsv(it, labels) }
+            out.add(observedFile)
             // X / Y CSV (degrees)
             val (xs, ys) = Exporter.positionsMatrix(session)
             val xFile = File(dir, "${baseName}_X.csv")

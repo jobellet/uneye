@@ -278,6 +278,101 @@ class Session(private val filesDir: File) {
         return ok
     }
 
+    /** Imports labels from a JSON string (uneye-labels-v1 session file format). */
+    fun importLabelsJson(jsonStr: String): Boolean {
+        return try {
+            val root = org.json.JSONObject(jsonStr)
+            val trials = root.optJSONArray("trials") ?: return false
+            val nT = _nTrials.value
+            for (t in 0 until minOf(nT.toInt(), trials.length())) {
+                val obj = trials.getJSONObject(t)
+                val scanWins = obj.optJSONArray("scanWins")
+                if (scanWins != null) {
+                    for (i in 0 until scanWins.length()) {
+                        val w = scanWins.getJSONArray(i)
+                        addScan(t.toLong(), w.getLong(0), w.getLong(1))
+                    }
+                }
+                val exp = obj.optJSONArray("expertEvents")
+                if (exp != null) {
+                    for (i in 0 until exp.length()) {
+                        val e = exp.getJSONObject(i)
+                        val on = e.getLong("onset")
+                        val off = e.getLong("offset")
+                        val c = e.getInt("cls")
+                        refineMark(t.toLong(), on, on, off, c)
+                    }
+                }
+                val pm = obj.optJSONArray("pointMarks")
+                if (pm != null) {
+                    for (i in 0 until pm.length()) {
+                        val p = pm.getJSONObject(i)
+                        addPointMark(t.toLong(), p.getLong("at"), p.getInt("cls"))
+                    }
+                }
+                applyScans(t.toLong())
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Imports labels from a 2D matrix (trials x samples: 0 fixation, 1 saccade, 2 blink, NaN / -1 unreviewed). */
+    fun importLabelsMatrix(labels: Array<DoubleArray>): Boolean {
+        return try {
+            val nT = _nTrials.value
+            for (t in 0 until minOf(nT.toInt(), labels.size)) {
+                val row = labels[t]
+                val n = row.size
+                var i = 0
+                while (i < n) {
+                    if (row[i].isNaN() || row[i] < 0) { i++; continue }
+                    var j = i
+                    while (j + 1 < n && !row[j + 1].isNaN() && row[j + 1] >= 0) j++
+                    addScan(t.toLong(), i.toLong(), j.toLong())
+                    i = j + 1
+                }
+                i = 0
+                while (i < n) {
+                    val c = if (row[i].isNaN()) -1 else row[i].toInt()
+                    if (c != 1 && c != 2) { i++; continue }
+                    var j = i
+                    while (j + 1 < n && !row[j + 1].isNaN() && row[j + 1].toInt() == c) j++
+                    refineMark(t.toLong(), i.toLong(), i.toLong(), j.toLong(), c)
+                    i = j + 1
+                }
+                applyScans(t.toLong())
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Imports labels from a CSV string (rows = trials, values = 0/1/2/nan). */
+    fun importLabelsCsv(csvStr: String): Boolean {
+        return try {
+            val lines = csvStr.lines().filter { it.isNotBlank() }
+            val rows = lines.map { line ->
+                val tokens = line.split(',').map { it.trim() }
+                DoubleArray(tokens.size) { idx ->
+                    val tok = tokens[idx]
+                    if (tok.equals("nan", ignoreCase = true) || tok.isEmpty()) Double.NaN else (tok.toDoubleOrNull() ?: Double.NaN)
+                }
+            }.toTypedArray()
+            importLabelsMatrix(rows)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Imports labels from text (auto-detecting JSON or CSV). */
+    fun importLabelsText(text: String): Boolean {
+        val trimmed = text.trim()
+        return if (trimmed.startsWith("{")) importLabelsJson(trimmed) else importLabelsCsv(trimmed)
+    }
+
     // --- training (phase 3) --------------------------------------------------------------
 
     /**

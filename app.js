@@ -107,6 +107,9 @@
         canvasContainer: document.getElementById('canvas-container'),
         passIndicator: document.getElementById('passIndicator'),
         convergenceBadge: document.getElementById('convergenceBadge'),
+        saccadeBtn: document.getElementById('saccadeBtn'),
+        blinkBtn: document.getElementById('blinkBtn'),
+        classBtnGroup: document.querySelector('.class-btn-group'),
         classToggle: document.getElementById('classToggle'),
         undoBtn: document.getElementById('undoBtn'),
         menuBtn: document.getElementById('menuBtn'),
@@ -148,9 +151,17 @@
         exportFormat: document.getElementById('exportFormat'),
         loadModal: document.getElementById('loadModal'),
         modalFileName: document.getElementById('modalFileName'),
+        modalChangeTraceBtn: document.getElementById('modalChangeTraceBtn'),
         rateInput: document.getElementById('rateInput'),
         scaleInput: document.getElementById('scaleInput'),
         modalSgWindow: document.getElementById('modalSgWindow'),
+        localModelRow: document.getElementById('localModelRow'),
+        modalModelFileName: document.getElementById('modalModelFileName'),
+        modalPickModelBtn: document.getElementById('modalPickModelBtn'),
+        modalModelFile: document.getElementById('modalModelFile'),
+        modalLabelsFileName: document.getElementById('modalLabelsFileName'),
+        modalPickLabelsBtn: document.getElementById('modalPickLabelsBtn'),
+        modalLabelsFile: document.getElementById('modalLabelsFile'),
         prelabelerSelect: document.getElementById('prelabelerSelect'),
         modalConfirmBtn: document.getElementById('modalConfirmBtn'),
         modalCancelBtn: document.getElementById('modalCancelBtn'),
@@ -780,7 +791,8 @@
             elements.passIndicator.className = "badge pass-badge";
             elements.pass1Controls.classList.remove('hidden');
             elements.pass2Controls.classList.add('hidden');
-            elements.classToggle.classList.remove('hidden');
+            if (elements.classBtnGroup) elements.classBtnGroup.classList.remove('hidden');
+            if (elements.classToggle) elements.classToggle.classList.remove('hidden');
             if (elements.trialNavGroup) elements.trialNavGroup.classList.remove('hidden');
 
             state.winIdx = Math.floor(Math.max(0, state.fromSample) / winStep());
@@ -790,7 +802,8 @@
             elements.passIndicator.className = "badge pass-badge pass-two";
             elements.pass1Controls.classList.add('hidden');
             elements.pass2Controls.classList.remove('hidden');
-            elements.classToggle.classList.add('hidden');
+            if (elements.classBtnGroup) elements.classBtnGroup.classList.add('hidden');
+            if (elements.classToggle) elements.classToggle.classList.add('hidden');
             if (elements.trialNavGroup) elements.trialNavGroup.classList.add('hidden');
 
             buildRefineQueue();
@@ -1696,20 +1709,27 @@
 
         // Training set: reviewed stretches of NON-test trials only (point marks never train)
         const traces = [];
+        const winSamples = Math.max(25, Math.round(state.rateHz / 25.0) * 25);
         for (let t = 0; t < state.trials.length; t++) {
             if (state.testTrials.has(t)) continue;
             const tr = state.trials[t];
             const rev = state.reviewedRanges[t];
             if (!rev || rev.length === 0) continue;
-            const lab = new Uint8Array(tr.x.length).fill(255); const hl = humanLabels(t); // 255 = ignore
+            let maxRev = 0;
             for (const [s, e] of rev) {
-                for (let i = s; i <= e && i < lab.length; i++) {
+                if (e > maxRev) maxRev = e;
+            }
+            const endSample = Math.min(tr.x.length, Math.max(winSamples, maxRev + 1));
+            const lab = new Uint8Array(endSample).fill(255);
+            const hl = humanLabels(t); // 255 = ignore
+            for (const [s, e] of rev) {
+                for (let i = s; i <= e && i < endSample; i++) {
                     lab[i] = hl[i];
                 }
             }
             traces.push({
-                x: tr.x,
-                y: tr.y,
+                x: tr.x.subarray(0, endSample),
+                y: tr.y.subarray(0, endSample),
                 labels: lab,
                 rateHz: state.rateHz
             });
@@ -2139,6 +2159,55 @@
         return rows;
     }
 
+    let pendingModelFile = null;
+    let pendingLabelsFile = null;
+
+    async function loadCustomModel(modelFile) {
+        if (!modelFile) return;
+        try {
+            const buf = await modelFile.arrayBuffer();
+            state.trainedModelBin = new Uint8Array(buf);
+            state.initialWeightsMode = 'local';
+            const worker = getTrainWorker();
+            worker.postMessage({ type: 'LOAD_MODEL', data: state.trainedModelBin });
+        } catch (err) {
+            console.error('Failed to load model weights:', err);
+            alert('Cannot load custom model weights: ' + err.message);
+        }
+    }
+
+    async function loadPreviousLabels(labelsFile) {
+        if (!labelsFile) return;
+        const ext = (labelsFile.name.split('.').pop() || '').toLowerCase();
+        try {
+            if (ext === 'json') {
+                const text = await labelsFile.text();
+                applyLabelsJson(JSON.parse(text));
+            } else if (['mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {
+                const buf = await labelsFile.arrayBuffer();
+                const r = await UnEyeFormats.readTrialsFile(labelsFile.name, buf, loadH5Lib);
+                if (r && r.labels) applyLoadedLabels(r.labels);
+            } else if (ext === 'csv' || ext === 'txt') {
+                const text = await labelsFile.text();
+                const rows = parseCSV(text);
+                if (rows.length > 0) {
+                    const loaded = rows.map(r => {
+                        const arr = new Int8Array(r.length);
+                        for (let i = 0; i < r.length; i++) {
+                            const v = r[i];
+                            arr[i] = (isNaN(v) || v < 0) ? -1 : Math.round(v);
+                        }
+                        return arr;
+                    });
+                    applyLoadedLabels(loaded);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to load previous labels:', err);
+            alert('Cannot load previous labels: ' + err.message);
+        }
+    }
+
     function handleFile(file) {
         const ext = (file.name.split('.').pop() || '').toLowerCase();
         if (ext === 'json') { loadLabelsFile(file); return; }
@@ -2147,11 +2216,17 @@
             return;
         }
         pendingFileToLoad = file;
+        pendingModelFile = null;
+        pendingLabelsFile = null;
         elements.modalFileName.textContent = file.name;
+        if (elements.modalModelFileName) elements.modalModelFileName.textContent = 'No file chosen';
+        if (elements.modalLabelsFileName) elements.modalLabelsFileName.textContent = '(none)';
+        if (elements.localModelRow) elements.localModelRow.classList.add('hidden');
+        if (elements.initialModelSelect) elements.initialModelSelect.value = 'pretrained';
         elements.loadModal.classList.remove('hidden');
     }
 
-    function confirmLoadFile() {
+    async function confirmLoadFile() {
         const file = pendingFileToLoad;
         if (!file) return;
 
@@ -2163,6 +2238,18 @@
         state.filterSettings.enabled = sgVal > 0;
         if (sgVal > 0) state.filterSettings.windowMs = sgVal;
 
+        if (elements.initialModelSelect) {
+            const mVal = elements.initialModelSelect.value;
+            if (mVal === 'local' && pendingModelFile) {
+                await loadCustomModel(pendingModelFile);
+            } else if (mVal === 'scratch') {
+                state.initialWeightsMode = 'scratch';
+                state.trainedModelBin = null;
+            } else {
+                state.initialWeightsMode = 'pretrained';
+            }
+        }
+
         const ext = (file.name.split('.').pop() || '').toLowerCase();
         if (['mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {      // binary formats: trials of different durations (formats.js)
             const binReader = new FileReader();
@@ -2172,7 +2259,11 @@
                     const r = await UnEyeFormats.readTrialsFile(file.name, e.target.result, loadH5Lib);
                     elements.loadModal.classList.add('hidden');
                     loadDataset(r.trials, r.fs || rate, scale, prelabeler);
-                    if (r.labels) applyLoadedLabels(r.labels);
+                    if (pendingLabelsFile) {
+                        await loadPreviousLabels(pendingLabelsFile);
+                    } else if (r.labels) {
+                        applyLoadedLabels(r.labels);
+                    }
                     const lens = r.trials.map(t => t.x.length);
                     console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples${r.fs ? ', ' + r.fs + ' Hz' : ''}${r.labels ? ', with labels' : ''}`);
                 } catch (err) {
@@ -2185,7 +2276,7 @@
         }
 
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
             const text = e.target.result;
             const rows = parseCSV(text);
             const trials = [];
@@ -2217,6 +2308,9 @@
 
             elements.loadModal.classList.add('hidden');
             loadDataset(trials, rate, scale, prelabeler);
+            if (pendingLabelsFile) {
+                await loadPreviousLabels(pendingLabelsFile);
+            }
         };
         reader.readAsText(file);
     }
@@ -2287,8 +2381,12 @@
             winMs: state.winMs,
             trialNames: state.trials.map((tr, i) => (state.trialNames && state.trialNames[i]) || tr.name || ''),
             trialLengths: state.trials.map(tr => tr.x.length),
+            observedPeriods: state.reviewedRanges,
+            reviewedRanges: state.reviewedRanges,
             trials: state.trials.map((tr, t) => ({
                 scanWins: state.scanWins[t],
+                observedPeriods: state.reviewedRanges[t],
+                reviewedRanges: state.reviewedRanges[t],
                 expertEvents: state.expertEvents[t].map(e => ({ onset: e.onset, offset: e.offset, cls: e.cls })),
                 pointMarks: state.pointMarks[t],
             })),
@@ -2353,6 +2451,20 @@
             }
             downloadFile("L.csv", lCsv, "text/csv");
 
+            // 1b. Observed periods mask CSV (observed.csv) - 1 for reviewed/observed samples, 0 for unreviewed
+            let obsCsv = "";
+            for (let t = 0; t < nTrials; t++) {
+                const row = [];
+                const rev = state.reviewedRanges[t] || [];
+                const len = state.trials[t].x.length;
+                for (let i = 0; i < len; i++) {
+                    const isRev = rev.some(([s, e]) => s <= i && i <= e);
+                    row.push(isRev ? "1" : "0");
+                }
+                obsCsv += row.join(",") + "\n";
+            }
+            downloadFile("observed.csv", obsCsv, "text/csv");
+
             // 2. Positions CSV (X.csv, Y.csv) - smooth positions for reproducibility
             let xCsv = "", yCsv = "";
             for (let t = 0; t < nTrials; t++) {
@@ -2400,18 +2512,39 @@
     }
 
     // --- Setup UI Listeners ---
-    function setupListeners() {
-        // Toggle Active Class
-        elements.classToggle.addEventListener('click', () => {
-            state.activeClass = state.activeClass === CLS_SACCADE ? CLS_BLINK : CLS_SACCADE;
+    function setActiveClass(cls) {
+        state.activeClass = cls;
+        if (elements.saccadeBtn && elements.blinkBtn) {
+            if (cls === CLS_SACCADE) {
+                elements.saccadeBtn.classList.add('active');
+                elements.saccadeBtn.classList.remove('inactive');
+                elements.blinkBtn.classList.remove('active');
+                elements.blinkBtn.classList.add('inactive');
+            } else {
+                elements.blinkBtn.classList.add('active');
+                elements.blinkBtn.classList.remove('inactive');
+                elements.saccadeBtn.classList.remove('active');
+                elements.saccadeBtn.classList.add('inactive');
+            }
+        }
+        if (elements.classToggle) {
             elements.classToggle.textContent = state.activeClass === CLS_SACCADE ? "Saccade" : "Blink";
             elements.classToggle.className = `btn btn-class ${state.activeClass === CLS_SACCADE ? 'saccade' : 'blink'}`;
-            if (state.eraser) {
-                state.eraser = false;
-                elements.eraserBtn.classList.remove('active');
-                elements.eraserBtn.textContent = 'Eraser';
-                render();
-            }
+        }
+        if (state.eraser) {
+            state.eraser = false;
+            elements.eraserBtn.classList.remove('active');
+            elements.eraserBtn.textContent = 'Eraser';
+            render();
+        }
+    }
+
+    function setupListeners() {
+        // Class selection (side-by-side buttons: selecting one grises the other and deactivates eraser)
+        if (elements.saccadeBtn) elements.saccadeBtn.addEventListener('click', () => setActiveClass(CLS_SACCADE));
+        if (elements.blinkBtn) elements.blinkBtn.addEventListener('click', () => setActiveClass(CLS_BLINK));
+        elements.classToggle.addEventListener('click', () => {
+            setActiveClass(state.activeClass === CLS_SACCADE ? CLS_BLINK : CLS_SACCADE);
         });
 
         elements.undoBtn.addEventListener('click', () => undo(state.currentTrialIdx));
@@ -2463,7 +2596,31 @@
         if (elements.initialModelSelect) {
             elements.initialModelSelect.addEventListener('change', (e) => {
                 state.initialWeightsMode = e.target.value;
+                if (elements.localModelRow) {
+                    elements.localModelRow.classList.toggle('hidden', e.target.value !== 'local');
+                }
             });
+        }
+        if (elements.modalPickModelBtn && elements.modalModelFile) {
+            elements.modalPickModelBtn.addEventListener('click', () => elements.modalModelFile.click());
+            elements.modalModelFile.addEventListener('change', (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    pendingModelFile = e.target.files[0];
+                    if (elements.modalModelFileName) elements.modalModelFileName.textContent = pendingModelFile.name;
+                }
+            });
+        }
+        if (elements.modalPickLabelsBtn && elements.modalLabelsFile) {
+            elements.modalPickLabelsBtn.addEventListener('click', () => elements.modalLabelsFile.click());
+            elements.modalLabelsFile.addEventListener('change', (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    pendingLabelsFile = e.target.files[0];
+                    if (elements.modalLabelsFileName) elements.modalLabelsFileName.textContent = pendingLabelsFile.name;
+                }
+            });
+        }
+        if (elements.modalChangeTraceBtn) {
+            elements.modalChangeTraceBtn.addEventListener('click', () => elements.fileInput.click());
         }
         restoreFromIndexedDB();
         elements.exportBtn.addEventListener('click', exportDataset);

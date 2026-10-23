@@ -456,7 +456,13 @@
     const L = layoutOf(trials, labels);
     const arrays = [{ name: 'xy', type: 'f4', shape: [L.total, 2], data: L.xy }, { name: 'trial_offset', type: 'i4', shape: [L.offs.length], data: Int32Array.from(L.offs) },
                     { name: 'fs', type: 'f8', shape: [], data: Float64Array.of(fs) }];
-    if (L.lab) arrays.push({ name: 'labels', type: 'i1', shape: [L.total], data: L.lab });
+    if (L.lab) {
+      arrays.push({ name: 'labels', type: 'i1', shape: [L.total], data: L.lab });
+      const obs = new Uint8Array(L.total);
+      for (let i = 0; i < L.total; i++) obs[i] = L.lab[i] >= 0 ? 1 : 0;
+      arrays.push({ name: 'observed', type: 'u1', shape: [L.total], data: obs });
+      arrays.push({ name: 'reviewed', type: 'u1', shape: [L.total], data: obs });
+    }
     if (names && names.length === trials.length) arrays.push({ name: 'names', strings: names });
     return buildNpz(arrays);
   }
@@ -464,7 +470,11 @@
   function writeMatFile(trials, labels, names, fs) {
     const vars = [{ name: 'trials', cell: trials.map(t => { const n = t.x.length, d = new Float64Array(2 * n); d.set(t.x, 0); d.set(t.y, n); return { dims: [n, 2], data: d }; }) },   // column-major N x 2
                   { name: 'fs', dims: [1, 1], data: Float64Array.of(fs) }];
-    if (labels) vars.push({ name: 'labels', cell: labels.map(l => ({ dims: [l.length, 1], data: Float64Array.from(l) })) });
+    if (labels) {
+      vars.push({ name: 'labels', cell: labels.map(l => ({ dims: [l.length, 1], data: Float64Array.from(l) })) });
+      vars.push({ name: 'observed', cell: labels.map(l => ({ dims: [l.length, 1], data: Float64Array.from(l, v => v >= 0 ? 1 : 0) })) });
+      vars.push({ name: 'reviewed', cell: labels.map(l => ({ dims: [l.length, 1], data: Float64Array.from(l, v => v >= 0 ? 1 : 0) })) });
+    }
     if (names && names.length === trials.length) vars.push({ name: 'names', strings: names });
     return buildMat5(vars);
   }
@@ -472,7 +482,13 @@
   async function writeH5File(trials, labels, names, fs, h5) {
     const L = layoutOf(trials, labels);
     const vars = [{ name: 'xy', type: 'f4', shape: [L.total, 2], data: L.xy }, { name: 'trial_offset', type: 'i4', shape: [L.offs.length], data: Int32Array.from(L.offs) }];
-    if (L.lab) vars.push({ name: 'labels', type: 'i1', shape: [L.total], data: L.lab });
+    if (L.lab) {
+      vars.push({ name: 'labels', type: 'i1', shape: [L.total], data: L.lab });
+      const obs = new Uint8Array(L.total);
+      for (let i = 0; i < L.total; i++) obs[i] = L.lab[i] >= 0 ? 1 : 0;
+      vars.push({ name: 'observed', type: 'u1', shape: [L.total], data: obs });
+      vars.push({ name: 'reviewed', type: 'u1', shape: [L.total], data: obs });
+    }
     if (names && names.length === trials.length) vars.push({ name: 'names', strings: names });
     return buildH5(vars, { fs }, typeof h5 === 'function' ? await h5() : h5);
   }
