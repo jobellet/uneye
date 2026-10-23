@@ -7,6 +7,7 @@ import android.os.Looper
 import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -16,161 +17,628 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
- * The two-pass labeling screen (phase 2).
+ * Touch-optimized two-pass saccade and blink labeling screen (aligned with web app).
  *
- * Pass 1 (tap + auto-scroll): a class toggle (saccade / blink), one tap places
- * a point mark (a tap on an existing mark removes it), pre-labels are dimmed
- * and a tap near one snaps to it. After each mark the view auto-scrolls so
- * the next epoch starts just after the last marked event (+30 ms for a
- * saccade, +300 ms for a blink). A large "Next" button (or a swipe) moves to
- * the next epoch when it has no event. When the epoch is scanned and all its
- * marks are refined (pass 2), the facade marks it reviewed.
+ * Pass 1 (one-tap mark with auto-scroll):
+ *  - Tools: Saccade (blue), Blink (red), Eraser (clear).
+ *  - Tap places a point mark (or removes it with eraser), snapping to putative pre-labels.
+ *  - Auto-scrolls after each marked event.
+ *  - Epoch and Trial navigation buttons (10% epoch overlap).
  *
- * Pass 2 (press-drag-lift): for each mark, in order, the view centers a
- * window around it (-50..+50 ms for saccades, -300..+300 ms for blinks,
- * widened when the pre-label is longer). Press = onset, drag, lift = offset;
- * the app then moves to the next mark. Buttons: "not an event" (deletes the
- * mark), "back", "wider" (zoom out). A double tap accepts the pre-label
- * boundaries as they are.
+ * Pass 2 (event-by-event focused refinement):
+ *  - Always centers strictly on one labeled event from Pass 1:
+ *    Window framed [-50 ms .. +50 ms] around event boundaries ([onset - 50ms, offset + 50ms]).
+ *  - Event counter badge: "Event X/Y (Saccade, 120 ms)".
+ *  - Single-event navigation: "◀ Prev", "Next ▶".
+ *  - Action buttons: "Accept Pre-label", "Not an Event", "Wider (±50ms)".
+ *  - Press-drag-lift on canvas sets fine-grained onset/offset.
  *
- * The screen loads the visible window from the facade on a worker thread and
- * keeps the TraceView fed; all edits go through the facade.
+ * Filter & Preprocessing Settings:
+ *  - Accessible via "⚙ Filter" button on top bar.
+ *  - Configurable Savitzky-Golay cubic filter window (default 21 ms) and adaptive threshold (λ·σ).
+ *  - Saved in uneye_config.json alongside exports for exact Google Colab reproduction.
  */
 class LabelingScreen : AppCompatActivity() {
 
     private lateinit var session: Session
     private lateinit var traceView: TraceView
-    private lateinit var classToggle: Button
-    private lateinit var undoBtn: Button
-    private lateinit var nextBtn: Button
+
+    // Top Bar Views
     private lateinit var passIndicator: TextView
+    private lateinit var toolGroup: View
+    private lateinit var saccadeToolBtn: Button
+    private lateinit var blinkToolBtn: Button
+    private lateinit var eraserToolBtn: Button
+    private lateinit var eventCounterBadge: TextView
+    private lateinit var filterBtn: Button
+    private lateinit var undoBtn: Button
+
+    // Status & Feedback
     private lateinit var statusText: TextView
-    private lateinit var refineButtons: View
+    private lateinit var trainStatusText: TextView
+    private lateinit var convergenceBadge: TextView
+
+    // Contextual Controls
+    private lateinit var pass1Controls: View
+    private lateinit var prevTrialBtn: Button
+    private lateinit var nextTrialBtn: Button
+    private lateinit var prevEpochBtn: Button
+    private lateinit var nextEpochBtn: Button
+
+    private lateinit var pass2Controls: View
+    private lateinit var prevEventBtn: Button
+    private lateinit var nextEventBtn: Button
+    private lateinit var acceptPreBtn: Button
     private lateinit var notEventBtn: Button
-    private lateinit var backBtn: Button
     private lateinit var widerBtn: Button
 
-    private var epochMs = 500L            // epoch length (setting): 200 or 500 ms
-    private var cls = Native.CLS_SACCADE  // the class chosen for pass-1 taps
+    // Global Actions
+    private lateinit var switchPassBtn: Button
+    private lateinit var saveBtn: Button
+    private lateinit var trainNowBtn: Button
+    private lateinit var metricsBtn: Button
+    private lateinit var exportBtn: Button
+
+    // Settings & State
+    private var filterSettings = FilterSettings.DEFAULT
+    private var epochMs = 500L            // epoch length: 500 ms default
+    private var activeTool = TraceView.TOOL_SACCADE
+    private var cls = Native.CLS_SACCADE  // active class for marking
+    private var zoomMultiplier = 1.0
 
     private val trial: Long get() = session.trial.value
     private val pass: Session.Pass get() = session.pass.value
 
-    // pass-1 state
+    // Pass 1 state
     private var lastMarkSample = -1L
-    private var epochScanned = false
 
-    // pass-2 state: the queue of marks to refine
-    private var refineQueue: List<Pair<Long, Int>> = emptyList()   // (at, cls)
+    // Pass 2 state: the queue of marks to refine
+    private var refineQueue: MutableList<Pair<Long, Int>> = mutableListOf()   // (at, cls)
     private var refineIdx = 0
     private var currentMarkAt = -1L
-    private var currentMarkCls = 1
+    private var currentPutativeOnset = -1L
+    private var currentPutativeOffset = -1L
+    private var currentMarkCls = Native.CLS_SACCADE
+
     private val ui = Handler(Looper.getMainLooper())
+    private lateinit var exportHelper: ExportHelper
+    private var convergenceAlertShown = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_labeling)
+
         session = (application as UneyeApp).session
+        filterSettings = FilterSettings.load(this)
+
         traceView = findViewById(R.id.traceView)
-        classToggle = findViewById(R.id.classToggle)
-        undoBtn = findViewById(R.id.undoBtn)
-        nextBtn = findViewById(R.id.nextBtn)
         passIndicator = findViewById(R.id.passIndicator)
+        toolGroup = findViewById(R.id.toolGroup)
+        saccadeToolBtn = findViewById(R.id.saccadeToolBtn)
+        blinkToolBtn = findViewById(R.id.blinkToolBtn)
+        eraserToolBtn = findViewById(R.id.eraserToolBtn)
+        eventCounterBadge = findViewById(R.id.eventCounterBadge)
+        filterBtn = findViewById(R.id.filterBtn)
+        undoBtn = findViewById(R.id.undoBtn)
+
         statusText = findViewById(R.id.statusText)
-        refineButtons = findViewById(R.id.refineButtons)
+        trainStatusText = findViewById(R.id.trainStatusText)
+        convergenceBadge = findViewById(R.id.convergenceBadge)
+
+        pass1Controls = findViewById(R.id.pass1Controls)
+        prevTrialBtn = findViewById(R.id.prevTrialBtn)
+        nextTrialBtn = findViewById(R.id.nextTrialBtn)
+        prevEpochBtn = findViewById(R.id.prevEpochBtn)
+        nextEpochBtn = findViewById(R.id.nextEpochBtn)
+
+        pass2Controls = findViewById(R.id.pass2Controls)
+        prevEventBtn = findViewById(R.id.prevEventBtn)
+        nextEventBtn = findViewById(R.id.nextEventBtn)
+        acceptPreBtn = findViewById(R.id.acceptPreBtn)
         notEventBtn = findViewById(R.id.notEventBtn)
-        backBtn = findViewById(R.id.backBtn)
         widerBtn = findViewById(R.id.widerBtn)
 
-        classToggle.setOnClickListener {
-            cls = if (cls == Native.CLS_SACCADE) Native.CLS_BLINK else Native.CLS_SACCADE
-            classToggle.text = if (cls == Native.CLS_SACCADE) "Saccade" else "Clignement"
-            classToggle.setBackgroundColor(
-                if (cls == Native.CLS_SACCADE) 0xFF1565C0.toInt() else 0xFFC62828.toInt())
-        }
-        classToggle.text = "Saccade"
-        classToggle.setBackgroundColor(0xFF1565C0.toInt())
+        switchPassBtn = findViewById(R.id.switchPassBtn)
+        saveBtn = findViewById(R.id.saveBtn)
+        trainNowBtn = findViewById(R.id.trainNowBtn)
+        metricsBtn = findViewById(R.id.metricsBtn)
+        exportBtn = findViewById(R.id.exportBtn)
 
-        undoBtn.setOnClickListener { session.undo(trial); refresh() }
-
-        nextBtn.setOnClickListener { moveEpoch(+1) }
-
-        notEventBtn.setOnClickListener {
-            if (currentMarkAt >= 0) {
-                session.deleteMark(trial, currentMarkAt)
-                advanceRefineQueue()
-            }
-        }
-        backBtn.setOnClickListener {
-            if (refineIdx > 0) {
-                --refineIdx
-                showCurrentMark()
-            }
-        }
-        widerBtn.setOnClickListener {
-            val span = traceView.toSample - traceView.fromSample + 1
-            traceView.centerOn(currentMarkAt, span * 2)
-            refreshWindow()
-        }
-
-        traceView.onTapSample = { s -> onTap(s) }
-        traceView.onDoubleTapSample = { s -> onDoubleTap(s) }
-        traceView.onDragSpan = { onset, offset -> onDragSpan(onset, offset) }
-        traceView.onScrolled = { _, _ -> refreshWindow() }
-
-        findViewById<Button>(R.id.switchPassBtn).setOnClickListener { switchPass() }
-        findViewById<Button>(R.id.saveBtn).setOnClickListener { saveLabels() }
-        findViewById<Button>(R.id.trainNowBtn).setOnClickListener {
-            TrainingScheduler.scheduleNow(this)
-            Toast.makeText(this, R.string.training_scheduled, Toast.LENGTH_SHORT).show()
-        }
-
-        session.trial.observeState(this) { refresh() }
-        session.pass.observeState(this) { updatePassUi() }
-        session.reviewedSeconds.observeState(this) { seconds ->
-            statusText.text = getString(R.string.reviewed_seconds, seconds)
-            // phase 3: schedule a background training round after every N newly
-            // labeled seconds
-            val app = application as UneyeApp
-            val newSeconds = seconds - session.reviewedAtLastTraining
-            TrainingScheduler.maybeSchedule(this, seconds, newSeconds)
-        }
-        (application as UneyeApp).trainingState.observeState(this) { ui ->
-            val trainStatus = findViewById<TextView>(R.id.trainStatusText)
-            trainStatus.text = if (ui.running) {
-                getString(R.string.training_progress, ui.epoch, ui.trainLoss, ui.valLoss)
-            } else if (ui.finished) {
-                getString(R.string.training_done, ui.epoch)
-            } else if (ui.failed) {
-                getString(R.string.training_failed, ui.message)
-            } else {
-                getString(R.string.training_idle)
-            }
-            // phase 4: a finished round appends to the convergence history ->
-            // re-evaluate the flag and refresh the badge / metrics
-            if (ui.finished || ui.failed) refreshConvergence()
-        }
-
-        findViewById<Button>(R.id.metricsBtn).setOnClickListener { showMetricsDialog() }
-
-        // phase 5: the SAF launchers must be registered before STARTED
         exportHelper = ExportHelper(this)
-        findViewById<Button>(R.id.exportBtn).setOnClickListener { showExportDialog() }
+
+        setupToolSelection()
+        setupListeners()
+        setupObservers()
 
         updatePassUi()
         refresh()
         refreshConvergence()
     }
 
-    // --- phase 4: convergence flag + metrics -------------------------------------------
+    private fun setupToolSelection() {
+        saccadeToolBtn.setOnClickListener { selectTool(TraceView.TOOL_SACCADE, Native.CLS_SACCADE) }
+        blinkToolBtn.setOnClickListener { selectTool(TraceView.TOOL_BLINK, Native.CLS_BLINK) }
+        eraserToolBtn.setOnClickListener { selectTool(TraceView.TOOL_ERASER, 0) }
+        selectTool(TraceView.TOOL_SACCADE, Native.CLS_SACCADE)
+    }
 
-    private var convergenceAlertShown = false
+    private fun selectTool(tool: Int, classId: Int) {
+        activeTool = tool
+        if (classId != 0) cls = classId
+        traceView.activeTool = tool
 
-    // --- phase 5: export ------------------------------------------------------------
+        // Update button visual styles
+        saccadeToolBtn.setBackgroundColor(if (tool == TraceView.TOOL_SACCADE) 0xFF1565C0.toInt() else 0xFFE0E0E0.toInt())
+        saccadeToolBtn.setTextColor(if (tool == TraceView.TOOL_SACCADE) 0xFFFFFFFF.toInt() else 0xFF37474F.toInt())
 
-    private lateinit var exportHelper: ExportHelper
+        blinkToolBtn.setBackgroundColor(if (tool == TraceView.TOOL_BLINK) 0xFFC62828.toInt() else 0xFFE0E0E0.toInt())
+        blinkToolBtn.setTextColor(if (tool == TraceView.TOOL_BLINK) 0xFFFFFFFF.toInt() else 0xFF37474F.toInt())
+
+        eraserToolBtn.setBackgroundColor(if (tool == TraceView.TOOL_ERASER) 0xFF455A64.toInt() else 0xFFE0E0E0.toInt())
+        eraserToolBtn.setTextColor(if (tool == TraceView.TOOL_ERASER) 0xFFFFFFFF.toInt() else 0xFF37474F.toInt())
+    }
+
+    private fun setupListeners() {
+        undoBtn.setOnClickListener { session.undo(trial); refresh() }
+
+        // Pass 1 Navigation
+        prevEpochBtn.setOnClickListener { moveEpoch(-1) }
+        nextEpochBtn.setOnClickListener { moveEpoch(+1) }
+        prevTrialBtn.setOnClickListener {
+            if (trial > 0) {
+                session.setTrial(trial - 1)
+                traceView.centerOn(epochMs / 2, epochMs)
+                refresh()
+            }
+        }
+        nextTrialBtn.setOnClickListener {
+            if (trial < session.nTrials.value - 1) {
+                session.setTrial(trial + 1)
+                traceView.centerOn(epochMs / 2, epochMs)
+                refresh()
+            }
+        }
+
+        // Pass 2 Navigation & Actions
+        prevEventBtn.setOnClickListener {
+            if (refineIdx > 0) {
+                refineIdx--
+                zoomMultiplier = 1.0
+                focusCurrentMark()
+            }
+        }
+        nextEventBtn.setOnClickListener {
+            if (refineIdx < refineQueue.size - 1) {
+                refineIdx++
+                zoomMultiplier = 1.0
+                focusCurrentMark()
+            }
+        }
+        acceptPreBtn.setOnClickListener {
+            if (currentMarkAt >= 0) {
+                val onset = if (currentPutativeOnset >= 0) currentPutativeOnset else max(0, currentMarkAt - 15)
+                val offset = if (currentPutativeOffset >= 0) currentPutativeOffset else min(session.trialSamples - 1, currentMarkAt + 15)
+                session.refineMark(trial, currentMarkAt, onset, offset, currentMarkCls)
+                refineIdx++
+                zoomMultiplier = 1.0
+                focusCurrentMark()
+                refresh()
+            }
+        }
+        notEventBtn.setOnClickListener {
+            if (currentMarkAt >= 0) {
+                session.deleteMark(trial, currentMarkAt)
+                if (refineIdx < refineQueue.size) {
+                    refineQueue.removeAt(refineIdx)
+                }
+                zoomMultiplier = 1.0
+                focusCurrentMark()
+                refresh()
+            }
+        }
+        widerBtn.setOnClickListener {
+            zoomMultiplier = when (zoomMultiplier) {
+                1.0 -> 2.5
+                2.5 -> 5.0
+                else -> 1.0
+            }
+            focusCurrentMark()
+            traceView.invalidate()
+        }
+
+        // Canvas gestures
+        traceView.onTapSample = { s -> onTap(s) }
+        traceView.onDoubleTapSample = { s -> onDoubleTap(s) }
+        traceView.onDragSpan = { onset, offset -> onDragSpan(onset, offset) }
+        traceView.onScrolled = { _, _ -> refreshWindow() }
+
+        // Top & Bottom Action Buttons
+        filterBtn.setOnClickListener { showFilterDialog() }
+        switchPassBtn.setOnClickListener { switchPass() }
+        saveBtn.setOnClickListener { saveLabels() }
+        trainNowBtn.setOnClickListener {
+            TrainingScheduler.scheduleNow(this)
+            Toast.makeText(this, R.string.training_scheduled, Toast.LENGTH_SHORT).show()
+        }
+        metricsBtn.setOnClickListener { showMetricsDialog() }
+        exportBtn.setOnClickListener { showExportDialog() }
+    }
+
+    private fun setupObservers() {
+        session.trial.observeState(this) { refresh() }
+        session.pass.observeState(this) { updatePassUi() }
+        session.reviewedSeconds.observeState(this) { seconds ->
+            val app = application as UneyeApp
+            val newSeconds = seconds - session.reviewedAtLastTraining
+            TrainingScheduler.maybeSchedule(this, seconds, newSeconds)
+        }
+        (application as UneyeApp).trainingState.observeState(this) { ui ->
+            trainStatusText.text = when {
+                ui.running -> getString(R.string.training_progress, ui.epoch, ui.trainLoss, ui.valLoss)
+                ui.finished -> getString(R.string.training_done, ui.epoch)
+                ui.failed -> getString(R.string.training_failed, ui.message)
+                else -> getString(R.string.training_idle)
+            }
+            if (ui.finished || ui.failed) refreshConvergence()
+        }
+    }
+
+    // --- Pass Switching & UI Setup ---------------------------------------------------
+
+    private fun switchPass() {
+        if (pass == Session.Pass.ONE) {
+            // Enter Pass 2: build refinement queue from point marks
+            val pm = session.trialUi(trial).pointMarks
+            refineQueue = pm.sortedBy { it.first }.toMutableList()
+            refineIdx = 0
+            zoomMultiplier = 1.0
+            session.setPass(Session.Pass.TWO)
+        } else {
+            session.setPass(Session.Pass.ONE)
+        }
+        updatePassUi()
+        refresh()
+    }
+
+    private fun updatePassUi() {
+        val isTwo = pass == Session.Pass.TWO
+        traceView.isPassTwo = isTwo
+
+        if (isTwo) {
+            passIndicator.text = getString(R.string.pass2_title)
+            toolGroup.visibility = View.GONE
+            eventCounterBadge.visibility = View.VISIBLE
+            pass1Controls.visibility = View.GONE
+            pass2Controls.visibility = View.VISIBLE
+
+            if (refineQueue.isEmpty()) {
+                refineQueue = session.trialUi(trial).pointMarks.sortedBy { it.first }.toMutableList()
+            }
+            refineIdx = 0
+            focusCurrentMark()
+        } else {
+            passIndicator.text = getString(R.string.pass1_title)
+            toolGroup.visibility = View.VISIBLE
+            eventCounterBadge.visibility = View.GONE
+            pass1Controls.visibility = View.VISIBLE
+            pass2Controls.visibility = View.GONE
+            traceView.activePutativeRange = null
+        }
+    }
+
+    // --- Pass 1 Gestures & Logic -----------------------------------------------------
+
+    private fun onTap(s: Long) {
+        if (pass != Session.Pass.ONE) return
+
+        if (activeTool == TraceView.TOOL_ERASER) {
+            // Eraser tool: removes point mark or expert event covering sample
+            session.removePointMark(trial, s)
+            session.deleteMark(trial, s)
+            refresh()
+            return
+        }
+
+        // Tap on existing mark removes it
+        if (session.removePointMark(trial, s)) {
+            refresh()
+            return
+        }
+
+        // Tap near a pre-label snaps to it
+        val snapped = session.snapToPrelabel(trial, s, 30)
+        val targetSample = if (snapped >= 0) snapped else s
+        session.addPointMark(trial, targetSample, cls)
+        lastMarkSample = targetSample
+
+        // Auto-scroll: next epoch starts just after marked event (+30 ms saccade, +300 ms blink)
+        val margin = if (cls == Native.CLS_SACCADE) 30L else 300L
+        val winStep = (epochMs * 0.9).roundToInt()
+        val nextFrom = ((lastMarkSample + margin) / winStep + 1) * winStep
+        if (nextFrom > traceView.toSample) {
+            traceView.centerOn(nextFrom + epochMs / 2, epochMs)
+        }
+        refresh()
+    }
+
+    private fun moveEpoch(dir: Int) {
+        val winStep = (epochMs * 0.9).roundToInt()
+        val cur = traceView.fromSample
+        val next = (cur + dir * winStep).coerceIn(0, max(0, session.trialSamples - 1))
+        // Scanned region marked reviewed
+        val leaveTo = min(cur + epochMs - 1, session.trialSamples - 1)
+        session.markEpochReviewed(trial, cur, leaveTo)
+        traceView.centerOn(next + epochMs / 2, epochMs)
+        refresh()
+    }
+
+    // --- Pass 2: Focused Event-by-Event Centering -----------------------------------
+
+    /**
+     * Pass 2: Always center the window on one labeled event from Pass 1.
+     * One event at a time.
+     * Window: -50 ms before event (or putative onset) to +50 ms after event (or putative offset).
+     */
+    private fun focusCurrentMark() {
+        if (refineQueue.isEmpty()) {
+            currentMarkAt = -1L
+            currentPutativeOnset = -1L
+            currentPutativeOffset = -1L
+            traceView.activePutativeRange = null
+            eventCounterBadge.text = getString(R.string.no_events)
+            traceView.invalidate()
+            return
+        }
+
+        if (refineIdx < 0) refineIdx = 0
+        if (refineIdx >= refineQueue.size) {
+            currentMarkAt = -1L
+            traceView.activePutativeRange = null
+            eventCounterBadge.text = getString(R.string.all_reviewed)
+            // Mark entire trial scanned/reviewed
+            session.markEpochReviewed(trial, 0, session.trialSamples - 1)
+            refresh()
+            return
+        }
+
+        val (at, markCls) = refineQueue[refineIdx]
+        currentMarkAt = at
+        currentMarkCls = markCls
+        traceView.activeClass = markCls
+
+        val trialUi = session.trialUi(trial)
+
+        // Find putative onset & offset from existing expert marks or prelabels
+        val exp = trialUi.marks.find { (it.onset <= at && at <= it.offset) || abs(it.onset - at) <= 30 || abs(it.offset - at) <= 30 }
+        val pre = trialUi.prelabels.find { (it.onset <= at && at <= it.offset) || abs(it.onset - at) <= 40 || abs(it.offset - at) <= 40 }
+
+        var on = at
+        var off = at
+        if (exp != null) {
+            on = exp.onset
+            off = exp.offset
+            currentMarkCls = exp.cls
+        } else if (pre != null) {
+            on = pre.onset
+            off = pre.offset
+            currentMarkCls = pre.cls
+        }
+
+        currentPutativeOnset = on
+        currentPutativeOffset = off
+        traceView.activePutativeRange = on to off
+
+        // Strict window framing: -50 ms before event to +50 ms after event
+        val pad50ms = (50.0 * zoomMultiplier).roundToInt().toLong()
+        val winFrom = max(0, on - pad50ms)
+        val winTo = min(session.trialSamples - 1, off + pad50ms)
+        val center = (winFrom + winTo) / 2
+        val span = max(100L, winTo - winFrom + 1)
+
+        traceView.centerOn(center, span)
+
+        val clsName = if (currentMarkCls == Native.CLS_SACCADE) getString(R.string.tool_saccade) else getString(R.string.tool_blink)
+        val durMs = max(1L, off - on + 1)
+        eventCounterBadge.text = getString(R.string.event_counter, refineIdx + 1, refineQueue.size, clsName, durMs)
+    }
+
+    private fun onDoubleTap(s: Long) {
+        if (pass != Session.Pass.TWO || currentMarkAt < 0) return
+        acceptPreBtn.performClick()
+    }
+
+    private fun onDragSpan(onset: Long, offset: Long) {
+        if (pass != Session.Pass.TWO || currentMarkAt < 0) return
+        if (session.refineMark(trial, currentMarkAt, onset, offset, currentMarkCls)) {
+            refineIdx++
+            zoomMultiplier = 1.0
+            focusCurrentMark()
+            refresh()
+        } else {
+            Toast.makeText(this, R.string.invalid_span, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // --- Filter Settings Dialog ------------------------------------------------------
+
+    private fun showFilterDialog() {
+        val view = layoutInflater.inflate(R.layout.dialog_filter, null)
+        val sgWindowEdit = view.findViewById<EditText>(R.id.sgWindowEdit)
+        val lambdaEdit = view.findViewById<EditText>(R.id.lambdaEdit)
+        val minVelEdit = view.findViewById<EditText>(R.id.minVelEdit)
+        val minAmpEdit = view.findViewById<EditText>(R.id.minAmpEdit)
+        val resetBtn = view.findViewById<Button>(R.id.resetFilterBtn)
+
+        sgWindowEdit.setText(filterSettings.windowMs.toString())
+        lambdaEdit.setText(String.format(java.util.Locale.US, "%.1f", filterSettings.lambda))
+        minVelEdit.setText(String.format(java.util.Locale.US, "%.1f", filterSettings.minPeakVel))
+        minAmpEdit.setText(String.format(java.util.Locale.US, "%.2f", filterSettings.minAmplitude))
+
+        resetBtn.setOnClickListener {
+            val def = FilterSettings.DEFAULT
+            sgWindowEdit.setText(def.windowMs.toString())
+            lambdaEdit.setText(String.format(java.util.Locale.US, "%.1f", def.lambda))
+            minVelEdit.setText(String.format(java.util.Locale.US, "%.1f", def.minPeakVel))
+            minAmpEdit.setText(String.format(java.util.Locale.US, "%.2f", def.minAmplitude))
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.filter_dialog_title)
+            .setView(view)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.filter_apply) { _, _ ->
+                var w = sgWindowEdit.text.toString().toIntOrNull() ?: FilterSettings.DEFAULT.windowMs
+                if (w % 2 == 0) w += 1
+                w = max(5, w)
+
+                val lam = lambdaEdit.text.toString().toDoubleOrNull() ?: FilterSettings.DEFAULT.lambda
+                val mVel = minVelEdit.text.toString().toDoubleOrNull() ?: FilterSettings.DEFAULT.minPeakVel
+                val mAmp = minAmpEdit.text.toString().toDoubleOrNull() ?: FilterSettings.DEFAULT.minAmplitude
+
+                filterSettings = FilterSettings(
+                    enabled = true,
+                    windowMs = w,
+                    polyOrder = 3,
+                    lambda = max(1.0, lam),
+                    minPeakVel = max(10.0, mVel),
+                    minAmplitude = max(0.01, mAmp)
+                )
+                FilterSettings.save(this, filterSettings)
+                refresh()
+                Toast.makeText(this, "Filter applied (SG window: ${w}ms, λ=${lam})", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    // --- Data Rendering & Kinematics Engine -------------------------------------------
+
+    private fun refresh() {
+        val k = trial
+        if (!session.loaded.value) return
+
+        Thread {
+            val uiState = session.trialUi(k)
+            val from = traceView.fromSample
+            val to = min(traceView.toSample, session.trialSamples - 1)
+            val (rawX, rawY) = session.trace(k, from, to)
+            val n = rawX.size
+
+            val invalid = BooleanArray(n) { !rawX[it].isFinite() || !rawY[it].isFinite() }
+
+            // Compute Savitzky-Golay cubic kinematics & adaptive threshold
+            val kin = Kinematics.computeKinematics(
+                rawX, rawY, invalid, 1000.0, session.degPerUnit, filterSettings
+            )
+
+            val lab = session.labels(k, from, to, true)
+            val reviewed = BooleanArray(n) { lab[it].toInt() and 0xFF != 255 }
+
+            val nMarks = uiState.pointMarks.size
+            val nExpert = uiState.marks.count { !it.fromPrelabel }
+
+            ui.post {
+                traceView.degPerUnit = session.degPerUnit
+                traceView.currentThreshold = kin.threshold
+                traceView.thresholdLambda = filterSettings.lambda
+
+                traceView.setWindow(
+                    from, to,
+                    TraceView.Lane(kin.smoothX, invalid),
+                    TraceView.Lane(kin.smoothY, invalid),
+                    TraceView.Lane(kin.speed)
+                )
+                traceView.labelBand = lab
+                traceView.reviewedBand = reviewed
+                traceView.prelabels = uiState.prelabels.map { it.onset to it.offset }
+                traceView.prelabelCls = uiState.prelabels.map { it.cls }
+                traceView.pointMarks = uiState.pointMarks
+                traceView.expertMarks = uiState.marks.map { Triple(it.onset, it.offset, it.cls) }
+                traceView.invalidate()
+
+                statusText.text = getString(
+                    R.string.status_marks,
+                    k + 1, session.nTrials.value,
+                    nExpert, nMarks, session.reviewedSeconds.value
+                )
+            }
+        }.start()
+    }
+
+    private fun refreshWindow() {
+        refresh()
+    }
+
+    private fun saveLabels() {
+        val path = (application as UneyeApp).labelsPathFor(session, trial)
+        val ok = session.saveLabels(path)
+        Toast.makeText(this, if (ok) R.string.labels_saved else R.string.labels_save_failed, Toast.LENGTH_SHORT).show()
+    }
+
+    // --- Metrics & Convergence -------------------------------------------------------
+
+    private fun refreshConvergence() {
+        val app = application as UneyeApp
+        val rounds = app.convergenceStore.rounds()
+        val flag = ConvergenceFlag.evaluate(rounds)
+        when (flag.state) {
+            ConvergenceFlag.State.SILENT -> {
+                convergenceBadge.visibility = View.GONE
+                convergenceBadge.text = ""
+            }
+            ConvergenceFlag.State.COLLECTING -> {
+                convergenceBadge.visibility = View.VISIBLE
+                convergenceBadge.setBackgroundColor(0xFFFFB300.toInt())
+                convergenceBadge.text = getString(
+                    R.string.convergence_collecting,
+                    flag.nSaccades, ConvergenceFlag.MIN_SACCADES, flag.nBlinks, ConvergenceFlag.MIN_BLINKS
+                )
+            }
+            ConvergenceFlag.State.CONVERGED -> {
+                convergenceBadge.visibility = View.VISIBLE
+                convergenceBadge.setBackgroundColor(0xFF2E7D32.toInt())
+                convergenceBadge.text = getString(
+                    R.string.convergence_converged,
+                    flag.f1Saccade, flag.kappaSaccade, flag.f1Blink, flag.kappaBlink
+                )
+                if (!convergenceAlertShown) {
+                    convergenceAlertShown = true
+                    AlertDialog.Builder(this)
+                        .setTitle(R.string.convergence_alert_title)
+                        .setMessage(getString(R.string.convergence_alert_message, flag.f1Saccade, flag.kappaSaccade))
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
+            }
+        }
+    }
+
+    private fun showMetricsDialog() {
+        val app = application as UneyeApp
+        val rounds = app.convergenceStore.rounds()
+        val flag = ConvergenceFlag.evaluate(rounds)
+        val view = MetricsView(this)
+        view.setSeries(rounds, flag.state == ConvergenceFlag.State.CONVERGED)
+        val heightPx = (360 * resources.displayMetrics.density).toInt()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.metrics_title)
+            .setView(view)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+        view.post {
+            view.layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT, heightPx
+            )
+            view.requestLayout()
+        }
+    }
+
+    // --- Export Dialog ---------------------------------------------------------------
 
     private fun showExportDialog() {
         if (!session.loaded.value) return
@@ -182,13 +650,12 @@ class LabelingScreen : AppCompatActivity() {
         val shareBox = dialog.findViewById<CheckBox>(R.id.shareBox)
         modelBox.isEnabled = hasModel
         if (!hasModel) modelBox.isChecked = false
+
         AlertDialog.Builder(this)
             .setTitle(R.string.export_dialog_title)
             .setView(dialog)
             .setNegativeButton(android.R.string.cancel, null)
             .setNeutralButton(R.string.export_pick_destination) { _, _ ->
-                // SAF CREATE_DOCUMENT: one single file. The .mat carries
-                // everything (X, Y, Sacc); without it, export the labels CSV.
                 if (matBox.isChecked) {
                     exportHelper.exportTo("application/octet-stream", "$baseName.mat",
                         write = { out -> Exporter.writeMat(out, session) },
@@ -213,10 +680,9 @@ class LabelingScreen : AppCompatActivity() {
                         return@launch
                     }
                     if (share) {
-                        exportHelper.shareFiles(files, listOf("text/csv", "application/octet-stream"))
+                        exportHelper.shareFiles(files, listOf("text/csv", "application/octet-stream", "application/json"))
                     }
-                    Toast.makeText(this@LabelingScreen,
-                        getString(R.string.export_done, dir.absolutePath), Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@LabelingScreen, getString(R.string.export_done, dir.absolutePath), Toast.LENGTH_LONG).show()
                 }
             }
             .show()
@@ -229,225 +695,6 @@ class LabelingScreen : AppCompatActivity() {
             else -> getString(R.string.export_failed)
         }
         Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-    }
-
-    private fun refreshConvergence() {
-        val app = application as UneyeApp
-        val rounds = app.convergenceStore.rounds()
-        val flag = ConvergenceFlag.evaluate(rounds)
-        val badge = findViewById<TextView>(R.id.convergenceBadge)
-        when (flag.state) {
-            ConvergenceFlag.State.SILENT -> {
-                badge.visibility = View.GONE
-                badge.text = ""
-            }
-            ConvergenceFlag.State.COLLECTING -> {
-                badge.visibility = View.VISIBLE
-                badge.setBackgroundColor(0xFFFFB300.toInt())
-                badge.text = getString(R.string.convergence_collecting,
-                    flag.nSaccades, ConvergenceFlag.MIN_SACCADES, flag.nBlinks, ConvergenceFlag.MIN_BLINKS)
-            }
-            ConvergenceFlag.State.CONVERGED -> {
-                badge.visibility = View.VISIBLE
-                badge.setBackgroundColor(0xFF2E7D32.toInt())
-                badge.text = getString(R.string.convergence_converged,
-                    flag.f1Saccade, flag.kappaSaccade, flag.f1Blink, flag.kappaBlink)
-                if (!convergenceAlertShown) {
-                    convergenceAlertShown = true
-                    AlertDialog.Builder(this)
-                        .setTitle(R.string.convergence_alert_title)
-                        .setMessage(getString(R.string.convergence_alert_message,
-                            flag.f1Saccade, flag.kappaSaccade))
-                        .setPositiveButton(android.R.string.ok, null)
-                        .show()
-                }
-            }
-        }
-    }
-
-    private fun showMetricsDialog() {
-        val app = application as UneyeApp
-        val rounds = app.convergenceStore.rounds()
-        val flag = ConvergenceFlag.evaluate(rounds)
-        val view = MetricsView(this)
-        view.setSeries(rounds, flag.state == ConvergenceFlag.State.CONVERGED)
-        val heightPx = (360 * resources.displayMetrics.density).toInt()
-        AlertDialog.Builder(this)
-            .setTitle(R.string.metrics_title)
-            .setView(view)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
-        // the dialog measures the view after show(); force a fixed height so
-        // onDraw always has a canvas
-        view.post {
-            view.layoutParams = android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT, heightPx)
-            view.requestLayout()
-        }
-    }
-
-    // --- pass switching ---------------------------------------------------------------
-
-    private fun switchPass() {
-        if (pass == Session.Pass.ONE) {
-            // entering pass 2: build the refinement queue from the point marks
-            val pm = session.trialUi(trial).pointMarks
-            refineQueue = pm.sortedBy { it.first }
-            refineIdx = 0
-            session.setPass(Session.Pass.TWO)
-        } else {
-            session.setPass(Session.Pass.ONE)
-        }
-        updatePassUi()
-        refresh()
-    }
-
-    private fun updatePassUi() {
-        val two = pass == Session.Pass.TWO
-        passIndicator.text = if (two) "Pass 2 : onset / offset" else "Pass 1 : marquer"
-        classToggle.visibility = if (two) View.GONE else View.VISIBLE
-        nextBtn.visibility = if (two) View.GONE else View.VISIBLE
-        refineButtons.visibility = if (two) View.VISIBLE else View.GONE
-        if (two && refineQueue.isEmpty()) {
-            // no marks to refine on this trial: pull them from the facade
-            refineQueue = session.trialUi(trial).pointMarks.sortedBy { it.first }
-        }
-        if (two) showCurrentMark() else refresh()
-    }
-
-    // --- pass 1 -------------------------------------------------------------------------
-
-    private fun onTap(s: Long) {
-        if (pass != Session.Pass.ONE) return
-        // a tap on an existing point mark removes it
-        if (session.removePointMark(trial, s)) { refresh(); return }
-        // a tap near a pre-label snaps to it
-        val snapped = session.snapToPrelabel(trial, s, 30)
-        session.addPointMark(trial, if (snapped >= 0) snapped else s, cls)
-        lastMarkSample = if (snapped >= 0) snapped else s
-        // auto-scroll: the next epoch starts just after the last marked event
-        val margin = if (cls == Native.CLS_SACCADE) 30L else 300L
-        val epochSamples = epochMs   // 1 sample = 1 ms at 1 kHz
-        val nextFrom = ((lastMarkSample + margin) / epochSamples + 1) * epochSamples
-        if (nextFrom > traceView.toSample) {
-            traceView.centerOn(nextFrom + epochSamples / 2, epochSamples)
-            epochScanned = false
-        }
-        refresh()
-    }
-
-    private fun moveEpoch(dir: Int) {
-        val epochSamples = epochMs
-        val cur = traceView.fromSample
-        val next = (cur + dir * epochSamples).coerceIn(0, maxOf(0, session.trialSamples - 1))
-        // the epoch we leave is scanned
-        val leaveTo = minOf(cur + epochSamples - 1, session.trialSamples - 1)
-        session.markEpochReviewed(trial, cur, leaveTo)
-        epochScanned = true
-        traceView.centerOn(next + epochSamples / 2, epochSamples)
-        refresh()
-    }
-
-    // --- pass 2 ---------------------------------------------------------------------------
-
-    private fun onDoubleTap(s: Long) {
-        if (pass != Session.Pass.TWO || currentMarkAt < 0) return
-        // accept the pre-label boundaries as they are
-        val snapped = session.snapToPrelabel(trial, currentMarkAt, 60)
-        if (snapped >= 0) {
-            val pre = session.trialUi(trial).prelabels.firstOrNull { it.onset == snapped }
-            if (pre != null && session.refineMark(trial, currentMarkAt, pre.onset, pre.offset, currentMarkCls)) {
-                advanceRefineQueue()
-            }
-        }
-    }
-
-    private fun onDragSpan(onset: Long, offset: Long) {
-        if (pass != Session.Pass.TWO || currentMarkAt < 0) return
-        if (session.refineMark(trial, currentMarkAt, onset, offset, currentMarkCls)) {
-            advanceRefineQueue()
-        } else {
-            Toast.makeText(this, R.string.invalid_span, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun showCurrentMark() {
-        if (refineIdx >= refineQueue.size) {
-            // all marks refined: the epoch can be reviewed
-            val from = traceView.fromSample
-            val to = minOf(from + epochMs - 1, session.trialSamples - 1)
-            session.markEpochReviewed(trial, from, to)
-            Toast.makeText(this, R.string.all_marks_refined, Toast.LENGTH_SHORT).show()
-            refresh()
-            return
-        }
-        val (at, markCls) = refineQueue[refineIdx]
-        currentMarkAt = at
-        currentMarkCls = markCls
-        // window: -50..+50 ms for saccades, -300..+300 ms for blinks, widened
-        // when the pre-label is longer
-        val half = if (markCls == Native.CLS_BLINK) 300L else 50L
-        val pre = session.trialUi(trial).prelabels.firstOrNull { it.onset <= at && at <= it.offset }
-        val span = if (pre != null) maxOf(2 * half + 1, pre.offset - pre.onset + 2 * half + 1) else 2 * half + 1
-        traceView.centerOn(at, span)
-        refresh()
-    }
-
-    private fun advanceRefineQueue() {
-        ++refineIdx
-        showCurrentMark()
-    }
-
-    // --- data -----------------------------------------------------------------------------
-
-    private fun refresh() {
-        val k = trial
-        if (!session.loaded.value) return
-        Thread {
-            val ui = session.trialUi(k)
-            val from = traceView.fromSample
-            val to = minOf(traceView.toSample, session.trialSamples - 1)
-            val (x, y) = session.trace(k, from, to)
-            val n = x.size
-            val invalid = BooleanArray(n) { !x[it].isFinite() || !y[it].isFinite() }
-            val speed = FloatArray(n) { i ->
-                if (i == 0 || invalid[i] || invalid[i - 1]) 0f
-                else kotlin.math.hypot((x[i] - x[i - 1]).toDouble(), (y[i] - y[i - 1]).toDouble()).toFloat()
-            }
-            val lab = session.labels(k, from, to, true)
-            val reviewed = BooleanArray(n) { lab[it].toInt() and 0xFF != 255 }
-            uiHandlerPost {
-                traceView.setWindow(from, to,
-                    TraceView.Lane(x, invalid), TraceView.Lane(y, invalid), TraceView.Lane(speed))
-                traceView.labelBand = lab
-                traceView.reviewedBand = reviewed
-                traceView.prelabels = ui.prelabels.map { it.onset to it.offset }
-                traceView.prelabelCls = ui.prelabels.map { it.cls }
-                traceView.pointMarks = ui.pointMarks
-                traceView.expertMarks = ui.marks.map { Triple(it.onset, it.offset, it.cls) }
-                traceView.invalidate()
-                val nMarks = ui.pointMarks.size
-                val nExpert = ui.marks.count { !it.fromPrelabel }
-                statusText.text = getString(R.string.status_marks, k + 1, session.nTrials.value,
-                    nExpert, nMarks, session.reviewedSeconds.value)
-            }
-        }.start()
-    }
-
-    private fun refreshWindow() {
-        // called after a pan/zoom: only the window-dependent data changes
-        refresh()
-    }
-
-    private inline fun uiHandlerPost(crossinline block: () -> Unit) {
-        ui.post { block() }
-    }
-
-    private fun saveLabels() {
-        val path = (application as UneyeApp).labelsPathFor(session, trial)
-        val ok = session.saveLabels(path)
-        Toast.makeText(this, if (ok) R.string.labels_saved else R.string.labels_save_failed,
-            Toast.LENGTH_SHORT).show()
     }
 
     override fun onDestroy() {

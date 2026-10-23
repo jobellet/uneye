@@ -120,6 +120,11 @@ class ExportHelper(private val activity: FragmentActivity) {
             val yFile = File(dir, "${baseName}_Y.csv")
             yFile.outputStream().use { Exporter.writePositionsCsv(it, ys) }
             out.add(yFile)
+            // Preprocessing & filter settings sidecar (.json)
+            val configFile = File(dir, "${baseName}_config.json")
+            val filterSettings = FilterSettings.load(activity)
+            configFile.outputStream().use { Exporter.writeConfigJson(it, session, filterSettings) }
+            out.add(configFile)
             // .mat (X, Y, Sacc)
             if (includeMat) {
                 val matFile = File(dir, "$baseName.mat")

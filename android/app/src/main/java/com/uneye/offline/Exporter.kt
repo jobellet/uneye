@@ -107,6 +107,68 @@ object Exporter {
         ))
     }
 
+    // --- configuration sidecar -----------------------------------------------------
+
+    /**
+     * Writes configuration sidecar JSON with preprocessing filter settings and
+     * Python Colab reproduction snippet.
+     */
+    fun writeConfigJson(stream: OutputStream, session: Session, settings: FilterSettings = FilterSettings.DEFAULT) {
+        writeConfigJson(stream, session.degPerUnit, 1000.0, settings)
+    }
+
+    /**
+     * Writes configuration sidecar JSON with preprocessing filter settings and
+     * Python Colab reproduction snippet.
+     */
+    fun writeConfigJson(stream: OutputStream, degPerUnit: Double, rateHz: Double = 1000.0, settings: FilterSettings = FilterSettings.DEFAULT) {
+        val windowMs = settings.windowMs
+        val pySnippet = "# Preprocessing pipeline matching UnEye labeler:\n" +
+                "import numpy as np\n" +
+                "import scipy.signal\n\n" +
+                "# Apply Savitzky-Golay filter to test traces before passing to UnEye:\n" +
+                "window_samples = int(round($windowMs * $rateHz / 1000.0)) | 1\n" +
+                "X_clean = scipy.signal.savgol_filter(X, window_length=window_samples, polyorder=3, mode=\"interp\", axis=-1)\n" +
+                "Y_clean = scipy.signal.savgol_filter(Y, window_length=window_samples, polyorder=3, mode=\"interp\", axis=-1)\n"
+
+        val json = """
+{
+  "uneye_version": "2026.1",
+  "rate_hz": ${formatDouble(rateHz)},
+  "deg_per_unit": ${formatDouble(degPerUnit)},
+  "filter_type": "savitzky_golay",
+  "window_ms": $windowMs,
+  "poly_order": ${settings.polyOrder},
+  "adaptive_threshold_lambda": ${settings.lambda},
+  "min_peak_vel_deg_s": ${settings.minPeakVel},
+  "min_amplitude_deg": ${settings.minAmplitude},
+  "min_duration_ms": ${settings.minDurationMs},
+  "merge_gap_ms": ${settings.mergeGapMs},
+  "python_preprocessing_code": ${escapeJson(pySnippet)}
+}
+        """.trimIndent()
+        stream.bufferedWriter(Charsets.UTF_8).use { w ->
+            w.write(json)
+            w.newLine()
+        }
+    }
+
+    private fun escapeJson(s: String): String {
+        val sb = StringBuilder("\"")
+        for (c in s) {
+            when (c) {
+                '\\' -> sb.append("\\\\")
+                '"' -> sb.append("\\\"")
+                '\n' -> sb.append("\\n")
+                '\r' -> sb.append("\\r")
+                '\t' -> sb.append("\\t")
+                else -> sb.append(c)
+            }
+        }
+        sb.append("\"")
+        return sb.toString()
+    }
+
     // --- model ---------------------------------------------------------------------
 
     /** Copies the trained model .bin + .json sidecar to [dir]/[name]. Returns the .bin path. */

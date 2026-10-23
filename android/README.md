@@ -37,7 +37,8 @@ module folders to owners. All new code lives in this folder.
 |---|---|
 | `Native.kt` | the single JNI entry point (1:1 with `offline_session_jni.cpp`) |
 | `Session.kt` | the labeling session state machine; Kotlin owns only the UI state, every label/edit decision lives in the C++ facade |
-| `LabelingScreen.kt` | the two-pass labeling UI (pass 1: tap + auto-scroll; pass 2: press-drag-lift) |
+| `LabelingScreen.kt` | the two-pass labeling UI (pass 1: tap + auto-scroll; pass 2: press-drag-lift with focused event centering [-50 ms, +50 ms]) |
+| `Kinematics.kt` | Savitzky-Golay cubic filter, derivative engine, robust noise estimation, and adaptive threshold detector |
 | `TraceView.kt` | the Canvas touch view (traces, label band, marks, zoom/pan) |
 | `TraceFiles.kt` | CSV + MATLAB v5 readers (`CsvParser`, `MatReader`) |
 | `Exporter.kt` / `MatWriter.kt` | the export writers (labels CSV, X/Y CSV, `.mat`, model `.bin` + `.json`) |
@@ -95,6 +96,7 @@ provider via the Storage Access Framework):
 | `<name>_L.csv` | labels, trials × time, 0 fixation / 1 saccade / 2 blink, `nan` = not reviewed (the UnEye convention: `np.loadtxt(L, delimiter=",")`, `np.isnan(Labels)` selects the labeled samples) |
 | `<name>_X.csv`, `<name>_Y.csv` | positions in degrees, trials × time (`np.loadtxt(X)` / `np.loadtxt(Y)`) |
 | `<name>.mat` | MATLAB v5, one file with `X`, `Y`, `Sacc` (`io.loadmat(L)['Sacc']`) |
+| `<name>_config.json` | JSON sidecar with preprocessing filter parameters (`filter_type`, `window_ms`, `lambda`, `min_peak_vel_deg_s`, `min_amplitude_deg`) and a Python snippet to preprocess test traces identically with `scipy.signal.savgol_filter` |
 | `<name>_model.bin` + `.json` | the last trained model (architecture + metadata), readable by the native engine and `uneye` |
 
 Upload the CSVs or the `.mat` to Google Colab and train a uneye network with

@@ -151,4 +151,23 @@ class ExporterTest {
         dir.deleteRecursively()
         outDir.deleteRecursively()
     }
+
+    // --- configuration JSON sidecar -----------------------------------------------
+
+    @Test
+    fun configJsonExportsValidJsonWithPythonSnippet() {
+        val out = ByteArrayOutputStream()
+        val settings = FilterSettings(
+            windowMs = 21,
+            lambda = 6.0,
+            minPeakVel = 50.0,
+            minAmplitude = 0.20
+        )
+        Exporter.writeConfigJson(out, degPerUnit = 1.0, rateHz = 1000.0, settings = settings)
+        val text = out.toString(Charsets.UTF_8)
+        assertTrue(text.contains("\"filter_type\": \"savitzky_golay\""))
+        assertTrue(text.contains("\"window_ms\": 21"))
+        assertTrue(text.contains("\"adaptive_threshold_lambda\": 6.0"))
+        assertTrue(text.contains("scipy.signal.savgol_filter"))
+    }
 }

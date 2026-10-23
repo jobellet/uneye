@@ -4,6 +4,7 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- Top App Bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -16,159 +17,263 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textSize="16sp"
-            android:textStyle="bold" />
+            android:text="@string/pass1_title"
+            android:textColor="#1565C0"
+            android:textSize="15sp"
+            android:textStyle="normal" />
+
+        <!-- Pass 1 Tools (Saccade, Blink, Eraser) -->
+        <LinearLayout
+            android:id="@+id/toolGroup"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/saccadeToolBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:text="@string/tool_saccade"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/blinkToolBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginStart="4dp"
+                android:text="@string/tool_blink"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/eraserToolBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginStart="4dp"
+                android:text="@string/tool_eraser"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- Pass 2 Event Badge -->
+        <TextView
+            android:id="@+id/eventCounterBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:textColor="#37474F"
+            android:textSize="14sp"
+            android:visibility="gone" />
 
         <Button
-            android:id="@+id/classToggle"
+            android:id="@+id/filterBtn"
             android:layout_width="wrap_content"
-            android:layout_height="56dp"
-            android:minWidth="120dp"
-            android:text="Saccade"
-            android:textSize="15sp" />
+            android:layout_height="48dp"
+            android:layout_marginStart="6dp"
+            android:text="@string/filter_btn"
+            android:textSize="13sp" />
 
         <Button
             android:id="@+id/undoBtn"
             android:layout_width="wrap_content"
-            android:layout_height="56dp"
-            android:minWidth="100dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="4dp"
             android:text="@string/undo"
-            android:textSize="15sp" />
+            android:textSize="13sp" />
     </LinearLayout>
 
+    <!-- Main Canvas View -->
     <com.uneye.offline.TraceView
         android:id="@+id/traceView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1" />
 
+    <!-- Status Bar -->
     <TextView
         android:id="@+id/statusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="8dp"
-        android:textSize="14sp" />
+        android:padding="6dp"
+        android:textColor="#455A64"
+        android:textSize="13sp" />
 
+    <!-- Contextual Controls for Pass 1 (Navigation by Epoch & Trial) -->
     <LinearLayout
+        android:id="@+id/pass1Controls"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:padding="6dp">
 
         <Button
-            android:id="@+id/nextBtn"
+            android:id="@+id/prevTrialBtn"
             android:layout_width="0dp"
-            android:layout_height="64dp"
+            android:layout_height="52dp"
             android:layout_weight="1"
-            android:text="@string/next_epoch"
-            android:textSize="16sp" />
+            android:text="@string/prev_trial"
+            android:textSize="14sp" />
 
-        <LinearLayout
-            android:id="@+id/refineButtons"
+        <Button
+            android:id="@+id/prevEpochBtn"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="52dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:text="@string/prev_epoch"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/nextEpochBtn"
+            android:layout_width="0dp"
+            android:layout_height="52dp"
+            android:layout_marginStart="4dp"
             android:layout_weight="2"
-            android:orientation="horizontal"
-            android:visibility="gone">
+            android:text="@string/next_epoch"
+            android:textSize="14sp" />
 
-            <Button
-                android:id="@+id/notEventBtn"
-                android:layout_width="0dp"
-                android:layout_height="64dp"
-                android:layout_weight="1"
-                android:text="@string/not_an_event"
-                android:textSize="14sp" />
-
-            <Button
-                android:id="@+id/backBtn"
-                android:layout_width="0dp"
-                android:layout_height="64dp"
-                android:layout_weight="1"
-                android:text="@string/back"
-                android:textSize="16sp" />
-
-            <Button
-                android:id="@+id/widerBtn"
-                android:layout_width="0dp"
-                android:layout_height="64dp"
-                android:layout_weight="1"
-                android:text="@string/wider"
-                android:textSize="16sp" />
-        </LinearLayout>
+        <Button
+            android:id="@+id/nextTrialBtn"
+            android:layout_width="0dp"
+            android:layout_height="52dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:text="@string/next_trial"
+            android:textSize="14sp" />
     </LinearLayout>
 
+    <!-- Contextual Controls for Pass 2 (Event-by-Event Focus & Refinement) -->
+    <LinearLayout
+        android:id="@+id/pass2Controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="6dp"
+        android:visibility="gone">
+
+        <Button
+            android:id="@+id/prevEventBtn"
+            android:layout_width="0dp"
+            android:layout_height="54dp"
+            android:layout_weight="1"
+            android:text="◀ Prev"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/acceptPreBtn"
+            android:layout_width="0dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="2"
+            android:text="@string/accept_prelabel"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/notEventBtn"
+            android:layout_width="0dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1.5"
+            android:text="@string/not_an_event"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/widerBtn"
+            android:layout_width="0dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1.2"
+            android:text="@string/wider"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/nextEventBtn"
+            android:layout_width="0dp"
+            android:layout_height="54dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:text="Next ▶"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <!-- Primary Action Bar (Pass Switch, Save, Train, Export) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:padding="6dp">
 
         <Button
             android:id="@+id/switchPassBtn"
             android:layout_width="0dp"
-            android:layout_height="56dp"
-            android:layout_weight="1"
+            android:layout_height="50dp"
+            android:layout_weight="1.5"
             android:text="@string/switch_pass"
-            android:textSize="16sp" />
+            android:textSize="14sp" />
 
         <Button
             android:id="@+id/saveBtn"
             android:layout_width="0dp"
-            android:layout_height="56dp"
+            android:layout_height="50dp"
+            android:layout_marginStart="4dp"
             android:layout_weight="1"
             android:text="@string/save"
-            android:textSize="16sp" />
+            android:textSize="14sp" />
 
         <Button
             android:id="@+id/trainNowBtn"
             android:layout_width="0dp"
-            android:layout_height="56dp"
-            android:layout_weight="1"
+            android:layout_height="50dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1.2"
             android:text="@string/train_now"
-            android:textSize="16sp" />
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/metricsBtn"
+            android:layout_width="0dp"
+            android:layout_height="50dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:text="@string/metrics"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/exportBtn"
+            android:layout_width="0dp"
+            android:layout_height="50dp"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:text="@string/export"
+            android:textSize="14sp" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/trainStatusText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="8dp"
-        android:text="@string/training_idle"
-        android:textSize="14sp" />
-
+    <!-- Background Training & Convergence Status Footer -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:padding="6dp">
+
+        <TextView
+            android:id="@+id/trainStatusText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/training_idle"
+            android:textColor="#546E7A"
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/convergenceBadge"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_weight="1"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
             android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
             android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:textStyle="bold"
+            android:textSize="13sp"
             android:visibility="gone" />
-
-        <Button
-            android:id="@+id/metricsBtn"
-            android:layout_width="0dp"
-            android:layout_height="56dp"
-            android:layout_weight="1"
-            android:text="@string/metrics"
-            android:textSize="16sp" />
-
-        <Button
-            android:id="@+id/exportBtn"
-            android:layout_width="0dp"
-            android:layout_height="56dp"
-            android:layout_weight="1"
-            android:text="@string/export"
-            android:textSize="16sp" />
     </LinearLayout>
 
 </LinearLayout>

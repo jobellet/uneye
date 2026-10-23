@@ -3,9 +3,11 @@ package com.uneye.offline
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -14,28 +16,27 @@ import android.view.View
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
- * Touch-optimized trace view (phase 2). Draws, for one epoch of one trial:
- *  - the X (top lane) and Y (bottom lane) position traces, plus the speed lane,
- *  - the rendered labels as a background band (reviewed only),
- *  - the invalid (blink / lost) samples as grey gaps,
- *  - the pre-labels as dimmed vertical marks, the point marks (pass 1) as
- *    triangles, the expert events (pass 2) as brackets,
- *  - a magnifier loupe above the finger while dragging (pass 2).
+ * Touch-optimized trace view with high data-ink ratio (Edward Tufte principles).
  *
- * Gestures:
- *  - single tap: [onTap(sample)] — pass 1 places / removes a point mark,
- *    pass 2 double-tap accepts the pre-label boundaries.
- *  - long press + drag: pass 2 onset/offset refinement (press = onset,
- *    lift = offset), reported through [onDragSpan].
- *  - two-finger pinch / vertical drag: zoom (time axis) and pan.
- *
- * All label decisions are delegated to the callbacks; the view keeps no label
- * state (the C++ ExpertLabels owns it).
+ * Displays:
+ *  - Lane 0: Position X trace (degrees) with 1° floating scale bar and range.
+ *  - Lane 1: Position Y trace (degrees) with 1° floating scale bar and range.
+ *  - Lane 2: Velocity trace (°/s) with dashed adaptive threshold (λ·σ) line.
+ *  - Reviewed bands, ground truth labels, and pre-label brackets.
+ *  - Pass 2: focused event highlight window with boundary drag handles.
+ *  - Magnifier loupe during drag refinement.
  */
 class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) :
     View(context, attrs) {
+
+    companion object {
+        const val TOOL_SACCADE = 1
+        const val TOOL_BLINK = 2
+        const val TOOL_ERASER = 3
+    }
 
     // --- data (set by the screen before invalidate) --------------------------------
 
@@ -51,12 +52,24 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         private set
     var speedLane: Lane? = null
         private set
+
     var labelBand: ByteArray? = null          // per sample, aligned with [fromSample]
     var reviewedBand: BooleanArray? = null     // true where the sample is reviewed
-    var prelabels: List<Pair<Long, Long>> = emptyList()     // (onset, offset) dimmed
+    var prelabels: List<Pair<Long, Long>> = emptyList()     // (onset, offset)
     var prelabelCls: List<Int> = emptyList()
     var pointMarks: List<Pair<Long, Int>> = emptyList()     // (at, cls)
     var expertMarks: List<Triple<Long, Long, Int>> = emptyList()  // (onset, offset, cls)
+
+    var currentThreshold: Double = 0.0
+    var thresholdLambda: Double = 6.0
+    var degPerUnit: Double = 1.0
+
+    // Pass 2 state
+    var isPassTwo: Boolean = false
+    var activePutativeRange: Pair<Long, Long>? = null
+    var activeClass: Int = Native.CLS_SACCADE
+    var activeTool: Int = TOOL_SACCADE
+
     var cursorSample: Long = -1               // drawn as a vertical line (pass 2 finger)
     var showLoupe: Boolean = false
 
@@ -68,20 +81,60 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
     var onDragSpan: ((onset: Long, offset: Long) -> Unit)? = null
     var onScrolled: ((from: Long, to: Long) -> Unit)? = null   // pan / zoom changed
 
-    // --- colors ------------------------------------------------------------------------
+    // --- colors & paints --------------------------------------------------------------
 
-    private val paintTrace = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 3f; style = Paint.Style.STROKE }
-    private val paintSpeed = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 2f; style = Paint.Style.STROKE; color = 0xFF7E57C2.toInt() }
+    private val typefaceNormal = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+
+    private val paintBg = Paint().apply { color = 0xFFFAFAFA.toInt() }
+    private val paintDivider = Paint().apply { color = 0xFFE0E0E0.toInt(); strokeWidth = 1.5f }
+
+    private val paintTraceX = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 3f; style = Paint.Style.STROKE; color = 0xFF1E88E5.toInt()
+    }
+    private val paintTraceY = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 3f; style = Paint.Style.STROKE; color = 0xFF43A047.toInt()
+    }
+    private val paintSpeed = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 2.5f; style = Paint.Style.STROKE; color = 0xFF7E57C2.toInt()
+    }
+
+    private val paintThreshold = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 1.5f; style = Paint.Style.STROKE; color = 0xFFD32F2F.toInt()
+        pathEffect = DashPathEffect(floatArrayOf(12f, 12f), 0f)
+    }
+
     private val paintLabelBand = Paint()
-    private val paintInvalid = Paint().apply { color = 0x33000000 }
-    private val paintPre = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 4f; style = Paint.Style.STROKE; color = 0x66FFB300.toInt() }
+    private val paintInvalid = Paint().apply { color = 0x22C62828 }
+    private val paintPre = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 3f; style = Paint.Style.STROKE; color = 0x88FFB300.toInt()
+    }
     private val paintPoint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val paintExpert = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 5f; style = Paint.Style.STROKE }
-    private val paintCursor = Paint().apply { strokeWidth = 4f; color = 0xFFD32F2F.toInt() }
-    private val paintGrid = Paint().apply { strokeWidth = 1f; color = 0x22000000 }
-    private val paintLoupeBg = Paint().apply { color = 0xCCFFFFFF.toInt() }
-    private val paintLoupeStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 3f; color = 0xFF1565C0.toInt(); style = Paint.Style.STROKE }
-    private val paintText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 30f; color = Color.DKGRAY }
+    private val paintCursor = Paint().apply { strokeWidth = 3f; color = 0xFFD32F2F.toInt() }
+    private val paintGrid = Paint().apply { strokeWidth = 1f; color = 0x1A000000 }
+    private val paintScaleBar = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 3.5f; style = Paint.Style.STROKE; color = 0xFF37474F.toInt()
+    }
+
+    private val paintLoupeBg = Paint().apply { color = 0xEEFFFFFF.toInt() }
+    private val paintLoupeStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 2.5f; color = 0xFF1565C0.toInt(); style = Paint.Style.STROKE
+    }
+
+    private val paintText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 28f; color = 0xFF546E7A.toInt(); typeface = typefaceNormal
+        isFakeBoldText = false
+    }
+    private val paintThresholdText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 26f; color = 0xFFD32F2F.toInt(); typeface = typefaceNormal
+        isFakeBoldText = false
+    }
+
+    private val paintPass2Highlight = Paint().apply { color = 0x261E88E5.toInt() }
+    private val paintPass2Bound = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 2f; style = Paint.Style.STROKE; color = 0xFF1565C0.toInt()
+        pathEffect = DashPathEffect(floatArrayOf(8f, 8f), 0f)
+    }
 
     private var dragStartSample = -1L
     private var dragCurSample = -1L
@@ -111,7 +164,6 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
 
     // --- data injection ------------------------------------------------------------------
 
-    /** Sets the visible window and the lanes; call before invalidate(). */
     fun setWindow(from: Long, to: Long, x: Lane?, y: Lane?, speed: Lane?) {
         fromSample = from; toSample = to
         xLane = x; yLane = y; speedLane = speed
@@ -131,7 +183,7 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         return (sample - fromSample).toFloat() / (toSample - fromSample) * width
     }
 
-    // --- touch ----------------------------------------------------------------------------
+    // --- touch gestures -------------------------------------------------------------------
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         scaleDetector.onTouchEvent(event)
@@ -144,8 +196,8 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
             }
             MotionEvent.ACTION_MOVE -> {
                 val s = sampleAt(event.x)
-                if (!dragging && abs(s - dragStartSample) > 12) {
-                    dragging = true       // a real drag, not a tap: pass 2 refinement
+                if (!dragging && abs(s - dragStartSample) > 8) {
+                    dragging = true       // a real drag: pass 2 refinement
                     showLoupe = true
                 }
                 if (dragging) {
@@ -182,7 +234,6 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         invalidate()
     }
 
-    /** Pans so that [center] is in the middle of the view. */
     fun centerOn(center: Long, span: Long) {
         val from = (center - span / 2).coerceAtLeast(0)
         fromSample = from
@@ -196,70 +247,234 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (width <= 0 || height <= 0) return
+
+        // 1. Solid clear to prevent ghosting between passes or frames
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paintBg)
+
         val laneH = height / 3f
-        drawLaneBand(canvas, 0f, laneH)          // X
-        drawLaneBand(canvas, laneH, 2 * laneH)   // Y
-        drawLaneBand(canvas, 2 * laneH, height.toFloat())  // speed
+        val xLaneTop = 0f
+        val yLaneTop = laneH
+        val spLaneTop = 2 * laneH
+
+        // Lane Dividers
+        canvas.drawLine(0f, yLaneTop, width.toFloat(), yLaneTop, paintDivider)
+        canvas.drawLine(0f, spLaneTop, width.toFloat(), spLaneTop, paintDivider)
+
+        // 2. Background label bands & reviewed regions
+        drawReviewedBands(canvas)
+        drawLabelBands(canvas)
+
+        // 3. In Pass 2: highlight the active putative event
+        if (isPassTwo) {
+            drawPass2Highlight(canvas)
+        }
+
+        // 4. Invalid / blink gaps
         val xl = xLane; val yl = yLane; val sp = speedLane
-        if (xl != null) drawTrace(canvas, xl, 0f, laneH, paintTrace, 0xFF1565C0.toInt())
-        if (yl != null) drawTrace(canvas, yl, laneH, 2 * laneH, paintTrace, 0xFF2E7D32.toInt())
-        if (sp != null) drawTrace(canvas, sp, 2 * laneH, height.toFloat(), paintSpeed, 0xFF7E57C2.toInt())
-        drawLabels(canvas)
-        drawInvalidGaps(canvas, xl, 0f, laneH)
-        drawInvalidGaps(canvas, yl, laneH, 2 * laneH)
+        drawInvalidGaps(canvas, xl, xLaneTop, yLaneTop)
+        drawInvalidGaps(canvas, yl, yLaneTop, spLaneTop)
+
+        // 5. Traces
+        if (xl != null) drawPositionTrace(canvas, xl, xLaneTop, yLaneTop, paintTraceX, "Position X (°)")
+        if (yl != null) drawPositionTrace(canvas, yl, yLaneTop, spLaneTop, paintTraceY, "Position Y (°)")
+        if (sp != null) drawVelocityTrace(canvas, sp, spLaneTop, height.toFloat(), "Velocity (°/s)")
+
+        // 6. Pre-labels, point marks, and expert marks
         drawPrelabels(canvas)
         drawPointMarks(canvas)
         drawExpertMarks(canvas)
+
+        // 7. Cursor / drag indicator
         if (cursorSample >= 0) {
             val px = pxOf(cursorSample)
             canvas.drawLine(px, 0f, px, height.toFloat(), paintCursor)
         }
-        if (dragging) drawLoupe(canvas)
+
+        // 8. Loupe magnifier during drag
+        if (dragging && showLoupe) {
+            drawLoupe(canvas)
+        }
+
+        // 9. Time scale ruler at bottom
         drawTimeRuler(canvas)
     }
 
-    private fun drawLaneBand(canvas: Canvas, top: Float, bottom: Float) {
-        canvas.drawRect(0f, top, width.toFloat(), bottom, paintGrid)
-        canvas.drawLine(0f, bottom, width.toFloat(), bottom, paintGrid)
+    private fun drawReviewedBands(canvas: Canvas) {
+        val rev = reviewedBand ?: return
+        var start = -1
+        val top = 0f; val h = height.toFloat()
+        paintLabelBand.color = 0x142E7D32 // faint green tint
+
+        for (i in 0 until rev.size) {
+            if (rev[i] && start == -1) {
+                start = i
+            } else if (!rev[i] && start != -1) {
+                val x0 = pxOf(fromSample + start)
+                val x1 = pxOf(fromSample + i)
+                canvas.drawRect(x0, top, x1, h, paintLabelBand)
+                // Top green hairline
+                canvas.drawRect(x0, top, x1, top + 6f, paintExpert.apply { color = 0xFF2E7D32.toInt() })
+                start = -1
+            }
+        }
+        if (start != -1) {
+            val x0 = pxOf(fromSample + start)
+            val x1 = pxOf(fromSample + rev.size)
+            canvas.drawRect(x0, top, x1, h, paintLabelBand)
+            canvas.drawRect(x0, top, x1, top + 6f, paintExpert.apply { color = 0xFF2E7D32.toInt() })
+        }
     }
 
-    private fun drawTrace(canvas: Canvas, lane: Lane, top: Float, bottom: Float, paint: Paint, color: Int) {
-        paint.color = color
-        val mid = (top + bottom) / 2f
-        val amp = (bottom - top) / 2f * 0.9f
+    private fun drawLabelBands(canvas: Canvas) {
+        val band = labelBand ?: return
+        val top = 0f; val bottom = height.toFloat()
+        var start = -1
+        var curCls = 0
+
+        for (i in band.indices) {
+            val l = band[i].toInt() and 0xFF
+            if (l != curCls) {
+                if (curCls == 1 || curCls == 2) {
+                    val x0 = pxOf(fromSample + start)
+                    val x1 = pxOf(fromSample + i)
+                    paintLabelBand.color = if (curCls == 1) 0x291E88E5.toInt() else 0x2EC62828.toInt()
+                    canvas.drawRect(x0, top, max(x1, x0 + 2f), bottom, paintLabelBand)
+                }
+                start = i
+                curCls = l
+            }
+        }
+        if (curCls == 1 || curCls == 2) {
+            val x0 = pxOf(fromSample + start)
+            val x1 = pxOf(fromSample + band.size)
+            paintLabelBand.color = if (curCls == 1) 0x291E88E5.toInt() else 0x2EC62828.toInt()
+            canvas.drawRect(x0, top, max(x1, x0 + 2f), bottom, paintLabelBand)
+        }
+    }
+
+    private fun drawPass2Highlight(canvas: Canvas) {
+        val r = activePutativeRange ?: return
+        val (on, off) = r
+        if (off < fromSample || on > toSample) return
+
+        val x0 = pxOf(on)
+        val x1 = pxOf(off + 1)
+        paintPass2Highlight.color = if (activeClass == Native.CLS_BLINK) 0x22C62828.toInt() else 0x221E88E5.toInt()
+        canvas.drawRect(x0, 0f, max(x1, x0 + 2f), height.toFloat(), paintPass2Highlight)
+
+        // Dashed boundaries
+        paintPass2Bound.color = if (activeClass == Native.CLS_BLINK) 0xFFC62828.toInt() else 0xFF1565C0.toInt()
+        canvas.drawLine(x0, 0f, x0, height.toFloat(), paintPass2Bound)
+        canvas.drawLine(x1, 0f, x1, height.toFloat(), paintPass2Bound)
+    }
+
+    private fun drawPositionTrace(
+        canvas: Canvas, lane: Lane, top: Float, bottom: Float, paint: Paint, title: String
+    ) {
+        val h = bottom - top
         var lo = Float.POSITIVE_INFINITY
         var hi = Float.NEGATIVE_INFINITY
-        for (v in lane.values) if (v.isFinite()) { if (v < lo) lo = v; if (v > hi) hi = v }
+        for (v in lane.values) {
+            if (v.isFinite()) {
+                if (v < lo) lo = v
+                if (v > hi) hi = v
+            }
+        }
         if (!lo.isFinite()) return
-        val range = (hi - lo).coerceAtLeast(1e-6f)
+
+        var minV = lo
+        var maxV = hi
+        val pad = max(0.2f, (maxV - minV) * 0.15f)
+        minV -= pad
+        maxV += pad
+
+        val oneDeg = (1.0 / max(1e-4, degPerUnit)).toFloat()
+        if (maxV - minV < 1.25f * oneDeg) {
+            val c = (minV + maxV) / 2f
+            minV = c - 0.625f * oneDeg
+            maxV = c + 0.625f * oneDeg
+        }
+
+        // Title on left
+        canvas.drawText(title, 20f, top + 36f, paintText)
+
+        // Range text and 1° scale bar on right
+        val rangeDeg = (maxV - minV) * degPerUnit.toFloat()
+        val rangeStr = String.format(java.util.Locale.US, "%.1f°", rangeDeg)
+        canvas.drawText(rangeStr, width - 110f, top + 36f, paintText)
+
+        // 1° scale bar
+        val barH = (oneDeg / (maxV - minV)) * (h - 40f)
+        val barX = width - 24f
+        val barY1 = bottom - 16f
+        val barY0 = barY1 - barH
+        canvas.drawLine(barX, barY1, barX, barY0, paintScaleBar)
+        canvas.drawLine(barX - 6f, barY0, barX + 6f, barY0, paintScaleBar)
+        canvas.drawLine(barX - 6f, barY1, barX + 6f, barY1, paintScaleBar)
+
         val path = Path()
         var started = false
         val n = lane.values.size
         for (i in 0 until n) {
             val v = lane.values[i]
             val px = pxOf(fromSample + i)
-            if (!v.isFinite()) { started = false; continue }
-            val py = mid - (v - (lo + hi) / 2f) / range * amp
-            if (!started) { path.moveTo(px, py); started = true } else path.lineTo(px, py)
+            if (!v.isFinite()) {
+                started = false
+                continue
+            }
+            val py = bottom - 16f - ((v - minV) / (maxV - minV)) * (h - 32f)
+            if (!started) {
+                path.moveTo(px, py)
+                started = true
+            } else {
+                path.lineTo(px, py)
+            }
         }
         canvas.drawPath(path, paint)
     }
 
-    private fun drawLabels(canvas: Canvas) {
-        val band = labelBand ?: return
-        val top = 0f; val bottom = height.toFloat()
-        for (i in band.indices) {
-            val l = band[i].toInt() and 0xFF
-            if (l == 0 || l == 255) continue
-            paintLabelBand.color = when (l) {
-                1 -> 0x331565C0
-                2 -> 0x33C62828
-                else -> 0x22000000
-            }
-            val x0 = pxOf(fromSample + i)
-            val x1 = pxOf(fromSample + i + 1)
-            canvas.drawRect(x0, top, x1.coerceAtLeast(x0 + 1f), bottom, paintLabelBand)
+    private fun drawVelocityTrace(
+        canvas: Canvas, lane: Lane, top: Float, bottom: Float, title: String
+    ) {
+        val h = bottom - top
+        var maxSp = 50f
+        for (v in lane.values) {
+            if (v.isFinite() && v > maxSp) maxSp = v
         }
+        maxSp = max(100f, maxSp * 1.15f)
+
+        // Title and max speed
+        canvas.drawText(title, 20f, top + 36f, paintText)
+        val maxStr = String.format(java.util.Locale.US, "%d °/s", maxSp.roundToInt())
+        canvas.drawText(maxStr, width - 110f, top + 36f, paintText)
+
+        // Dashed adaptive threshold line
+        if (currentThreshold > 0 && currentThreshold <= maxSp) {
+            val thY = bottom - 16f - (currentThreshold.toFloat() / maxSp) * (h - 32f)
+            canvas.drawLine(0f, thY, width.toFloat(), thY, paintThreshold)
+            val thStr = String.format(java.util.Locale.US, "Threshold: %.1f °/s (%.1fσ)", currentThreshold, thresholdLambda)
+            canvas.drawText(thStr, width - 360f, thY - 8f, paintThresholdText)
+        }
+
+        val path = Path()
+        var started = false
+        val n = lane.values.size
+        for (i in 0 until n) {
+            val v = lane.values[i]
+            val px = pxOf(fromSample + i)
+            if (!v.isFinite()) {
+                started = false
+                continue
+            }
+            val py = bottom - 16f - (v / maxSp) * (h - 32f)
+            if (!started) {
+                path.moveTo(px, py)
+                started = true
+            } else {
+                path.lineTo(px, py)
+            }
+        }
+        canvas.drawPath(path, paintSpeed)
     }
 
     private fun drawInvalidGaps(canvas: Canvas, lane: Lane?, top: Float, bottom: Float) {
@@ -268,7 +483,7 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
             if (!inv[i]) continue
             val x0 = pxOf(fromSample + i)
             val x1 = pxOf(fromSample + i + 1)
-            canvas.drawRect(x0, top, x1.coerceAtLeast(x0 + 1f), bottom, paintInvalid)
+            canvas.drawRect(x0, top, max(x1, x0 + 1f), bottom, paintInvalid)
         }
     }
 
@@ -279,8 +494,8 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
             val cls = prelabelCls.getOrElse(i) { 1 }
             paintPre.color = if (cls == 2) 0x66C62828.toInt() else 0x66FFB300.toInt()
             val x0 = pxOf(on); val x1 = pxOf(off + 1)
-            canvas.drawLine(x0, mid - 40, x0, mid + 40, paintPre)
-            canvas.drawLine(x1, mid - 40, x1, mid + 40, paintPre)
+            canvas.drawLine(x0, mid - 35, x0, mid + 35, paintPre)
+            canvas.drawLine(x1, mid - 35, x1, mid + 35, paintPre)
             canvas.drawLine(x0, mid, x1, mid, paintPre)
         }
     }
@@ -292,7 +507,7 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
             paintPoint.style = Paint.Style.FILL
             val px = pxOf(at)
             val path = Path()
-            path.moveTo(px, mid - 50); path.lineTo(px - 25, mid - 10); path.lineTo(px + 25, mid - 10)
+            path.moveTo(px, mid - 45); path.lineTo(px - 20, mid - 10); path.lineTo(px + 20, mid - 10)
             path.close()
             canvas.drawPath(path, paintPoint)
         }
@@ -303,26 +518,25 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         for ((on, off, cls) in expertMarks) {
             paintExpert.color = if (cls == 2) 0xFFC62828.toInt() else 0xFF1565C0.toInt()
             val x0 = pxOf(on); val x1 = pxOf(off + 1)
-            canvas.drawLine(x0, mid - 60, x0, mid - 20, paintExpert)
-            canvas.drawLine(x0, mid - 20, x1, mid - 20, paintExpert)
-            canvas.drawLine(x1, mid - 20, x1, mid - 60, paintExpert)
-            canvas.drawLine(x0, mid + 20, x0, mid + 60, paintExpert)
-            canvas.drawLine(x0, mid + 60, x1, mid + 60, paintExpert)
-            canvas.drawLine(x1, mid + 60, x1, mid + 20, paintExpert)
+            canvas.drawLine(x0, mid - 50, x0, mid - 15, paintExpert)
+            canvas.drawLine(x0, mid - 15, x1, mid - 15, paintExpert)
+            canvas.drawLine(x1, mid - 15, x1, mid - 50, paintExpert)
+            canvas.drawLine(x0, mid + 15, x0, mid + 50, paintExpert)
+            canvas.drawLine(x0, mid + 50, x1, mid + 50, paintExpert)
+            canvas.drawLine(x1, mid + 50, x1, mid + 15, paintExpert)
         }
     }
 
-    /** Magnifier above the finger: a zoomed copy of the trace around the cursor. */
     private fun drawLoupe(canvas: Canvas) {
-        val r = 140f
+        val r = 130f
         val cx = width / 2f
-        val cy = r + 30f
+        val cy = r + 24f
         val rect = RectF(cx - r, cy - r, cx + r, cy + r)
-        canvas.drawRoundRect(rect, 24f, 24f, paintLoupeBg)
-        canvas.drawRoundRect(rect, 24f, 24f, paintLoupeStroke)
+        canvas.drawRoundRect(rect, 20f, 20f, paintLoupeBg)
+        canvas.drawRoundRect(rect, 20f, 20f, paintLoupeStroke)
         canvas.save()
         canvas.clipRect(rect)
-        val span = 200L    // loupe shows +/- 100 samples around the cursor
+        val span = 160L
         val lo = (cursorSample - span / 2).coerceAtLeast(fromSample)
         val hi = (cursorSample + span / 2).coerceAtMost(toSample)
         val xl = xLane
@@ -338,38 +552,38 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
             if (lo2.isFinite()) {
                 val range = (hi2 - lo2).coerceAtLeast(1e-6f)
                 val mid = cy
-                val amp = r * 0.8f
+                val amp = r * 0.75f
                 for (i in (lo - fromSample).toInt()..(hi - fromSample).toInt()) {
                     if (i < 0 || i >= xl.values.size) continue
                     val v = xl.values[i]
                     if (!v.isFinite()) { started = false; continue }
                     val px = rect.left + (i - (lo - fromSample)).toFloat() / (hi - lo + 1).coerceAtLeast(1) * rect.width()
                     val py = mid - (v - (lo2 + hi2) / 2f) / range * amp
-                    if (!started) { path.moveTo(px, py); started = true } else path.lineTo(px, py)
+                    if (!started) { path.moveTo(px, py) } else path.lineTo(px, py)
                 }
-                canvas.drawPath(path, paintTrace.apply { color = 0xFF1565C0.toInt() })
+                canvas.drawPath(path, paintTraceX)
             }
         }
         canvas.restore()
-        // cursor line inside the loupe
         val cpx = cx
         canvas.drawLine(cpx, rect.top, cpx, rect.bottom, paintCursor)
-        canvas.drawText("${cursorSample}", rect.left + 10, rect.bottom - 10, paintText)
+        canvas.drawText("${cursorSample} ms", rect.left + 14, rect.bottom - 12, paintText)
     }
 
     private fun drawTimeRuler(canvas: Canvas) {
-        val y = height - 8f
-        val spanMs = (toSample - fromSample + 1)   // 1 sample = 1 ms at 1 kHz
+        val y = height - 10f
+        val spanMs = (toSample - fromSample + 1)
         val step = when {
-            spanMs <= 500 -> 50L
-            spanMs <= 2000 -> 200L
+            spanMs <= 300 -> 50L
+            spanMs <= 1000 -> 100L
+            spanMs <= 2500 -> 250L
             else -> 500L
         }
         var s = (fromSample / step) * step
         while (s <= toSample) {
             val px = pxOf(s)
-            canvas.drawLine(px, y - 14, px, y, paintGrid)
-            canvas.drawText("${s}ms", px + 4, y - 18, paintText.apply { textSize = 24f })
+            canvas.drawLine(px, y - 12, px, y, paintGrid)
+            canvas.drawText("${s} ms", px + 4, y - 14, paintText.apply { textSize = 22f })
             s += step
         }
     }

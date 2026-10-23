@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/filter_sg_window"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/sgWindowEdit"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:inputType="number"
+            android:text="21"
+            android:textSize="16sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/filter_lambda"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/lambdaEdit"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:inputType="numberDecimal"
+            android:text="6.0"
+            android:textSize="16sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/filter_min_peak_vel"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/minVelEdit"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:inputType="numberDecimal"
+            android:text="50.0"
+            android:textSize="16sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/filter_min_amp"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/minAmpEdit"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:inputType="numberDecimal"
+            android:text="0.20"
+            android:textSize="16sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/filter_hint"
+            android:textColor="#78909C"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/resetFilterBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginTop="12dp"
+            android:text="@string/filter_reset_defaults" />
+
+    </LinearLayout>
+</ScrollView>

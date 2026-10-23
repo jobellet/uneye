@@ -104,7 +104,12 @@ class MainActivity : AppCompatActivity() {
         val modelEdit = dialog.findViewById<EditText>(R.id.modelEdit)
         val estimateBox = dialog.findViewById<android.widget.CheckBox>(R.id.estimateBox)
         preSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-            listOf("HMM", "Modèle embarqué (combined.bin)", "Dernier modèle entraîné", "Aucun"))
+            listOf(
+                getString(R.string.prelabeler_hmm),
+                getString(R.string.prelabeler_shipped),
+                getString(R.string.prelabeler_last_trained),
+                getString(R.string.prelabeler_none)
+            ))
         AlertDialog.Builder(this)
             .setTitle(R.string.load_dialog_title)
             .setView(dialog)
