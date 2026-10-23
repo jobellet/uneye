@@ -40,3 +40,6 @@ foundation/runs/landing_tex_saliency.csv
 data/archive 2.zip
 data/DTB70/
 data/DeepGazeKit/
+
+node_modules/
+package-lock.json

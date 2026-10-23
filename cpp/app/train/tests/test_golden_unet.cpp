@@ -12,7 +12,11 @@ int main(int, char** argv) {
     std::ifstream f(std::string(argv[1]) + "/app/train/tests/golden_unet_grads.txt"); if (!f) { std::printf("cannot open the golden file\n"); return 1; }
     std::map<std::string, std::vector<double>> g; int B = 0, T = 0, K = 0, ks = 0, mp = 0; std::string line;
     while (std::getline(f, line)) { std::istringstream is(line); std::string name; is >> name; if (name == "dims") { is >> B >> T >> K >> ks >> mp; continue; } size_t n; is >> n; auto& v = g[name]; v.resize(n); for (auto& x : v) is >> x; }
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    UNet<double> net(K, ks, mp, 1);
+#else
     UNet<double> net(K, ks, mp, 2);
+#endif
     std::vector<std::vector<double>> st; for (int i = 0; i < 19; ++i) { for (int j = 0; j < 4; ++j) { auto it = g.find("state_" + std::to_string(i) + "_" + std::to_string(j)); if (it == g.end()) break; st.push_back(it->second); } }
     if (!net.load_state(st)) { std::printf("state layout mismatch\n"); return 1; }
     net.zero_grad(); auto& z = net.forward(g["x"].data(), B, T, true);

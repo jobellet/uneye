@@ -33,6 +33,8 @@
                 <button id="filterBtn" class="btn btn-secondary">⚙ Filter</button>
                 <button id="metricsBtn" class="btn btn-secondary">Metrics</button>
                 <button id="trainNowBtn" class="btn btn-train">Train</button>
+                <button id="cancelTrainBtn" class="btn btn-danger hidden">Cancel</button>
+                <button id="downloadModelBtn" class="btn btn-secondary" title="Download model">Model</button>
                 <select id="exportFormat" class="btn btn-secondary" title="Export format: CSV (L, X, Y files) or one file with all trials, labels and names">
                     <option value="csv" selected>CSV</option>
                     <option value="npz">NumPy .npz</option>
@@ -116,6 +118,13 @@
                         <option value="31">31 ms (medium)</option>
                         <option value="51">51 ms (strong)</option>
                         <option value="0">Off (raw trace)</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="initialModelSelect">Initial model weights:</label>
+                    <select id="initialModelSelect">
+                        <option value="pretrained" selected>Pretrained (combined.bin)</option>
+                        <option value="scratch">From scratch (random)</option>
                     </select>
                 </div>
                 <div class="form-row">
@@ -206,5 +215,12 @@
 
     <script src="formats.js"></script>
     <script src="app.js"></script>
+<script>
+    if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+            navigator.serviceWorker.register("./sw.js").catch(err => console.log("SW reg failed:", err));
+        });
+    }
+</script>
 </body>
 </html>

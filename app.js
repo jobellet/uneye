@@ -70,6 +70,12 @@
         convergenceAlertShown: false,
         testTrials: new Set(),
         reviewedAtLastTraining: 0.0,
+        isTraining: false,
+        trainedModelBin: null,
+        trainedModelJson: null,
+        previousPrelabels: null,
+        wakeLock: null,
+        initialWeightsMode: 'pretrained',
 
         // Signal Filtering & Preprocessing (Savitzky-Golay + Adaptive Engbert/HMM Threshold)
         filterSettings: {
@@ -115,6 +121,9 @@
         reviewedStatus: document.getElementById('reviewedStatus'),
         eventsStatus: document.getElementById('eventsStatus'),
         trainStatus: document.getElementById('trainStatus'),
+        cancelTrainBtn: document.getElementById('cancelTrainBtn'),
+        downloadModelBtn: document.getElementById('downloadModelBtn'),
+        initialModelSelect: document.getElementById('initialModelSelect'),
         fileInput: document.getElementById('fileInput'),
         exportFormat: document.getElementById('exportFormat'),
         loadModal: document.getElementById('loadModal'),
@@ -652,6 +661,12 @@
         }
         state.reviewedRanges[trialIdx] = merged;
         syncRenderedLabels(trialIdx);
+        saveToIndexedDB();
+        // Auto-train after every 20s of newly reviewed data
+        const totRev = totalReviewedSeconds();
+        if (!state.isTraining && (totRev - state.reviewedAtLastTraining >= 20.0)) {
+            runTrainingRound();
+        }
     }
 
     function syncRenderedLabels(trialIdx) {
@@ -1458,52 +1473,333 @@
         }
     }
 
-    // --- Client-Side Training & Convergence Bootstrap ---
-    function runTrainingRound() {
+    // --- Web Worker & On-Device Training (WASM SIMD) ---
+    let trainWorker = null;
+    function getTrainWorker() {
+        if (!trainWorker) {
+            trainWorker = new Worker('train_worker.js');
+        }
+        return trainWorker;
+    }
+
+    async function runTrainingRound() {
+        if (state.isTraining) return;
         const reviewedS = totalReviewedSeconds();
         if (reviewedS < 0.5) {
             alert("Please label at least 0.5 seconds of reviewed data before training.");
             return;
         }
 
+        state.isTraining = true;
         elements.trainStatus.className = 'train-active';
-        elements.trainStatus.textContent = "On-device training…";
+        elements.trainStatus.textContent = "Preparing training windows…";
+        if (elements.cancelTrainBtn) elements.cancelTrainBtn.classList.remove('hidden');
 
-        setTimeout(() => {
-            // Simulate training metrics progressing on the iPad M1
-            const roundIdx = state.convergenceHistory.length + 1;
-            const counts = totalExpertEventCounts();
+        // Keep screen awake during training (iPad Safari & Chrome)
+        try {
+            if ('wakeLock' in navigator) {
+                state.wakeLock = await navigator.wakeLock.request('screen');
+            }
+        } catch (e) {
+            console.log("WakeLock:", e);
+        }
 
-            // Saccade F1 converges towards ~0.88-0.92
-            const targetF1 = 0.88 + Math.min(0.04, roundIdx * 0.01);
-            const noise = (Math.random() - 0.5) * 0.008;
-            const testF1Saccade = Math.min(1.0, Math.max(0.70, targetF1 + noise));
-            const testKappaSaccade = testF1Saccade * 0.92;
-            const testF1Blink = 0.96;
-            const testKappaBlink = 0.95;
+        // Training set: reviewed stretches of NON-test trials only (point marks never train)
+        const traces = [];
+        for (let t = 0; t < state.trials.length; t++) {
+            if (state.testTrials.has(t)) continue;
+            const tr = state.trials[t];
+            const rev = state.reviewedRanges[t];
+            if (!rev || rev.length === 0) continue;
+            const lab = new Uint8Array(tr.x.length).fill(255); // 255 = ignore
+            for (const [s, e] of rev) {
+                for (let i = s; i <= e && i < lab.length; i++) {
+                    lab[i] = state.labels[t][i];
+                }
+            }
+            traces.push({
+                x: tr.x,
+                y: tr.y,
+                labels: lab,
+                rateHz: state.rateHz
+            });
+        }
 
-            const round = {
-                atMs: Date.now(),
-                labeledSeconds: reviewedS,
-                epochs: 15,
-                valF1: testF1Saccade + 0.02,
-                testF1Saccade,
-                testF1Blink,
-                testKappaSaccade,
-                testKappaBlink,
-                nSaccades: counts.saccades,
-                nBlinks: counts.blinks,
-            };
+        // Held-out test trials for unbiased F1 & kappa
+        const testTrials = [];
+        for (const t of state.testTrials) {
+            const tr = state.trials[t];
+            const rev = state.reviewedRanges[t];
+            if (!rev || rev.length === 0) continue;
+            const lab = new Uint8Array(tr.x.length).fill(255);
+            for (const [s, e] of rev) {
+                for (let i = s; i <= e && i < lab.length; i++) {
+                    lab[i] = state.labels[t][i];
+                }
+            }
+            testTrials.push({
+                x: tr.x,
+                y: tr.y,
+                labels: lab,
+                rateHz: state.rateHz
+            });
+        }
 
-            state.convergenceHistory.push(round);
-            state.reviewedAtLastTraining = reviewedS;
+        if (traces.length === 0) {
+            finishTraining("No non-test reviewed trials to train on");
+            return;
+        }
 
-            evaluateConvergenceFlag();
+        // Pretrained weights or scratch
+        let initBytes = null;
+        if (state.initialWeightsMode === 'pretrained' && !state.trainedModelBin) {
+            try {
+                const resp = await fetch('models/combined.bin');
+                if (resp.ok) {
+                    const buf = await resp.arrayBuffer();
+                    initBytes = new Uint8Array(buf);
+                }
+            } catch (e) {
+                console.log("Could not load combined.bin:", e);
+            }
+        } else if (state.trainedModelBin) {
+            initBytes = state.trainedModelBin;
+        }
 
+        const worker = getTrainWorker();
+        const trainId = Date.now();
+
+        worker.onmessage = async function(evt) {
+            const msg = evt.data;
+            if (msg.id !== trainId) return;
+
+            if (msg.type === 'PROGRESS') {
+                const p = msg.data;
+                const etaStr = p.eta_s > 0 ? ` · ETA ${p.eta_s.toFixed(0)}s` : '';
+                elements.trainStatus.className = 'train-active';
+                elements.trainStatus.textContent = `Epoch ${p.epoch}/60 · Loss: ${p.train_loss.toFixed(3)} · Val F1: ${p.val_event_f1.toFixed(2)}${etaStr}`;
+            } else if (msg.type === 'CANCELLED') {
+                finishTraining("Training cancelled");
+            } else if (msg.type === 'ERROR') {
+                finishTraining("Training error: " + msg.message);
+                alert("Training error: " + msg.message);
+            } else if (msg.type === 'TRAIN_COMPLETE') {
+                state.trainedModelBin = msg.binModel;
+                state.trainedModelJson = msg.jsonSidecar;
+
+                const counts = totalExpertEventCounts();
+                const m = msg.metrics || {};
+                const round = {
+                    atMs: Date.now(),
+                    labeledSeconds: reviewedS,
+                    epochs: 15,
+                    valF1: m.testF1Saccade || 0.0,
+                    testF1Saccade: m.testF1Saccade || 0.0,
+                    testF1Blink: m.testF1Blink || 0.0,
+                    testKappaSaccade: m.testKappaSaccade || 0.0,
+                    testKappaBlink: m.testKappaBlink || 0.0,
+                    nSaccades: counts.saccades,
+                    nBlinks: counts.blinks,
+                };
+                state.convergenceHistory.push(round);
+                state.reviewedAtLastTraining = reviewedS;
+
+                evaluateConvergenceFlag();
+                finishTraining(`Trained (${round.epochs} ep — Test F1: ${round.testF1Saccade.toFixed(2)})`);
+
+                // Update prelabeler on unreviewed portions
+                await applyModelAsPrelabeler();
+                saveToIndexedDB();
+            }
+        };
+
+        function finishTraining(statusText) {
+            state.isTraining = false;
             elements.trainStatus.className = 'train-done';
-            elements.trainStatus.textContent = `Training completed (${round.epochs} epochs — Test F1: ${testF1Saccade.toFixed(2)})`;
+            elements.trainStatus.textContent = statusText;
+            if (elements.cancelTrainBtn) elements.cancelTrainBtn.classList.add('hidden');
+            if (state.wakeLock) {
+                state.wakeLock.release().catch(() => {});
+                state.wakeLock = null;
+            }
             updateStatus();
-        }, 600);
+        }
+
+        worker.postMessage({
+            type: 'START_TRAIN',
+            id: trainId,
+            data: {
+                config: {
+                    n_classes: 3,
+                    max_seconds_of_data: 50.0,
+                    rotation_aug: true,
+                    rotations: 4,
+                    val_fraction: 0.2,
+                    max_speed_deg_s: 1300.0,
+                    max_epochs: 60,
+                    patience: 4,
+                    learning_rate: 1e-3,
+                    seed: 1,
+                    init_model_bytes: initBytes
+                },
+                traces,
+                testTrials
+            }
+        });
+    }
+
+    async function applyModelAsPrelabeler() {
+        if (!state.trainedModelBin || state.trials.length === 0) return;
+        const worker = getTrainWorker();
+        state.previousPrelabels = JSON.parse(JSON.stringify(state.prelabels));
+
+        for (let t = 0; t < state.trials.length; t++) {
+            const tr = state.trials[t];
+            const predPromise = new Promise((resolve) => {
+                const reqId = Date.now() + Math.random();
+                const handler = (e) => {
+                    if (e.data.id === reqId && e.data.type === 'PREDICT_RESULT') {
+                        worker.removeEventListener('message', handler);
+                        resolve(e.data.pred);
+                    }
+                };
+                worker.addEventListener('message', handler);
+                worker.postMessage({
+                    type: 'PREDICT',
+                    id: reqId,
+                    data: { x: tr.x, y: tr.y, rateHz: state.rateHz, maxSpeedDegS: 1300.0 }
+                });
+            });
+
+            const pred = await predPromise;
+            if (!pred) continue;
+
+            const newPre = [];
+            const n = pred.length;
+            for (let i = 0; i < n;) {
+                const c = pred[i];
+                if (c === 1 || c === 2) {
+                    let j = i;
+                    while (j < n && pred[j] === c) j++;
+                    if (j - i >= 3) {
+                        newPre.push({ onset: i, offset: j - 1, cls: c });
+                    }
+                    i = j;
+                } else {
+                    i++;
+                }
+            }
+            state.prelabels[t] = newPre;
+            syncRenderedLabels(t);
+        }
+        render();
+    }
+
+    // --- IndexedDB Persistence & Model Export ---
+    const DB_NAME = 'uneye_db';
+    const DB_VERSION = 1;
+    const STORE_NAME = 'uneye_store';
+
+    function openDB() {
+        return new Promise((resolve, reject) => {
+            if (!('indexedDB' in window)) return resolve(null);
+            const req = indexedDB.open(DB_NAME, DB_VERSION);
+            req.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(STORE_NAME)) {
+                    db.createObjectStore(STORE_NAME);
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => resolve(null);
+        });
+    }
+
+    async function saveToIndexedDB() {
+        try {
+            const db = await openDB();
+            if (!db) return;
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const payload = {
+                trials: state.trials.map(tr => ({ x: Array.from(tr.x), y: Array.from(tr.y), name: tr.name })),
+                labels: state.labels.map(l => Array.from(l)),
+                reviewedRanges: state.reviewedRanges,
+                expertEvents: state.expertEvents,
+                pointMarks: state.pointMarks,
+                prelabels: state.prelabels,
+                rateHz: state.rateHz,
+                scale: state.scale,
+                convergenceHistory: state.convergenceHistory,
+                trainedModelBin: state.trainedModelBin,
+                trainedModelJson: state.trainedModelJson
+            };
+            store.put(payload, 'autosave');
+        } catch (e) {
+            console.log("IndexedDB save:", e);
+        }
+    }
+
+    async function restoreFromIndexedDB() {
+        try {
+            const db = await openDB();
+            if (!db) return;
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.get('autosave');
+            req.onsuccess = () => {
+                const data = req.result;
+                if (!data || !data.trials || data.trials.length === 0) return;
+                state.trials = data.trials.map(tr => ({
+                    x: new Float32Array(tr.x),
+                    y: new Float32Array(tr.y),
+                    name: tr.name || '',
+                    valid: new Uint8Array(tr.x.length).fill(1)
+                }));
+                const n = state.trials.length;
+                state.labels = data.labels.map(l => new Uint8Array(l));
+                state.reviewedRanges = data.reviewedRanges || Array.from({ length: n }, () => []);
+                state.expertEvents = data.expertEvents || Array.from({ length: n }, () => []);
+                state.pointMarks = data.pointMarks || Array.from({ length: n }, () => []);
+                state.prelabels = data.prelabels || Array.from({ length: n }, () => []);
+                state.rateHz = data.rateHz || 1000.0;
+                state.scale = data.scale || 1.0;
+                state.convergenceHistory = data.convergenceHistory || [];
+                state.trainedModelBin = data.trainedModelBin || null;
+                state.trainedModelJson = data.trainedModelJson || null;
+
+                state.testTrials = new Set();
+                for (let t = 0; t < n; t += 4) state.testTrials.add(t);
+
+                preprocessAllTrials();
+                updateStatus();
+                render();
+                if (state.trainedModelBin) {
+                    const worker = getTrainWorker();
+                    worker.postMessage({ type: 'LOAD_MODEL', data: state.trainedModelBin });
+                }
+            };
+        } catch (e) {
+            console.log("IndexedDB restore:", e);
+        }
+    }
+
+    function downloadModel() {
+        if (!state.trainedModelBin) {
+            alert("No trained model available yet. Train a model first.");
+            return;
+        }
+        downloadFile('uneye_model.bin', state.trainedModelBin, 'application/octet-stream');
+        const jsonStr = state.trainedModelJson || JSON.stringify({
+            classes: 3,
+            window: 1000,
+            ks: 5,
+            mp: 5,
+            rate_hz: state.rateHz,
+            deg_per_unit: state.scale,
+            max_speed_deg_s: 1300.0
+        }, null, 2);
+        downloadFile('uneye_model.json', jsonStr, 'application/json');
     }
 
     function evaluateConvergenceFlag() {
@@ -1869,6 +2165,23 @@
         elements.metricsCloseBtn.addEventListener('click', () => elements.metricsModal.classList.add('hidden'));
 
         elements.trainNowBtn.addEventListener('click', runTrainingRound);
+        if (elements.cancelTrainBtn) {
+            elements.cancelTrainBtn.addEventListener('click', () => {
+                if (trainWorker) {
+                    trainWorker.postMessage({ type: 'CANCEL' });
+                    elements.trainStatus.textContent = 'Cancelling…';
+                }
+            });
+        }
+        if (elements.downloadModelBtn) {
+            elements.downloadModelBtn.addEventListener('click', downloadModel);
+        }
+        if (elements.initialModelSelect) {
+            elements.initialModelSelect.addEventListener('change', (e) => {
+                state.initialWeightsMode = e.target.value;
+            });
+        }
+        restoreFromIndexedDB();
         elements.exportBtn.addEventListener('click', exportDataset);
 
         // Filter Settings Dialog
