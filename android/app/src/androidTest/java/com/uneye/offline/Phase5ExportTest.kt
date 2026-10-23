@@ -107,6 +107,7 @@ class Phase5ExportTest {
 
         var loadOk = false
         var loadErr = ""
+        var loadDone = false
         session.load(
             TraceFiles.Trace(xRows, yRows),
             rateHz = 1000.0, degPerUnit = 1.0, estimateScale = false,
@@ -115,8 +116,9 @@ class Phase5ExportTest {
         ) { ok, err ->
             loadOk = ok
             loadErr = err
+            loadDone = true
         }
-        while (!session.loaded.value && loadErr.isEmpty()) {
+        while (!loadDone) {
             kotlinx.coroutines.delay(20)
         }
         assertTrue("Session load failed: $loadErr", loadOk)

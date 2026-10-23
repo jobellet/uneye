@@ -94,7 +94,13 @@ const px = await ev(() => { const w = document.getElementById('traceCanvas').cli
 await ptr('pointerdown', 9, px[0], 100); await ptr('pointermove', 9, px[1], 100); await ptr('pointerup', 9, px[1], 100);
 const er = await ev(() => [state.expertEvents[0].map(e => e.onset).join(), state.pointMarks[0].length, state.prelabels[0].map(p => p.onset).join()]);
 check(er[0] === '800' && er[1] === 0 && er[2] === '900', `eraser removed saccade, blink, mark and pre-label between the two times, kept the rest: ${er}`);
-await page.click('#eraserBtn');
+// Switching class while eraser is active must automatically turn eraser off
+check(await ev(() => state.eraser), 'eraser is on');
+await page.click('#classToggle');
+check(!(await ev(() => state.eraser)), 'clicking classToggle automatically deactivates eraser');
+check(await ev(() => state.activeClass === 2), 'class switched to blink');
+await page.click('#classToggle');
+check(await ev(() => state.activeClass === 1), 'class switched back to saccade');
 
 // --- save / reload labels
 await ev(() => { state.expertEvents[0] = [{ onset: 190, offset: 215, cls: 1, fromPrelabel: false }]; });

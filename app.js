@@ -2318,6 +2318,12 @@
             state.activeClass = state.activeClass === CLS_SACCADE ? CLS_BLINK : CLS_SACCADE;
             elements.classToggle.textContent = state.activeClass === CLS_SACCADE ? "Saccade" : "Blink";
             elements.classToggle.className = `btn btn-class ${state.activeClass === CLS_SACCADE ? 'saccade' : 'blink'}`;
+            if (state.eraser) {
+                state.eraser = false;
+                elements.eraserBtn.classList.remove('active');
+                elements.eraserBtn.textContent = 'Eraser';
+                render();
+            }
         });
 
         elements.undoBtn.addEventListener('click', () => undo(state.currentTrialIdx));

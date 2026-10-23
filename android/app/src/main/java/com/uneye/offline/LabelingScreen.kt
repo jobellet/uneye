@@ -172,7 +172,15 @@ class LabelingScreen : AppCompatActivity() {
     private fun setupToolSelection() {
         saccadeToolBtn.setOnClickListener { selectTool(TraceView.TOOL_SACCADE, Native.CLS_SACCADE) }
         blinkToolBtn.setOnClickListener { selectTool(TraceView.TOOL_BLINK, Native.CLS_BLINK) }
-        eraserToolBtn.setOnClickListener { selectTool(TraceView.TOOL_ERASER, 0) }
+        eraserToolBtn.setOnClickListener {
+            if (activeTool == TraceView.TOOL_ERASER) {
+                // Toggling eraser off restores current class tool (saccade or blink)
+                val backTool = if (cls == Native.CLS_BLINK) TraceView.TOOL_BLINK else TraceView.TOOL_SACCADE
+                selectTool(backTool, cls)
+            } else {
+                selectTool(TraceView.TOOL_ERASER, 0)
+            }
+        }
         selectTool(TraceView.TOOL_SACCADE, Native.CLS_SACCADE)
     }
 
@@ -190,6 +198,8 @@ class LabelingScreen : AppCompatActivity() {
 
         eraserToolBtn.setBackgroundColor(if (tool == TraceView.TOOL_ERASER) 0xFF455A64.toInt() else 0xFFE0E0E0.toInt())
         eraserToolBtn.setTextColor(if (tool == TraceView.TOOL_ERASER) 0xFFFFFFFF.toInt() else 0xFF37474F.toInt())
+
+        traceView.invalidate()
     }
 
     private fun applyWinMs() {

@@ -113,6 +113,7 @@ class Session(private val filesDir: File) {
         prelabeler: Int, modelBin: String, recordingName: String = "recording",
         onDone: (ok: Boolean, error: String) -> Unit,
     ) {
+        _loaded.value = false
         Thread {
             val res = native.load(
                 trace.x.toTypedArray(), trace.y.toTypedArray(),

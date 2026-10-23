@@ -22,9 +22,12 @@ class UneyeApp : Application() {
     /** Directory for the trained models of this app. */
     fun modelsDir(): File = session.appDir("models")
 
-    /** Labels path for the current recording (per trial: path + ".trialK"). */
-    fun labelsPathFor(session: Session, trial: Long): String =
-        File(session.appDir("labels"), "labels.bin").absolutePath
+    /** Labels path for the current recording (per trial: path + ".trialK"), isolated in a per-recording subfolder. */
+    fun labelsPathFor(session: Session, trial: Long): String {
+        val safeName = session.recordingName.replace(Regex("[^a-zA-Z0-9._-]"), "_").ifEmpty { "default" }
+        val dir = File(session.appDir("labels"), safeName).apply { mkdirs() }
+        return File(dir, "labels.bin").absolutePath
+    }
 
     /**
      * The shipped pre-trained model, copied from the assets on first use
