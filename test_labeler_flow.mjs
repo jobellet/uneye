@@ -117,6 +117,51 @@ await (await page.$('#labelsInput')).uploadFile('/tmp/uneye_labels_test.json'); 
 const back = await ev(() => [state.expertEvents[0].length, state.scanWins[0].length]);
 check(back[0] >= 1 && back[1] >= 1, `Load labels restores events and windows seen: ${back}`);
 
+// --- auto-scroll window sliding & prelabel ground truth acceptance on tap
+await ev(() => {
+  state.currentTrialIdx = 0;
+  state.pass = 1;
+  state.winMs = 500;
+  state.fromSample = 0;
+  state.toSample = 499;
+  state.scanWins[0] = [];
+  state.pointMarks[0] = [];
+  state.expertEvents[0] = [];
+  state.prelabels[0] = [{ onset: 200, offset: 235, cls: 1 }, { onset: 700, offset: 740, cls: 2 }];
+  render();
+});
+
+// Tap on proposed prelabel at sample 210:
+// 1) Must accept full [200, 235] as ground truth (expertEvents), without adding point mark
+// 2) Must slide window: starts 50 ms before onset (200 - 50 = 150) and ends at 150 + 500 - 1 = 649
+await ev(() => handleTap(210));
+const tapPreResult = await ev(() => ({
+  expCount: state.expertEvents[0].length,
+  expEvent: state.expertEvents[0][0],
+  pmCount: state.pointMarks[0].length,
+  from: state.fromSample,
+  to: state.toSample,
+}));
+check(tapPreResult.expCount === 1 && tapPreResult.expEvent.onset === 200 && tapPreResult.expEvent.offset === 235 && tapPreResult.pmCount === 0,
+  `tapping proposed event accepts full duration [200..235] as ground truth without adding point mark: ${JSON.stringify(tapPreResult.expEvent)}`);
+check(tapPreResult.from === 150 && tapPreResult.to === 649,
+  `window glides to start 50 ms before event onset (150..649): from=${tapPreResult.from}, to=${tapPreResult.to}`);
+
+// Tap on empty space at sample 450:
+// 1) Adds a point mark at 450
+// 2) Glides window so it starts 50 ms before sample (450 - 50 = 400) and ends at 400 + 500 - 1 = 899
+await ev(() => handleTap(450));
+const tapEmptyResult = await ev(() => ({
+  pmCount: state.pointMarks[0].length,
+  pmAt: state.pointMarks[0][0].at,
+  from: state.fromSample,
+  to: state.toSample,
+}));
+check(tapEmptyResult.pmCount === 1 && tapEmptyResult.pmAt === 450,
+  `tapping empty space places point mark at 450: ${JSON.stringify(tapEmptyResult)}`);
+check(tapEmptyResult.from === 400 && tapEmptyResult.to === 899,
+  `window glides to start 50 ms before new mark (400..899): from=${tapEmptyResult.from}, to=${tapEmptyResult.to}`);
+
 check(errors.length === 0, 'no page error' + (errors.length ? ': ' + errors.join(' | ') : ''));
 await page.screenshot({ path: process.env.SHOT || '/tmp/labeler.png' });
 await browser.close();

@@ -21,6 +21,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 /**
  * Touch-optimized two-pass saccade and blink labeling screen (aligned with web app).
@@ -373,6 +374,28 @@ class LabelingScreen : AppCompatActivity() {
 
     // --- Pass 1 Gestures & Logic -----------------------------------------------------
 
+    private fun slideWindowAfterEvent(eventOnset: Long) {
+        if (pass != Session.Pass.ONE) return
+        val n = session.trialSamples
+        val pad50 = (50.0 * session.rateHz / 1000.0).roundToLong().coerceAtLeast(1L)
+        val winSpan = (epochMs * session.rateHz / 1000.0).roundToLong().coerceAtLeast(20L)
+
+        // Mark current visible window as scanned before sliding
+        session.addScan(trial, traceView.fromSample, min(traceView.toSample, n - 1))
+
+        var newFrom = max(0L, eventOnset - pad50)
+        if (n <= winSpan) {
+            newFrom = 0L
+        } else if (newFrom + winSpan > n) {
+            newFrom = max(0L, n - winSpan)
+        }
+        val center = newFrom + winSpan / 2
+        traceView.centerOn(center, winSpan)
+
+        // Mark new window as scanned
+        session.addScan(trial, newFrom, min(newFrom + winSpan - 1, n - 1))
+    }
+
     private fun onTap(s: Long) {
         if (pass != Session.Pass.ONE) return
 
@@ -383,26 +406,37 @@ class LabelingScreen : AppCompatActivity() {
             return
         }
 
-        // Tap on existing mark removes it
-        if (session.removePointMark(trial, s)) {
+        val ui = session.trialUi(trial)
+
+        // 1. Tap on existing point mark removes it (tolerance up to 15 samples)
+        val pm = ui.pointMarks.find { abs(it.first - s) <= 15 }
+        if (pm != null && session.removePointMark(trial, pm.first)) {
             refresh()
             return
         }
 
-        // Tap near a pre-label snaps to it
-        val snapped = session.snapToPrelabel(trial, s, 30)
-        val targetSample = if (snapped >= 0) snapped else s
-        session.addPointMark(trial, targetSample, cls)
-        lastMarkSample = targetSample
-
-        // Auto-scroll: next epoch starts just after marked event (+30 ms saccade, +300 ms blink)
-        val margin = if (cls == Native.CLS_SACCADE) 30L else 300L
-        val winStep = (epochMs * 0.9).roundToInt()
-        val nextFrom = ((lastMarkSample + margin) / winStep + 1) * winStep
-        if (nextFrom > traceView.toSample) {
-            session.addScan(trial, traceView.fromSample, min(traceView.toSample, session.trialSamples - 1))
-            traceView.centerOn(nextFrom + epochMs / 2, epochMs)
+        // 2. Tap on existing expert mark removes it
+        val existingMark = ui.marks.find { (it.onset <= s && s <= it.offset) || abs(it.onset - s) <= 15 || abs(it.offset - s) <= 15 }
+        if (existingMark != null) {
+            session.deleteMark(trial, existingMark.onset)
+            refresh()
+            return
         }
+
+        // 3. Tap on proposed event: accept whole proposed duration as ground truth, then slide
+        val pre = ui.prelabels.find { (it.onset <= s && s <= it.offset) || abs(it.onset - s) <= 25 || abs(it.offset - s) <= 25 }
+        if (pre != null) {
+            session.refineMark(trial, s, pre.onset, pre.offset, pre.cls)
+            lastMarkSample = pre.onset
+            slideWindowAfterEvent(pre.onset)
+            refresh()
+            return
+        }
+
+        // 4. Empty space: add point mark, then slide
+        session.addPointMark(trial, s, cls)
+        lastMarkSample = s
+        slideWindowAfterEvent(s)
         refresh()
     }
 
@@ -550,6 +584,14 @@ class LabelingScreen : AppCompatActivity() {
                 focusCurrentMark()
             }
             refresh()
+            return
+        }
+        if (pass == Session.Pass.ONE) {
+            if (session.refineMark(trial, onset, onset, offset, cls)) {
+                lastMarkSample = onset
+                slideWindowAfterEvent(onset)
+                refresh()
+            }
             return
         }
         if (pass != Session.Pass.TWO || currentMarkAt < 0) return

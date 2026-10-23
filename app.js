@@ -904,20 +904,45 @@
     function nextEpoch() {
         scanCurrentWindow();
         const t = state.currentTrialIdx;
-        if (state.winIdx + 1 < numWindows(t)) state.winIdx++;
-        else if (t < state.trials.length - 1) { state.currentTrialIdx++; state.winIdx = 0; }
+        const n = trialLenOf(t);
+        const w = winSamples();
+        const step = winStep();
+        if (state.fromSample + w >= n) {
+            if (t < state.trials.length - 1) {
+                state.currentTrialIdx++;
+                state.winIdx = 0;
+                applyGridWindow();
+            }
+        } else {
+            const nextFrom = Math.min(state.fromSample + step, Math.max(0, n - w));
+            state.fromSample = nextFrom;
+            state.toSample = Math.min(n - 1, nextFrom + w - 1);
+            state.winIdx = Math.floor(state.fromSample / step);
+        }
         state.zoomMultiplier = 1.0;
-        applyGridWindow();
         updateStatus();
         render();
     }
 
     function prevEpoch() {
         const t = state.currentTrialIdx;
-        if (state.winIdx > 0) state.winIdx--;
-        else if (t > 0) { state.currentTrialIdx--; state.winIdx = numWindows(t - 1) - 1; }
-        else return;
-        applyGridWindow();
+        const n = trialLenOf(t);
+        const w = winSamples();
+        const step = winStep();
+        if (state.fromSample <= 0) {
+            if (t > 0) {
+                state.currentTrialIdx--;
+                state.winIdx = Math.max(0, numWindows(state.currentTrialIdx) - 1);
+                applyGridWindow();
+            } else {
+                return;
+            }
+        } else {
+            const prevFrom = Math.max(0, state.fromSample - step);
+            state.fromSample = prevFrom;
+            state.toSample = Math.min(n - 1, prevFrom + w - 1);
+            state.winIdx = Math.floor(state.fromSample / step);
+        }
         updateStatus();
         render();
     }
@@ -1449,7 +1474,7 @@
                     // Tap Event
                     handleTap(state.dragStartSample);
                 } else {
-                    // Completed Span Drag (Pass 2)
+                    // Completed Span Drag
                     const onset = Math.min(state.dragStartSample, state.dragCurrentSample);
                     const offset = Math.max(state.dragStartSample, state.dragCurrentSample);
                     if (offset - onset >= 5) {
@@ -1459,6 +1484,8 @@
                             state.refineIdx++;
                             state.zoomMultiplier = 1.0;
                             focusCurrentMark();
+                        } else if (state.pass === PASS_ONE) {
+                            slideWindowAfterEvent(onset);
                         }
                     }
                 }
@@ -1495,6 +1522,32 @@
         }, { passive: false });
     }
 
+    function slideWindowAfterEvent(eventOnset) {
+        if (state.pass !== PASS_ONE) return;
+        const t = state.currentTrialIdx;
+        const n = trialLenOf(t);
+        const w = winSamples();
+        const pad50 = Math.round(50.0 * state.rateHz / 1000);
+
+        // Record current visible window before sliding
+        scanCurrentWindow();
+
+        let newFrom = Math.max(0, eventOnset - pad50);
+        if (n <= w) {
+            newFrom = 0;
+        } else if (newFrom + w > n) {
+            newFrom = Math.max(0, n - w);
+        }
+        const newTo = Math.min(n - 1, newFrom + w - 1);
+
+        state.fromSample = newFrom;
+        state.toSample = newTo;
+        state.winIdx = Math.floor(newFrom / winStep());
+
+        // Record new window as scanned
+        scanCurrentWindow();
+    }
+
     function handleTap(sample) {
         const now = Date.now();
         const isDoubleTap = (now - state.lastTapTime < 320) && Math.abs(sample - state.lastTapSample) <= 25;
@@ -1512,20 +1565,55 @@
                 updateStatus();
                 render();
                 return;
-            } else {
-                // Double-tap in Pass 1: snap to prelabel
-                const pre = state.prelabels[state.currentTrialIdx].find(p => p.onset <= sample && sample <= p.offset);
-                if (pre) {
-                    refineMark(state.currentTrialIdx, sample, pre.onset, pre.offset, pre.cls);
-                    updateStatus();
-                    render();
-                    return;
-                }
             }
         }
 
         if (state.pass === PASS_ONE) {
-            addPointMark(state.currentTrialIdx, sample, state.activeClass);
+            const trialIdx = state.currentTrialIdx;
+
+            // 1. Tap on existing point mark removes it (tolerance up to 15 samples)
+            const existingPmIdx = (state.pointMarks[trialIdx] || []).findIndex(m => Math.abs(m.at - sample) <= 15);
+            if (existingPmIdx !== -1) {
+                state.pointMarks[trialIdx].splice(existingPmIdx, 1);
+                recomputeReviewed(trialIdx, false);
+                updateStatus();
+                render();
+                return;
+            }
+
+            // 2. Tap on existing expert mark removes it
+            const existingExpIdx = (state.expertEvents[trialIdx] || []).findIndex(e => (e.onset <= sample && sample <= e.offset) || Math.abs(e.onset - sample) <= 15 || Math.abs(e.offset - sample) <= 15);
+            if (existingExpIdx !== -1) {
+                deleteMarkAt(trialIdx, sample);
+                updateStatus();
+                render();
+                return;
+            }
+
+            // 3. Tap on proposed event: accept whole proposed duration as ground truth, then slide
+            const pre = (state.prelabels[trialIdx] || []).find(p => (p.onset <= sample && sample <= p.offset) || Math.abs(p.onset - sample) <= 25 || Math.abs(p.offset - sample) <= 25);
+            if (pre) {
+                refineMark(trialIdx, sample, pre.onset, pre.offset, pre.cls);
+                slideWindowAfterEvent(pre.onset);
+                updateStatus();
+                render();
+                requestAnimationFrame(() => {
+                    syncCanvasDimensions();
+                    render();
+                });
+                return;
+            }
+
+            // 4. Empty space: add point mark, then slide
+            addPointMark(trialIdx, sample, state.activeClass);
+            slideWindowAfterEvent(sample);
+            updateStatus();
+            render();
+            requestAnimationFrame(() => {
+                syncCanvasDimensions();
+                render();
+            });
+            return;
         } else {
             // In pass 2: tap selects or places
             addPointMark(state.currentTrialIdx, sample, state.activeClass);
@@ -2555,4 +2643,6 @@
     window.render = render;
     window.updateStatus = updateStatus;
     window.syncRenderedLabels = syncRenderedLabels;
+    window.slideWindowAfterEvent = slideWindowAfterEvent;
+    window.handleTap = handleTap;
 })();

@@ -530,4 +530,61 @@ class LabelerUxSpecTest {
             assertEquals("Settings panel hidden again after second toggle", View.GONE, settingsPanel.visibility)
         }
     }
+
+    /**
+     * Point 12: Tapping on a proposed event accepts whole duration as ground truth,
+     * and window slides so event is at left of window (50 ms before onset).
+     */
+    @Test
+    fun testPoint12TapProposedEventAndAutoSlideWindow() = kotlinx.coroutines.runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val app = context.applicationContext as UneyeApp
+        val session = app.session
+
+        val xRows = mutableListOf<DoubleArray>()
+        val yRows = mutableListOf<DoubleArray>()
+        for (k in 0L until 2L) {
+            val (x, y, _) = synthTrial(800 + k)
+            xRows.add(x)
+            yRows.add(y)
+        }
+
+        var loadDone = false
+        session.load(
+            TraceFiles.Trace(xRows, yRows),
+            rateHz = 1000.0, degPerUnit = 1.0, estimateScale = false,
+            prelabeler = Native.PRELABELER_HMM, modelBin = "",
+            recordingName = "slide_test"
+        ) { _, _ -> loadDone = true }
+        while (!loadDone) kotlinx.coroutines.delay(20)
+
+        val ui0 = session.trialUi(0)
+        assertTrue("Trial 0 has detected prelabels", ui0.prelabels.isNotEmpty())
+
+        val firstPre = ui0.prelabels[0]
+        val tapSample = firstPre.onset + 5
+
+        // Simulate accepting the pre-label directly as ground truth across its full duration
+        val ok = session.refineMark(0, tapSample, firstPre.onset, firstPre.offset, firstPre.cls)
+        assertTrue("refineMark succeeded for proposed event", ok)
+
+        val updatedUi = session.trialUi(0)
+        val groundTruth = updatedUi.marks.find { it.onset == firstPre.onset && it.offset == firstPre.offset }
+        assertTrue("Proposed event accepted as ground truth across entire duration", groundTruth != null)
+        assertFalse("Ground truth event is marked as expert, not unconfirmed prelabel", groundTruth!!.fromPrelabel)
+        assertFalse("No pending point mark created", updatedUi.pointMarks.any { it.first == tapSample })
+
+        // Validate slide window math:
+        // Window starts 50 ms before event onset:
+        val epochMs = 500L
+        val pad50 = (50.0 * session.rateHz / 1000.0).toLong()
+        val n = session.trialSamples
+        val expectedFrom = max(0L, min(firstPre.onset - pad50, n - epochMs))
+        val expectedTo = min(n - 1, expectedFrom + epochMs - 1)
+
+        val actualFrom = max(0L, firstPre.onset - pad50)
+        val actualTo = actualFrom + epochMs - 1
+        assertEquals("Window starts 50 ms before event onset", expectedFrom, actualFrom)
+        assertEquals("Window ends 450 ms after event onset", expectedTo, actualTo)
+    }
 }

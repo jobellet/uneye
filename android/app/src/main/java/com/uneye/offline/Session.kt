@@ -80,6 +80,9 @@ class Session(private val filesDir: File) {
     var trialSamples: Long = 1000   // samples per trial at 1 kHz (1 s)
         private set
 
+    var rateHz: Double = 1000.0
+        private set
+
     var degPerUnit: Double = 1.0
         private set
 
@@ -138,6 +141,7 @@ class Session(private val filesDir: File) {
             uiHandler.post {
                 _nTrials.value = nT
                 trialSamples = if (nT > 0) per else 1000
+                this.rateHz = rateHz
                 this.degPerUnit = res.degPerUnit
                 this.recordingName = recordingName
                 scans.clear(); erased.clear()
