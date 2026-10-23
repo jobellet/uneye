@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <thread>
 #include "eyelive/gui/ui_logic.hpp"
 #include "eyelive/net_detectors.hpp"

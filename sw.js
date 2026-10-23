@@ -2,7 +2,7 @@
 // 1. Full offline caching for all assets (.html, .js, .wasm, .bin, .json, .css)
 // 2. coi-serviceworker functionality: adds COOP/COEP headers to enable Cross-Origin Isolation (SharedArrayBuffer)
 
-const CACHE_NAME = 'uneye-cache-v1';
+const CACHE_NAME = 'uneye-cache-v2';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -41,19 +41,16 @@ self.addEventListener('activate', (event) => {
     );
 });
 
+// Network-first strategy with cache fallback:
+// When connected to the internet, always fetch the latest version and update the cache.
+// When offline, immediately serve from cache.
 self.addEventListener('fetch', (event) => {
     const request = event.request;
     if (request.method !== 'GET') return;
 
     event.respondWith(
-        caches.match(request).then(async (cachedResponse) => {
-            if (cachedResponse) {
-                // Add COOP / COEP headers to cached responses
-                return addCoopCoepHeaders(cachedResponse);
-            }
-
-            try {
-                const networkResponse = await fetch(request);
+        fetch(request)
+            .then((networkResponse) => {
                 if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
                     const responseToCache = networkResponse.clone();
                     caches.open(CACHE_NAME).then((cache) => {
@@ -61,13 +58,14 @@ self.addEventListener('fetch', (event) => {
                     });
                 }
                 return addCoopCoepHeaders(networkResponse);
-            } catch (err) {
-                // Fallback to cache if offline
-                const fallback = await caches.match(request);
-                if (fallback) return addCoopCoepHeaders(fallback);
-                throw err;
-            }
-        })
+            })
+            .catch(async () => {
+                const cachedResponse = await caches.match(request);
+                if (cachedResponse) {
+                    return addCoopCoepHeaders(cachedResponse);
+                }
+                return new Response('Network error and asset not cached', { status: 503, statusText: 'Offline' });
+            })
     );
 });
 
