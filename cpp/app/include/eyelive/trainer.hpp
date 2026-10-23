@@ -23,6 +23,7 @@ struct TrainConfig {
     bool noise_aug = false;            // added white noise (std 0..0.005 deg), off by default
     bool gain_aug = false;             // random gain 0.7..1.4, off by default
     double val_fraction = 0.2;         // held out for early stopping and the displayed validation score
+    double max_speed_deg_s = 1300.0;   // limit of the speed of the network input (deg/s, direction kept; 0 = off), as uneye/functions.py::clip_speed and the detector's Config::max_speed_deg_s: blinks and tracker losses would otherwise reach the network at up to a thousand times the size of a saccade. Use the same value at inference
     int max_epochs = 500;              // upper bound; early stopping normally ends before
     int patience = 4;                  // epochs without improvement of the validation loss before stopping (the original uses 4 with learning-rate decay)
     double learning_rate = 1e-3;

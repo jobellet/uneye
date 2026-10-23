@@ -20,6 +20,7 @@ Wikipedia "Saccade" (Fuchs 1967) and the Radboud course page `perception-and-act
 | `cpp/include/uneye/detector.hpp`, `cpp/src/detector.cpp` | `Config::max_speed_deg_s = 1300.0` (0 = off); applied in `StreamingDetector::push` after NaN / Inf, for the windowed U-Net engines and the causal TCN alike |
 | `cpp/src/bitcn.cpp`, `cpp/include/uneye/bitcn.hpp` | `features2(pos, T, fs, out, max_speed = 1300.0)` and `detect(..., max_speed = 1300.0)`: the limit is applied to (vx, vy) before the noise normalisation, as `feats2(..., max_speed=1300)` in Python |
 | `cpp/tools/uneye_rt.cpp` | option `--max-speed DEG_S` (0 = off) |
+| `cpp/app/include/eyelive/trainer.hpp`, `cpp/app/train/src/dataset.cpp` | the C++ trainer (EyeLive, `ITrainer`) builds its own (dX, dY) windows: `TrainConfig::max_speed_deg_s = 1300` is applied there too, after rotation and noise, before the network (it was missing in the first version of this change; the 4 train tests pass) |
 | `app.js` (web labeler) | the velocities of the pre-labeler, the thresholds and the display are limited to 1300 deg/s |
 | `foundation/eval_speed_limit.py` | new: old weights evaluated with the limit off / 1300 / 2000 / 2500 deg/s (writes `docs/figs_data/uneye_speed_limit_inference_only.json`) |
 | `foundation/make_summary.py`, `docs/BENCHMARK_SUMMARY.md` | all cells that come from a U'n'Eye network are NA (`UNEYE_PENDING = True`) with a note at the top |

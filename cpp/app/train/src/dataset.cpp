@@ -7,12 +7,13 @@ namespace eyelive { namespace train {
 
 int window_for_rate(double rate_hz) { return std::max(25, int(std::lround(rate_hz / 25.0)) * 25); }
 
-static void append_window(Windows& w, const std::vector<float>& x, const std::vector<float>& y, const std::vector<uint8_t>& l, size_t s, int orient) {
+static void append_window(Windows& w, const std::vector<float>& x, const std::vector<float>& y, const std::vector<uint8_t>& l, size_t s, int orient, double lim) {   // lim: speed limit in position units per sample (0 = off)
     const int W = w.W; const size_t base = w.vel.size(); w.vel.resize(base + 2 * size_t(W));
     for (int t = 0; t < W; ++t) {
         float dx = 0, dy = 0;
         if (t > 0) { dx = x[s + t] - x[s + t - 1]; dy = y[s + t] - y[s + t - 1]; }
         if (!std::isfinite(dx) || !std::isfinite(dy)) dx = dy = 0;                 // blinks / lost samples (the original sets NaN to 0)
+        if (lim > 0) { const double n = std::hypot(double(dx), double(dy)); if (n > lim) { dx = float(dx * lim / n); dy = float(dy * lim / n); } }   // speed limit, direction kept
         w.vel[base + t] = dx; w.vel[base + W + t] = dy;
     }
     w.lab.insert(w.lab.end(), l.begin() + s, l.begin() + s + W); w.orient.push_back(orient); ++w.n;
@@ -22,6 +23,7 @@ Dataset make_dataset(const std::vector<TrainTrace>& traces, const TrainConfig& c
     Dataset d; d.n_classes = cfg.n_classes; const int K = cfg.n_classes;
     if (traces.empty()) { d.error = "no training trace"; return d; }
     d.rate_hz = traces[0].rate_hz; const int W = window_for_rate(d.rate_hz); d.train.W = d.val.W = W;
+    const double lim = cfg.max_speed_deg_s > 0 ? cfg.max_speed_deg_s / d.rate_hz : 0.0;     // deg per sample (the trace positions are in degrees at this point)
     struct Win { const TrainTrace* tr; size_t s; };
     std::vector<Win> wins;
     for (auto it = traces.rbegin(); it != traces.rend(); ++it) {                       // most recent first, at most max_seconds_of_data
@@ -42,14 +44,14 @@ Dataset make_dataset(const std::vector<TrainTrace>& traces, const TrainConfig& c
     std::vector<float> x, y; std::vector<uint8_t> l; std::normal_distribution<float> nd(0.f, 1.f); std::uniform_real_distribution<float> ud(0.f, 1.f);
     for (size_t i = 0; i < wins.size(); ++i) {
         prep(wins[i], x, y, l);
-        if (i < nval) { append_window(d.val, x, y, l, 0, 0); continue; }
+        if (i < nval) { append_window(d.val, x, y, l, 0, 0, lim); continue; }
         const int nrot = cfg.rotation_aug ? std::max(0, cfg.rotations) : 0;
         for (int r = 0; r <= nrot; ++r) {
             std::vector<float> xr = x, yr = y;
             if (r > 0) { const double th = 3.14159265358979323846 * (0.25 + 2.0 * (r - 1) / nrot), c = std::cos(th), s = std::sin(th); for (int t = 0; t < W; ++t) { xr[t] = float(x[t] * c + y[t] * s); yr[t] = float(-x[t] * s + y[t] * c); } }
             if (cfg.gain_aug) { const float g = 0.7f + 0.7f * ud(rng); for (int t = 0; t < W; ++t) { xr[t] *= g; yr[t] *= g; } }
             if (cfg.noise_aug) { const float sd = 0.005f * ud(rng); for (int t = 0; t < W; ++t) { xr[t] += sd * nd(rng); yr[t] += sd * nd(rng); } }
-            append_window(d.train, xr, yr, l, 0, r);
+            append_window(d.train, xr, yr, l, 0, r, lim);
         }
     }
     return d;
