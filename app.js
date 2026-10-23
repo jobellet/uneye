@@ -116,6 +116,7 @@
         eventsStatus: document.getElementById('eventsStatus'),
         trainStatus: document.getElementById('trainStatus'),
         fileInput: document.getElementById('fileInput'),
+        exportFormat: document.getElementById('exportFormat'),
         loadModal: document.getElementById('loadModal'),
         modalFileName: document.getElementById('modalFileName'),
         rateInput: document.getElementById('rateInput'),
@@ -369,6 +370,10 @@
     }
 
     // --- Dataset Loader & State Initializer ---
+    // trials have their own durations (variable-length files): always use the length of the trial in question
+    function trialLenOf(i) { const t = state.trials[i]; return t ? t.x.length : 1000; }
+    function curLen() { return trialLenOf(state.currentTrialIdx); }
+
     function loadDataset(trials, rateHz = 1000.0, degPerUnit = 1.0, prelabeler = 'hmm') {
         state.trials = trials;
         state.rateHz = rateHz;
@@ -376,11 +381,12 @@
         state.currentTrialIdx = 0;
         state.trialLength = trials[0] ? trials[0].x.length : 1000;
         state.fromSample = 0;
-        state.toSample = Math.min(state.trialLength - 1, 499);
+        state.toSample = Math.min(curLen() - 1, 499);
 
         // Clear and initialize per-trial annotation arrays
         const n = trials.length;
-        state.labels = Array.from({ length: n }, () => new Uint8Array(state.trialLength));
+        state.labels = Array.from({ length: n }, (_, t) => new Uint8Array(trials[t].x.length));      // trials may have different durations
+        state.trialNames = trials.map(t => t.name || '');
         state.reviewedRanges = Array.from({ length: n }, () => []);
         state.pointMarks = Array.from({ length: n }, () => []);
         state.expertEvents = Array.from({ length: n }, () => []);
@@ -591,7 +597,7 @@
     function refineMark(trialIdx, at, onset, offset, cls) {
         saveUndo(trialIdx);
         onset = Math.max(0, onset);
-        offset = Math.min(state.trialLength - 1, offset);
+        offset = Math.min(trialLenOf(trialIdx) - 1, offset);
         if (onset > offset) return false;
 
         // Remove point mark closest to `at`
@@ -624,7 +630,7 @@
         if (hasUnrefined) return;
 
         from = Math.max(0, from);
-        to = Math.min(state.trialLength - 1, to);
+        to = Math.min(trialLenOf(trialIdx) - 1, to);
 
         // Merge contiguous ranges
         const current = state.reviewedRanges[trialIdx];
@@ -701,7 +707,7 @@
             elements.classToggle.classList.remove('hidden');
 
             state.fromSample = 0;
-            state.toSample = Math.min(state.trialLength - 1, 499);
+            state.toSample = Math.min(curLen() - 1, 499);
         } else {
             elements.passIndicator.textContent = "Pass 2: Refine (Onset / Offset)";
             elements.passIndicator.className = "badge pass-badge pass-two";
@@ -755,7 +761,7 @@
         if (state.refineIdx >= state.refineQueue.length) {
             // All events in this trial reviewed
             state.currentMarkAt = -1;
-            markEpochReviewed(trialIdx, 0, state.trialLength - 1);
+            markEpochReviewed(trialIdx, 0, trialLenOf(trialIdx) - 1);
             if (elements.eventCounterBadge) {
                 elements.eventCounterBadge.textContent = "All Reviewed ✓";
             }
@@ -804,7 +810,7 @@
         const pad50ms = Math.round(50.0 * (state.rateHz / 1000.0) * mult);
 
         state.fromSample = Math.max(0, putativeOnset - pad50ms);
-        state.toSample = Math.min(state.trialLength - 1, putativeOffset + pad50ms);
+        state.toSample = Math.min(curLen() - 1, putativeOffset + pad50ms);
 
         if (elements.eventCounterBadge) {
             const clsName = state.activeClass === CLS_SACCADE ? "Saccade" : "Blink";
@@ -815,10 +821,10 @@
     function nextEpoch() {
         const span = state.toSample - state.fromSample + 1;
         const nextFrom = state.toSample + 1;
-        if (nextFrom < state.trialLength) {
+        if (nextFrom < curLen()) {
             markEpochReviewed(state.currentTrialIdx, state.fromSample, state.toSample);
             state.fromSample = nextFrom;
-            state.toSample = Math.min(state.trialLength - 1, nextFrom + span - 1);
+            state.toSample = Math.min(curLen() - 1, nextFrom + span - 1);
             updateStatus();
             render();
         } else {
@@ -826,7 +832,7 @@
             if (state.currentTrialIdx < state.trials.length - 1) {
                 state.currentTrialIdx++;
                 state.fromSample = 0;
-                state.toSample = Math.min(state.trialLength - 1, span - 1);
+                state.toSample = Math.min(curLen() - 1, span - 1);
                 updateStatus();
                 render();
             }
@@ -1305,11 +1311,11 @@
                 if (state.initialPinchDist > 0) {
                     const scale = state.initialPinchDist / Math.max(10, dist);
                     const origSpan = state.initialPinchTo - state.initialPinchFrom;
-                    const newSpan = Math.max(50, Math.min(state.trialLength, Math.round(origSpan * scale)));
+                    const newSpan = Math.max(50, Math.min(curLen(), Math.round(origSpan * scale)));
                     const center = (state.initialPinchFrom + state.initialPinchTo) / 2;
 
                     state.fromSample = Math.max(0, Math.round(center - newSpan / 2));
-                    state.toSample = Math.min(state.trialLength - 1, state.fromSample + newSpan);
+                    state.toSample = Math.min(curLen() - 1, state.fromSample + newSpan);
                     render();
                 }
             }
@@ -1365,9 +1371,9 @@
             const mouseSample = pxToSample(e.offsetX, canvas.clientWidth);
             const frac = (mouseSample - state.fromSample) / Math.max(1, span);
 
-            const newSpan = Math.max(50, Math.min(state.trialLength, Math.round(span * factor)));
+            const newSpan = Math.max(50, Math.min(curLen(), Math.round(span * factor)));
             state.fromSample = Math.max(0, Math.round(mouseSample - frac * newSpan));
-            state.toSample = Math.min(state.trialLength - 1, state.fromSample + newSpan);
+            state.toSample = Math.min(curLen() - 1, state.fromSample + newSpan);
             render();
         }, { passive: false });
     }
@@ -1420,7 +1426,7 @@
     // --- UI Updates & Convergence Logic ---
     function updateStatus() {
         const nTrials = state.trials.length;
-        elements.trialStatus.textContent = `Trial ${state.currentTrialIdx + 1}/${Math.max(1, nTrials)}${state.testTrials.has(state.currentTrialIdx) ? ' (Test)' : ''}`;
+        elements.trialStatus.textContent = `Trial ${state.currentTrialIdx + 1}/${Math.max(1, nTrials)}${state.testTrials.has(state.currentTrialIdx) ? ' (Test)' : ''}${(state.trialNames && state.trialNames[state.currentTrialIdx]) ? ' · ' + state.trialNames[state.currentTrialIdx] : ''}`;
         elements.reviewedStatus.textContent = `Reviewed: ${totalReviewedSeconds().toFixed(1)} s`;
 
         const counts = totalExpertEventCounts();
@@ -1648,6 +1654,27 @@
         state.filterSettings.enabled = sgVal > 0;
         if (sgVal > 0) state.filterSettings.windowMs = sgVal;
 
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        if (['mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {      // binary formats: trials of different durations (formats.js)
+            const binReader = new FileReader();
+            binReader.onload = async (e) => {
+                try {
+                    elements.modalFileName.textContent = 'Reading ' + file.name + '…';
+                    const r = await UnEyeFormats.readTrialsFile(file.name, e.target.result, loadH5Lib);
+                    elements.loadModal.classList.add('hidden');
+                    loadDataset(r.trials, r.fs || rate, scale, prelabeler);
+                    if (r.labels) applyLoadedLabels(r.labels);
+                    const lens = r.trials.map(t => t.x.length);
+                    console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples${r.fs ? ', ' + r.fs + ' Hz' : ''}${r.labels ? ', with labels' : ''}`);
+                } catch (err) {
+                    elements.loadModal.classList.add('hidden');
+                    alert('Cannot read ' + file.name + ': ' + err.message);
+                }
+            };
+            binReader.readAsArrayBuffer(file);
+            return;
+        }
+
         const reader = new FileReader();
         reader.onload = (e) => {
             const text = e.target.result;
@@ -1685,36 +1712,97 @@
         reader.readAsText(file);
     }
 
+    // --- HDF5 needs h5wasm (5 MB, loaded the first time an .h5 file is read or written; needs a connection once) ---
+    async function loadH5Lib() {
+        if (!window.h5wasm) {
+            await new Promise((resolve, reject) => {
+                const sc = document.createElement('script');
+                sc.src = 'https://cdn.jsdelivr.net/npm/h5wasm@0.10.3/dist/iife/h5wasm.js';
+                sc.onload = resolve;
+                sc.onerror = () => reject(new Error('Cannot load the HDF5 library (h5wasm from cdn.jsdelivr.net): connect to the internet once, or use .npz / .mat.'));
+                document.head.appendChild(sc);
+            });
+        }
+        return window.h5wasm;
+    }
+
+    // labels read from a file (Int8Array per trial: 0 fixation, 1 saccade, 2 blink, -1 not reviewed) -> reviewed ranges + expert events
+    function applyLoadedLabels(labels) {
+        for (let t = 0; t < state.trials.length; t++) {
+            const L = labels[t];
+            if (!L) continue;
+            const n = state.trials[t].x.length, reviewed = [], events = [];
+            for (let i = 0; i < n;) {
+                if (!(L[i] >= 0)) { i++; continue; }
+                let j = i; while (j + 1 < n && L[j + 1] >= 0) j++;
+                reviewed.push([i, j]); i = j + 1;
+            }
+            for (let i = 0; i < n;) {
+                const c = L[i];
+                if (c !== 1 && c !== 2) { i++; continue; }
+                let j = i; while (j + 1 < n && L[j + 1] === c) j++;
+                events.push({ onset: i, offset: j, cls: c, fromPrelabel: false }); i = j + 1;
+            }
+            state.reviewedRanges[t] = reviewed; state.expertEvents[t] = events; state.pointMarks[t] = [];
+            syncRenderedLabels(t);
+        }
+        updateStatus();
+        render();
+    }
+
+    // positions (raw, so that the index of a label is the index of the sample in the file) and labels (-1 = not reviewed) in .npz / .mat / .h5
+    async function exportBinary(fmt) {
+        const labels = state.trials.map((tr, t) => {
+            const out = new Int8Array(tr.x.length).fill(-1), lab = state.labels[t];
+            for (const [s, e] of state.reviewedRanges[t]) for (let i = s; i <= e && i < out.length; i++) out[i] = lab[i];
+            return out;
+        });
+        const names = (state.trialNames && state.trialNames.some(n => n)) ? state.trialNames.map((n, i) => n || ('trial_' + i)) : null;
+        const trials = state.trials.map(tr => ({ x: tr.x, y: tr.y }));
+        try {
+            if (fmt === 'npz') downloadFile('unEye_labeled.npz', UnEyeFormats.writeNpzFile(trials, labels, names, state.rateHz), 'application/octet-stream');
+            else if (fmt === 'mat') downloadFile('unEye_labeled.mat', UnEyeFormats.writeMatFile(trials, labels, names, state.rateHz), 'application/octet-stream');
+            else downloadFile('unEye_labeled.h5', await UnEyeFormats.writeH5File(trials, labels, names, state.rateHz, loadH5Lib), 'application/octet-stream');
+        } catch (err) {
+            alert('Cannot write the ' + fmt + ' file: ' + err.message);
+        }
+    }
+
     // --- CSV & Preprocessing Config Export (UnEye convention) ---
     function exportDataset() {
         if (state.trials.length === 0) return;
         const nTrials = state.trials.length;
 
-        // 1. Labels CSV (L.csv) - NaN for unreviewed samples
-        let lCsv = "";
-        for (let t = 0; t < nTrials; t++) {
-            const row = [];
-            const lab = state.labels[t];
-            const rev = state.reviewedRanges[t];
-            for (let i = 0; i < lab.length; i++) {
-                const isRev = rev.some(([s, e]) => s <= i && i <= e);
-                row.push(isRev ? lab[i] : "nan");
+        const fmt = elements.exportFormat ? elements.exportFormat.value : 'csv';
+        if (fmt !== 'csv') {
+            exportBinary(fmt);          // one file with all trials (different durations), the labels and the names
+        } else {
+            // 1. Labels CSV (L.csv) - NaN for unreviewed samples
+            let lCsv = "";
+            for (let t = 0; t < nTrials; t++) {
+                const row = [];
+                const lab = state.labels[t];
+                const rev = state.reviewedRanges[t];
+                for (let i = 0; i < lab.length; i++) {
+                    const isRev = rev.some(([s, e]) => s <= i && i <= e);
+                    row.push(isRev ? lab[i] : "nan");
+                }
+                lCsv += row.join(",") + "\n";
             }
-            lCsv += row.join(",") + "\n";
-        }
-        downloadFile("L.csv", lCsv, "text/csv");
+            downloadFile("L.csv", lCsv, "text/csv");
 
-        // 2. Positions CSV (X.csv, Y.csv) - smooth positions for reproducibility
-        let xCsv = "", yCsv = "";
-        for (let t = 0; t < nTrials; t++) {
-            const tr = state.trials[t];
-            const px = (state.filterSettings.enabled && tr.smoothX) ? tr.smoothX : tr.x;
-            const py = (state.filterSettings.enabled && tr.smoothY) ? tr.smoothY : tr.y;
-            xCsv += Array.from(px).map(v => isNaN(v) ? "nan" : v.toFixed(5)).join(",") + "\n";
-            yCsv += Array.from(py).map(v => isNaN(v) ? "nan" : v.toFixed(5)).join(",") + "\n";
+            // 2. Positions CSV (X.csv, Y.csv) - smooth positions for reproducibility
+            let xCsv = "", yCsv = "";
+            for (let t = 0; t < nTrials; t++) {
+                const tr = state.trials[t];
+                const px = (state.filterSettings.enabled && tr.smoothX) ? tr.smoothX : tr.x;
+                const py = (state.filterSettings.enabled && tr.smoothY) ? tr.smoothY : tr.y;
+                xCsv += Array.from(px).map(v => isNaN(v) ? "nan" : v.toFixed(5)).join(",") + "\n";
+                yCsv += Array.from(py).map(v => isNaN(v) ? "nan" : v.toFixed(5)).join(",") + "\n";
+            }
+            downloadFile("X.csv", xCsv, "text/csv");
+            downloadFile("Y.csv", yCsv, "text/csv");
         }
-        downloadFile("X.csv", xCsv, "text/csv");
-        downloadFile("Y.csv", yCsv, "text/csv");
 
         // 3. Preprocessing Config & Python Code (uneye_config.json)
         const cfg = {
@@ -1842,7 +1930,7 @@
                     focusCurrentMark();
                 } else {
                     state.fromSample = 0;
-                    state.toSample = Math.min(state.trialLength - 1, 499);
+                    state.toSample = Math.min(curLen() - 1, 499);
                 }
                 updateStatus();
                 render();
@@ -1859,7 +1947,7 @@
                     focusCurrentMark();
                 } else {
                     state.fromSample = 0;
-                    state.toSample = Math.min(state.trialLength - 1, 499);
+                    state.toSample = Math.min(curLen() - 1, 499);
                 }
                 updateStatus();
                 render();
