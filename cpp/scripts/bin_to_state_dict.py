@@ -6,6 +6,7 @@ Usage:
     python cpp/scripts/bin_to_state_dict.py cpp/models/combined.bin output_weights.pt
 """
 import argparse
+import json
 import os
 import struct
 import sys
@@ -66,7 +67,25 @@ def load_bin_to_state_dict(bin_path):
         if len(extra) > 0:
             print(f"Warning: {len(extra)} trailing bytes in {bin_path}", file=sys.stderr)
 
-        return sd, {"version": version, "classes": classes, "ks": ks, "mp": mp}
+        meta = {"version": version, "classes": classes, "ks": ks, "mp": mp}
+
+        # Check for sidecar JSON
+        json_path = os.path.splitext(bin_path)[0] + ".json"
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, "r", encoding="utf-8") as jf:
+                    sidecar = json.load(jf)
+                    meta["sidecar"] = sidecar
+                    print(f"Loaded sidecar metadata from {json_path}:")
+                    print(f"  Rate: {sidecar.get('rate_hz', 'unknown')} Hz")
+                    print(f"  Deg/unit: {sidecar.get('deg_per_unit', 1.0)}")
+                    print(f"  Speed limit: {sidecar.get('max_speed_deg_s', 1300.0)} deg/s")
+                    if "preprocessing" in sidecar:
+                        print(f"  Preprocessing: {sidecar['preprocessing']}")
+            except Exception as e:
+                print(f"Notice: Could not parse sidecar {json_path}: {e}", file=sys.stderr)
+
+        return sd, meta
 
 def main():
     parser = argparse.ArgumentParser(description="Convert .bin U'n'Eye model to PyTorch state dict")
@@ -77,7 +96,20 @@ def main():
     sd, meta = load_bin_to_state_dict(args.bin_path)
     os.makedirs(os.path.dirname(os.path.abspath(args.out_path)), exist_ok=True)
     torch.save(sd, args.out_path)
+    
+    # Save accompanying metadata sidecar
+    out_json = os.path.splitext(args.out_path)[0] + "_config.json"
+    sidecar_data = meta.get("sidecar", {
+        "classes": meta["classes"],
+        "ks": meta["ks"],
+        "mp": meta["mp"],
+        "max_speed_deg_s": 1300.0
+    })
+    with open(out_json, "w", encoding="utf-8") as jf:
+        json.dump(sidecar_data, jf, indent=2)
+
     print(f"Converted {args.bin_path} -> {args.out_path} (classes: {meta['classes']}, ks: {meta['ks']}, mp: {meta['mp']})")
+    print(f"Saved configuration to {out_json}")
 
 if __name__ == "__main__":
     main()

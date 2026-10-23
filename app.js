@@ -1790,16 +1790,24 @@
             return;
         }
         downloadFile('uneye_model.bin', state.trainedModelBin, 'application/octet-stream');
-        const jsonStr = state.trainedModelJson || JSON.stringify({
-            classes: 3,
-            window: 1000,
-            ks: 5,
-            mp: 5,
-            rate_hz: state.rateHz,
-            deg_per_unit: state.scale,
+        let sidecar = {};
+        try {
+            if (state.trainedModelJson) sidecar = JSON.parse(state.trainedModelJson);
+        } catch (e) {}
+        sidecar.classes = sidecar.classes || 3;
+        sidecar.window = sidecar.window || 1000;
+        sidecar.ks = 5;
+        sidecar.mp = 5;
+        sidecar.rate_hz = state.rateHz;
+        sidecar.deg_per_unit = state.scale || 1.0;
+        sidecar.max_speed_deg_s = 1300.0;
+        sidecar.preprocessing = {
+            filter: state.filterSettings.enabled ? state.filterSettings.filterType : "none",
+            savgol_window_ms: state.filterSettings.enabled ? state.filterSettings.windowMs : 0,
+            savgol_poly_order: state.filterSettings.polyOrder || 3,
             max_speed_deg_s: 1300.0
-        }, null, 2);
-        downloadFile('uneye_model.json', jsonStr, 'application/json');
+        };
+        downloadFile('uneye_model.json', JSON.stringify(sidecar, null, 2), 'application/json');
     }
 
     function evaluateConvergenceFlag() {
@@ -2118,7 +2126,8 @@
                 savgol_poly_order: state.filterSettings.polyOrder,
                 adaptive_threshold_lambda: state.filterSettings.lambda,
                 min_peak_velocity_deg_s: state.filterSettings.minPeakVel,
-                min_amplitude_deg: state.filterSettings.minAmplitude
+                min_amplitude_deg: state.filterSettings.minAmplitude,
+                max_speed_deg_s: 1300.0
             },
             python_preprocessing_code: `# Preprocessing pipeline matching web labeler:\nimport scipy.signal\nimport numpy as np\n\n# Apply Savitzky-Golay filter to test traces before passing to UnEye:\nwindow_samples = int(round(${state.filterSettings.windowMs} * ${state.rateHz} / 1000.0)) | 1\nX_clean = scipy.signal.savgol_filter(X, window_length=window_samples, polyorder=3, mode="interp", axis=-1)\nY_clean = scipy.signal.savgol_filter(Y, window_length=window_samples, polyorder=3, mode="interp", axis=-1)\n`
         };
@@ -2339,4 +2348,9 @@
     } else {
         init();
     }
+
+    window.state = state;
+    window.render = render;
+    window.updateStatus = updateStatus;
+    window.syncRenderedLabels = syncRenderedLabels;
 })();

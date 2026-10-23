@@ -100,3 +100,40 @@ bash scripts/build_wasm.sh
 scripts\build_wasm.bat
 ```
 Prerequisites: Emscripten SDK (`emsdk`).
+
+
+---
+
+## 6. Manual Verification Checklist (iPad Safari & Android Chrome)
+
+When verifying on a physical iPad M1 (Safari) or Android phone (Chrome):
+
+1. **Initial Load & Offline Caching**:
+   - Navigate to the web labeler (`https://jobellet.github.io/uneye/`).
+   - Open Developer Tools (or inspect cache): confirm Service Worker (`sw.js`) installs and caches `web/uneye_train.wasm` and `models/combined.bin`.
+   - Enable Airplane Mode / disconnect Wi-Fi and refresh: confirm the page loads completely offline.
+
+2. **Touch Gestures & Labeling Flow**:
+   - Tap "⚡ Demo" to load 8 trials of synthetic gaze data.
+   - **Pass 1 (Mark)**: Tap to place point marks on saccade candidates.
+   - **Pass 2 (Refine)**: Press and drag boundaries to precisely refine saccade onset and offset.
+   - Mark epoch as reviewed. Notice that unrefined point marks never enter training.
+
+3. **On-Device Training**:
+   - Tap **Train** (or review $\ge 20$ s to trigger auto-train).
+   - Confirm status changes to `Epoch 1/60 · Loss: ... · Val F1: ... · ETA: ...`.
+   - Verify screen stays awake during training (`navigator.wakeLock`).
+   - Verify canvas panning and zooming remain smooth at 60 fps while training runs in the worker.
+
+4. **Cooperative Cancellation**:
+   - While training is active, tap **Cancel**.
+   - Confirm training immediately stops and status displays `Training cancelled`.
+
+5. **Post-Training Inference & Metrics**:
+   - On training completion, verify `testF1Saccade` and `testKappaSaccade` update with real numbers calculated on the held-out `testTrials`.
+   - Open **Metrics**: verify learning curve canvas plots the real test metrics.
+   - Navigate to unreviewed trials: verify putative pre-labels now reflect the trained U'n'Eye network rather than the initial HMM.
+
+6. **Export & Persistence**:
+   - Tap **Model**: confirm browser downloads `uneye_model.bin` (75,708 bytes for 2 classes) and `uneye_model.json` sidecar.
+   - Close the browser tab and re-open: confirm IndexedDB automatically restores all reviewed ranges, expert events, and the trained model.
