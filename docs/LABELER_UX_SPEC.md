@@ -22,3 +22,7 @@ Implemented in `app.js` / `index.html` (web) and checked by `test_labeler_flow.m
    1.25 degrees of range so the bar always fits.
 9. **Trainer memory.** The batch is capped at 32 windows (`cpp/web/uneye_web.cpp`) and `max_seconds_of_data` is a total budget over all traces
    (`cpp/app/train/src/dataset.cpp`); the page trains on all reviewed labels.
+10. **Screen space.** The top bar keeps only the annotation tools (class / eraser / undo, and the pass switch on Android); files, labels, filter,
+    training, metrics, export and the window width are behind a menu button (hidden by default). One status line.
+11. **One position lane.** X (blue) and Y (green) share the same axes, scaled on the extreme values of the visible window
+    (4 % margin, never tighter than 1.25 degrees); the speed lane gets the remaining third.
