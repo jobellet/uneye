@@ -43,3 +43,4 @@ data/DeepGazeKit/
 
 node_modules/
 package-lock.json
+cpp/build_win/
