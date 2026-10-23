@@ -9,6 +9,7 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.AttributeSet
+import android.os.SystemClock
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
@@ -36,6 +37,7 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         const val TOOL_SACCADE = 1
         const val TOOL_BLINK = 2
         const val TOOL_ERASER = 3
+        const val REFRACTORY_MS = 600L     // no mark for this long after the end of a pinch zoom
     }
 
     // --- data (set by the screen before invalidate) --------------------------------
@@ -140,18 +142,25 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
     private var dragCurSample = -1L
     private var dragging = false
 
+    // Refractory period after a pinch zoom: the last finger that lifts must not mark an event, and neither may
+    // a new touch within REFRACTORY_MS of the end of a multi-touch gesture.
+    private var multiTouch = false
+    private var ignoreGesture = false
+    private var lastMultiEnd = 0L
+    private fun suppressed() = multiTouch || ignoreGesture
+
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean = true
         override fun onSingleTapUp(e: MotionEvent): Boolean {
-            onTapSample?.invoke(sampleAt(e.x))
+            if (!suppressed()) onTapSample?.invoke(sampleAt(e.x))
             return true
         }
         override fun onDoubleTap(e: MotionEvent): Boolean {
-            onDoubleTapSample?.invoke(sampleAt(e.x))
+            if (!suppressed()) onDoubleTapSample?.invoke(sampleAt(e.x))
             return true
         }
         override fun onLongPress(e: MotionEvent) {
-            onLongPressSample?.invoke(sampleAt(e.x))
+            if (!suppressed()) onLongPressSample?.invoke(sampleAt(e.x))
         }
     })
 
@@ -186,6 +195,15 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
     // --- touch gestures -------------------------------------------------------------------
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        val now = SystemClock.uptimeMillis()
+        // gesture state first: the detectors below call back while they process this very event
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                multiTouch = false
+                ignoreGesture = now - lastMultiEnd < REFRACTORY_MS
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> multiTouch = true
+        }
         scaleDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)
         when (event.actionMasked) {
@@ -194,9 +212,14 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
                 dragCurSample = dragStartSample
                 dragging = false
             }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                dragging = false
+                showLoupe = false
+            }
+            MotionEvent.ACTION_POINTER_UP -> lastMultiEnd = now
             MotionEvent.ACTION_MOVE -> {
                 val s = sampleAt(event.x)
-                if (!dragging && abs(s - dragStartSample) > 8) {
+                if (!suppressed() && !dragging && abs(s - dragStartSample) > 8) {
                     dragging = true       // a real drag: pass 2 refinement
                     showLoupe = true
                 }
@@ -207,6 +230,8 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (multiTouch) lastMultiEnd = now
+                if (dragging && suppressed()) { dragging = false; showLoupe = false; cursorSample = -1; invalidate() }
                 if (dragging) {
                     val onset = min(dragStartSample, dragCurSample)
                     val offset = max(dragStartSample, dragCurSample)
@@ -251,13 +276,11 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         // 1. Solid clear to prevent ghosting between passes or frames
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paintBg)
 
-        val laneH = height / 3f
-        val xLaneTop = 0f
-        val yLaneTop = laneH
-        val spLaneTop = 2 * laneH
+        // two lanes: position (X and Y on the same axes) above, speed below
+        val posLaneTop = 0f
+        val spLaneTop = 0.66f * height
 
-        // Lane Dividers
-        canvas.drawLine(0f, yLaneTop, width.toFloat(), yLaneTop, paintDivider)
+        // Lane Divider
         canvas.drawLine(0f, spLaneTop, width.toFloat(), spLaneTop, paintDivider)
 
         // 2. Background label bands & reviewed regions
@@ -271,12 +294,11 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
 
         // 4. Invalid / blink gaps
         val xl = xLane; val yl = yLane; val sp = speedLane
-        drawInvalidGaps(canvas, xl, xLaneTop, yLaneTop)
-        drawInvalidGaps(canvas, yl, yLaneTop, spLaneTop)
+        drawInvalidGaps(canvas, xl, posLaneTop, spLaneTop)
+        drawInvalidGaps(canvas, yl, posLaneTop, spLaneTop)
 
         // 5. Traces
-        if (xl != null) drawPositionTrace(canvas, xl, xLaneTop, yLaneTop, paintTraceX, "Position X (°)")
-        if (yl != null) drawPositionTrace(canvas, yl, yLaneTop, spLaneTop, paintTraceY, "Position Y (°)")
+        drawPositionLane(canvas, xl, yl, posLaneTop, spLaneTop)
         if (sp != null) drawVelocityTrace(canvas, sp, spLaneTop, height.toFloat(), "Velocity (°/s)")
 
         // 6. Pre-labels, point marks, and expert marks
@@ -368,43 +390,43 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         canvas.drawLine(x1, 0f, x1, height.toFloat(), paintPass2Bound)
     }
 
-    private fun drawPositionTrace(
-        canvas: Canvas, lane: Lane, top: Float, bottom: Float, paint: Paint, title: String
-    ) {
+    /**
+     * X (blue) and Y (green) on the same axes, zoomed as far as possible on the extreme values of the visible window.
+     * The scale is never tighter than 1.25 degrees so that the 1-degree scale bar always fits.
+     */
+    private fun drawPositionLane(canvas: Canvas, xl: Lane?, yl: Lane?, top: Float, bottom: Float) {
         val h = bottom - top
         var lo = Float.POSITIVE_INFINITY
         var hi = Float.NEGATIVE_INFINITY
-        for (v in lane.values) {
-            if (v.isFinite()) {
-                if (v < lo) lo = v
-                if (v > hi) hi = v
+        for (lane in listOf(xl, yl)) {
+            if (lane == null) continue
+            for (v in lane.values) {
+                if (v.isFinite()) {
+                    if (v < lo) lo = v
+                    if (v > hi) hi = v
+                }
             }
         }
         if (!lo.isFinite()) return
 
+        val oneDeg = (1.0 / max(1e-4, degPerUnit)).toFloat()
         var minV = lo
         var maxV = hi
-        val pad = max(0.2f, (maxV - minV) * 0.15f)
+        val pad = max(0.02f * oneDeg, (maxV - minV) * 0.04f)
         minV -= pad
         maxV += pad
-
-        val oneDeg = (1.0 / max(1e-4, degPerUnit)).toFloat()
         if (maxV - minV < 1.25f * oneDeg) {
             val c = (minV + maxV) / 2f
             minV = c - 0.625f * oneDeg
             maxV = c + 0.625f * oneDeg
         }
 
-        // Title on left
-        canvas.drawText(title, 20f, top + 36f, paintText)
-
-        // Range text and 1° scale bar on right
+        canvas.drawText("X / Y  Position (°)", 20f, top + 36f, paintText)
         val rangeDeg = (maxV - minV) * degPerUnit.toFloat()
-        val rangeStr = String.format(java.util.Locale.US, "%.1f°", rangeDeg)
-        canvas.drawText(rangeStr, width - 110f, top + 36f, paintText)
+        canvas.drawText(String.format(java.util.Locale.US, "%.1f°", rangeDeg), width - 110f, top + 36f, paintText)
 
-        // 1° scale bar
-        val barH = (oneDeg / (maxV - minV)) * (h - 40f)
+        // 1° scale bar at the right edge
+        val barH = (oneDeg / (maxV - minV)) * (h - 32f)
         val barX = width - 24f
         val barY1 = bottom - 16f
         val barY0 = barY1 - barH
@@ -412,25 +434,19 @@ class TraceView @JvmOverloads constructor(context: Context, attrs: AttributeSet?
         canvas.drawLine(barX - 6f, barY0, barX + 6f, barY0, paintScaleBar)
         canvas.drawLine(barX - 6f, barY1, barX + 6f, barY1, paintScaleBar)
 
-        val path = Path()
-        var started = false
-        val n = lane.values.size
-        for (i in 0 until n) {
-            val v = lane.values[i]
-            val px = pxOf(fromSample + i)
-            if (!v.isFinite()) {
-                started = false
-                continue
+        for ((lane, paint) in listOf(xl to paintTraceX, yl to paintTraceY)) {
+            if (lane == null) continue
+            val path = Path()
+            var started = false
+            for (i in lane.values.indices) {
+                val v = lane.values[i]
+                val px = pxOf(fromSample + i)
+                if (!v.isFinite()) { started = false; continue }
+                val py = bottom - 16f - ((v - minV) / (maxV - minV)) * (h - 32f)
+                if (!started) { path.moveTo(px, py); started = true } else path.lineTo(px, py)
             }
-            val py = bottom - 16f - ((v - minV) / (maxV - minV)) * (h - 32f)
-            if (!started) {
-                path.moveTo(px, py)
-                started = true
-            } else {
-                path.lineTo(px, py)
-            }
+            canvas.drawPath(path, paint)
         }
-        canvas.drawPath(path, paint)
     }
 
     private fun drawVelocityTrace(

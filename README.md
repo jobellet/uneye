@@ -1,351 +1,104 @@
-
-
 ![U'n'Eye](logo.jpeg)
 
-# U'n'Eye: Deep neural network for the detection of saccades and other eye movements
-Bellet et al. 2018, **Human-level saccade and microsaccade detection with deep neural networks**
-********
-> **Transparency (2026):** the real-time C++ engine (`cpp/`), the safety guard, the fault-injection and timing tools, the
-> label-free study (`free_saccade/`), web labeling app, Android offline labeler, and documentation in `docs/` were written with AI assistance. Every number in
-> those documents comes from a script in this repository that was run; see `docs/ROADMAP.md` and `docs/safety/hazards.md`.
+# U'n'Eye — tools to detect and label saccades, microsaccades and blinks
 
-## Latest Updates:
-- **[Web Labeling Interface](https://jobellet.github.io/uneye/)**: Client-side touch-optimized web application for tablets (e.g. iPad Air / iPad Pro with Apple Pencil / touch) and desktops. Implements two-pass labeling with automated event centering ([-50 ms, +50 ms]) and local export.
-- **[Android Offline Labeler](android/README.md)**: Native Android app with two-pass saccade and blink labeling, background on-device U-Net training, convergence detection via bootstrap confidence intervals, and UnEye CSV / MATLAB v5 export for Google Colab.
-- Configurable convolution and max pooling kernel sizes (`ks`, `mp`) to adjust the network's temporal receptive field.
+This repository is a **fork of [berenslab/uneye](https://github.com/berenslab/uneye)** that has grown far beyond it.
 
-------------------
+> **The original U'n'Eye** (Bellet, Bellet, Nienborg, Hafed & Berens 2019, *Human-level saccade detection performance using deep neural networks*, J. Neurophysiol.; [preprint](https://www.biorxiv.org/content/early/2018/06/29/359018)) is a **proof of principle**: a Python package that trains a U-Net to detect saccades on a finished recording. **This repository is the practical side**: tools you can install on a tablet, a phone or a lab computer, to label your own data quickly, train a detector on it, and run it live. The original package, its install instructions and its notebooks are kept in this repository (see [the original package](#6-the-original-python-package)) and documented in [`docs/README_UNEYE_ORIGINAL.md`](docs/README_UNEYE_ORIGINAL.md); for that alone, the [original repository](https://github.com/berenslab/uneye) is the reference.
 
-### <i>Train your own eye movement detection network in 10 minutes and label your data on tablet, mobile, or desktop. [Get started now](#installation)</i>
-### <i>Try the [client-side web labeler](https://jobellet.github.io/uneye/) or the [Android app](android/README.md).</i>
+> **Transparency (2026):** the real-time C++ engine, EyeLive, the web and Android labelers, the label-free and foundation studies and the documents in `docs/` were written with AI assistance. Every number quoted in `docs/` comes from a script of this repository that was run (`docs/BENCHMARK_SUMMARY.md`, `docs/ROADMAP.md`, `docs/safety/hazards.md`).
 
-## <a name="content">Content</a> 
-- [Overview](#overview)
-- [Web & Mobile Labeling Tools](#labeling-apps)
-- [Installation](#installation)
-- [Usage](#usage)
-	- [jupyter notebook](#jupyter)
-	- [command line](#cmd)
-- [Module description](#module)
-- [Further use](#further)
+## Which tool do I want?
 
-## <a name="overview">Overview</a> 
-U'n'Eye is a Python 3 package that uses [PyTorch](http://pytorch.org) for neural network training and inference.
+| I want to... | Use | Runs on |
+|---|---|---|
+| mark saccades / blinks by hand on my recordings, with a pen or fingers, and train a detector from my labels | [**Web labeler**](#1-web-labeler-ipad-tablet-phone-laptop) | iPad, Android tablet or phone, any laptop (browser, no install) |
+| the same, offline in a phone app that trains in the background | [**Android labeler**](#2-android-labeler) | Android phone / tablet (arm64) |
+| record from an eye tracker, detect events live, correct the labels, trigger my experiment | [**EyeLive**](#3-eyelive-real-time-recording-labeling-and-triggers) | Windows, macOS, Linux |
+| run a causal detector sample by sample inside my own program | [**Real-time C++ engine**](#4-real-time-c-engine-and-command-line-tools) | any C++17 compiler; Windows / macOS / Linux / Android |
+| the most accurate offline detector, or a detector that needs no labels | [**Python detectors**](#5-python-detectors-and-studies) | Python 3, PyTorch |
+| the original 2019 package and notebooks | [**Original package**](#6-the-original-python-package) | Python 3 |
 
-For a description of the algorithm, see [our preprint](https://www.biorxiv.org/content/early/2018/06/29/359018).
+---
 
-Pretrained network weights learned on diverse datasets (described in the paper) are available in the folder **training**, and corresponding datasets are provided in the folder **data**.
+## 1. Web labeler (iPad, tablet, phone, laptop)
 
-**Users can easily train their own network on custom datasets to obtain optimal performance.** Please see the module description below and the example jupyter notebook **UnEye.ipynb** for instructions.
+**Open <https://jobellet.github.io/uneye/>.** Nothing to install; everything runs in the browser and your data never leave the device.
 
-We provide a [docker](http://docker.com) container for platform-independent use.
+### Install on a device
+- **iPad / iPhone (Safari)**: open the page, wait for it to finish loading once, then *Share → Add to Home Screen*. It then starts like an app and works **offline**.
+- **Android (Chrome)**: open the page, menu *⋮ → Install app / Add to Home screen*.
+- **Laptop (Chrome, Edge, Safari, Firefox)**: just open the page; to work offline keep the tab or install it from the address bar.
+- After a new version, reload the page twice (the service worker updates the offline copy).
+- Self-hosting: serve this folder with any static server (`python3 -m http.server`) and open `index.html`.
 
-[back to start](#content)
+### What you can do
+- **Load** eye traces: CSV / TXT (two columns x y, or rows X / Y per trial), `.npz`, `.mat` (MATLAB v5, trials in a cell array, different durations allowed) and `.h5` (HDF5; the HDF5 reader is downloaded once, so be online the first time). Formats and layouts: [`docs/WEB_FORMATS.md`](docs/WEB_FORMATS.md).
+- **Pass 1 — mark**: the trace is shown in windows whose width in ms you choose (default 500 ms, 10 % overlap between windows, then on to the next trial). Tap a saccade or a blink to mark it; tap again to remove. Automatic pre-labels (adaptive Engbert–Kliegl / HMM) are shown as suggestions.
+- **Pass 2 — refine**: the view jumps from event to event (across trials, without a "next trial" button) with a ±50 ms frame; press-drag to set the onset and offset, or accept the pre-label.
+- **Eraser**: drag between two times to delete every event, mark and pre-label in between.
+- **1° scale bar** at the right of each position lane, so a microsaccade is told from a large saccade whatever the automatic zoom.
+- **No accidental marks** after a two-finger zoom (600 ms refractory period).
+- **Save / reload your labels** (`Save labels` / `Load labels`, a `.json` file) to continue later or on another device; export CSV, `.npz`, `.mat` or `.h5` with the labels (`-1` = not reviewed).
+- **Train a real U-Net in the browser** (button *Train*): the C++ trainer compiled to WebAssembly (SIMD) runs in a worker on the iPad M1 or on an ordinary CPU, starts from the shipped pretrained model, reports epochs, loss and F1 on held-out trials, and can be cancelled; the model is saved on the device and downloadable (`Model`, a `.bin` the other tools read). Details, speeds and caveats: [`docs/WEB_TRAINING.md`](docs/WEB_TRAINING.md).
+- **Only what you looked at is ever used for training**: a window counts only after you moved on from it in pass 1, and only if every mark in it has been refined; automatic pre-labels never count as truth; every 4th trial is held out to score the network. Behaviour specification: [`docs/LABELER_UX_SPEC.md`](docs/LABELER_UX_SPEC.md).
 
-## <a name="labeling-apps">Web & Mobile Labeling Tools</a>
+Files: `index.html`, `app.js`, `formats.js`, `train_worker.js`, `sw.js`, `web/uneye_train.{js,wasm}`, `models/combined.bin`. Rebuild the WebAssembly with `scripts/build_wasm.sh` (needs [emsdk](https://github.com/emscripten-core/emsdk)). Tests: `node test_formats.js`, `node test_labeler_flow.mjs` (headless Chrome, `puppeteer-core`), `node test_wasm_trainer.js`.
 
-### 1. Web Labeling Interface (iPad / Tablets / Desktops)
-- **URL**: [https://jobellet.github.io/uneye/](https://jobellet.github.io/uneye/)
-- Runs 100% client-side in the browser (HTML5 Canvas + vanilla JS).
-- Two-pass labeling workflow:
-  - **Pass 1**: Rapid 1-tap event marking with auto-advance.
-  - **Pass 2**: Automated event centering with a strict `[-50 ms, +50 ms]` window around putative onsets/offsets (`[onset - 50ms, offset + 50ms]`) for fine-grained boundary refinement.
-- Touch- and stylus-friendly controls for Apple Pencil / iPad.
-- Export to UnEye CSV conventions (`L.csv`, `X.csv`, `Y.csv`).
+## 2. Android labeler
 
-### 2. Android Offline Labeler
-- **Directory**: [`android/`](android/README.md)
-- Native Android application (Kotlin + C++ JNI via `liboffline_session.so`).
-- Real-time on-device U-Net background training via Android `WorkManager`.
-- Automated convergence detection using bootstrap confidence intervals (flags when gains over rounds stabilize).
-- Export to UnEye CSV and MATLAB v5 (`.mat` with `X`, `Y`, `Sacc`) formats for training on Google Colab or desktop workstations.
-- See the [Android documentation](android/README.md) for architecture, build instructions, and benchmark figures.
+Offline app for a phone or tablet with the same two-pass labeling as the web labeler (windows with 10 % overlap and a width you set, event-to-event refinement across trials, eraser, 1° scale bar, refractory period after a pinch), plus **background training** of the on-device U-Net (WorkManager), a **convergence flag** (bootstrap confidence interval of the F1 gain over the last rounds) with learning curves, and export of labels CSV (UnEye convention), X / Y CSV, MATLAB v5 `.mat` and the trained model `.bin` / `.json` through the system share sheet.
 
-[back to start](#content)
+### Install
+There is no store release; you build the APK once:
+1. Install [Android Studio](https://developer.android.com/studio) with the SDK and the NDK (arm64-v8a), JDK 17.
+2. `cd android && ./gradlew :app:assembleDebug` (or *Run* in Android Studio with the phone connected by USB, developer mode and USB debugging on).
+3. Or install the APK by hand: `adb install app/build/outputs/apk/debug/app-debug.apk`.
+4. Copy your CSV (two files X / Y, trials × time) or a `.mat` (variables `X`, `Y`) to the phone, open the app, pick the file, the sampling rate and the units.
 
-## <a name="installation">Installation:</a> [local](#local) or with [docker](#docker)
+Host-side check without a phone: `cmake -S android -B build-host && cmake --build build-host --target test_offline_session && ctest --test-dir build-host -R test_offline_session`. Design, phases and measurements: [`android/README.md`](android/README.md), [`android/PHASE0_RESULTS.md`](android/PHASE0_RESULTS.md).
 
-In the following, all commands written in boxes need to be entered into your terminal. 
- 
-### <a name="local">Local:</a> install the python package (Mac & Linux)
+## 3. EyeLive: real-time recording, labeling and triggers
 
-**1)** Via the terminal, check if you have python3 installed
+A small desktop program (a window `eyelive` plus the command-line twin `eyelive_cli`, no installer, no administrator rights) that **records an eye-tracker stream, labels saccades and blinks as they happen, lets you correct the labels in minutes, learns from your corrections and can trigger your experiment on events**. The state block of a running session is readable from MATLAB / Psychtoolbox or Python / PsychoPy.
 
-	python3 --version
-If not found, download and install python3 [here](https://www.python.org/downloads/release/python-364/). 
+### Install
+1. Download the zip for your system from the *Releases* of the repository (built by `.github/workflows/eyelive-release.yml`: Windows, macOS, Linux).
+2. Check the SHA-256, unblock / allow the unsigned program, and start it: step by step for each system in [`docs/eyelive/INSTALL_UNSIGNED.md`](docs/eyelive/INSTALL_UNSIGNED.md). Keep the `models/` folder next to the program.
+3. First launch: a four-question wizard (tracker, signal, goal, name) creates a profile; then *Start recording*.
 
-**2)** Clone the repository into your local directory:
+### What you can do
+Simulator or file replay (no tracker needed to try it), UDP stream from the tracker computer (protocol in the manual, helper senders in `cpp/app/tools/`: Python, EyeLink template, PsychoPy and MATLAB frame feeders), several detectors swappable during a recording (label-free `hmm_accel`, the very fast threshold detector for triggers, the pretrained U'n'Eye networks, causal and bidirectional TCNs, your own), review and correction of labels, training on your corrections, prediction on other sessions, export (events CSV, BIDS TSV + JSON, MAT-file, HTML report with provenance). Manuals: [`docs/eyelive/MANUAL.md`](docs/eyelive/MANUAL.md) (English), [`docs/eyelive/MANUAL_FR.md`](docs/eyelive/MANUAL_FR.md) (français), [`docs/eyelive/EYELINK_DATA.md`](docs/eyelive/EYELINK_DATA.md), [`docs/eyelive/LAB_TEST.md`](docs/eyelive/LAB_TEST.md), [`docs/eyelive/WINDOWS_MATLAB_TEST.md`](docs/eyelive/WINDOWS_MATLAB_TEST.md).
 
-	git clone https://github.com/jobellet/uneye.git
-	cd uneye
+### Build from source
+`cmake -S cpp -B build -G Ninja && cmake --build build && ctest --test-dir build -L eyelive --output-on-failure` (see [`cpp/AGENT.md`](cpp/AGENT.md), [`cpp/app/AGENT.md`](cpp/app/AGENT.md)).
 
-**3)** Install the package and dependencies:
+## 4. Real-time C++ engine and command-line tools
 
-For Mac:
+Dependency-free C++17 port of the networks that labels **sample by sample while the signal is recorded** (`StreamingDetector`: ring buffer, windowing, lookahead commit, event state machine), with a physics layer and a safety guard (`GazeEngine`, `SafetyGuard`: NORMAL / DEGRADED / SAFE) and ONNX / native `.bin` models. Command-line tools in `cpp/tools/`: `uneye_rt` (`--sim`, `--replay` a recording as a live stream and score it, `--stdin`), `gaze_replay`, `fault_injection`, `bench_latency`. Build: `cd cpp && cmake -B build && cmake --build build && ctest --test-dir build`. Usage, design, guarantees and what is *not* verified: [`cpp/README.md`](cpp/README.md), [`cpp/GAZE_ENGINE.md`](cpp/GAZE_ENGINE.md), [`docs/safety/hazards.md`](docs/safety/hazards.md), [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-	pip install ./ -r ./requirements_mac.txt
-	
-For Linux:
+All detectors clip the input velocity at 1300 deg/s (physiological limit of macaque saccades) so that blinks and tracker loss cannot destabilise the network: [`docs/SPEED_LIMIT_HANDOFF.md`](docs/SPEED_LIMIT_HANDOFF.md).
 
-	pip install ./ -r ./requirements_lin.txt
-	
-Note: If the git command does not work under Mac OS, first run
+## 5. Python detectors and studies
 
-	xcode-select --install
+| Folder | What it is |
+|---|---|
+| [`foundation/`](foundation/AGENT.md) | the best offline detector so far, a 2-channel (vx, vy) bidirectional TCN (`sup_bitcn.py`), the benchmark on 5 datasets (event F1 and kappa, tables in [`docs/BENCHMARK_SUMMARY.md`](docs/BENCHMARK_SUMMARY.md)) and every self-supervised variant tried ([`docs/OVERNIGHT_REPORT.md`](docs/OVERNIGHT_REPORT.md)) |
+| [`free_saccade/`](free_saccade/AGENT.md) | label-free detectors: Engbert–Kliegl, a universal minimum-duration HMM (F1 0.88), seeded contrastive embeddings |
+| [`online/`](online/AGENT.md) | causal (forward-only) networks for online labeling, the model behind the live engine |
+| [`training/`](training/AGENT.md), [`data/`](data/AGENT.md) | pretrained weights and the datasets of the original article |
+| [`docs/`](docs/AGENT.md) | roadmaps, audits, safety documents, benchmark tables, slides |
 
-and install the necessary tools.
+Set-up (macOS / Linux): `python3 -m venv .venv && .venv/bin/pip install -r requirements_mac.txt` (or `requirements_lin.txt`, `requirements_wind.txt`), then run from the repository root, e.g. `.venv/bin/python foundation/sup_bitcn.py --inputs 2`. Evaluation metric everywhere: event F1 (a predicted run of at least 3 samples overlapping a human saccade) and Cohen's kappa.
 
-### <a name="docker">Docker:</a> the platform independent solution
+## 6. The original Python package
 
-**1)** Install docker:
+`uneye` (PyTorch, `pip install ./ -r requirements_*.txt`) trains and applies the original U-Net on position traces; pretrained weights are in `training/`, the datasets in `data/`, and the examples in `UnEye.ipynb` (and the online-labeling notebooks `UnEye_online_labeling.ipynb`, `UnEye_online_training.ipynb`). Installation, Docker, command-line use and the module description are in [`docs/README_UNEYE_ORIGINAL.md`](docs/README_UNEYE_ORIGINAL.md). `saccade_labeler.py` is the older desktop (PySide6) labeling GUI.
 
-for [Windows](https://docs.docker.com/docker-for-windows/install/#download-docker-for-windows), [Mac](https://store.docker.com/editions/community/docker-ce-desktop-mac) or [Ubuntu](https://docs.docker.com/install/linux/docker-ce/ubuntu/#set-up-the-repository)
+## Citation
 
-**2)** Download the docker image that contains U'n'Eye, pytorch and all other python packages you need. This step will take some time.
+If you use U'n'Eye, please cite the original article: Bellet, M. E., Bellet, J., Nienborg, H., Hafed, Z. M., & Berens, P. (2019). *Human-level saccade detection performance using deep neural networks.* Journal of Neurophysiology, 121(2), 646–661.
 
-	docker pull mebellet/uneye:v-0.2	
+## Repository map
 
-
-[back to start](#content)
-
-## <a name="usage">Usage</a> 
-General:
-
-	model = uneye.DNN(sampfreq= sampling_frequency )
-	model.train(X,Y,Labels)
-	model.test(X,Y,Labels)
-	model.predict(X,Y)
-	model.crossvalidate
-	
-Generally, one first calls the network and can then apply different methods, as described in the module description below.
-
-### <a name="jupyter">Jupyter Notebook</a> 
-
-An example jupyter notebook is provided in this repository (**UnEye.ipynb**).
-Clone the repository as described above (or alternatively download the files). Put the file **UnEye.ipynb** into the folder where you want to work. Depending on whether you use U'n'Eye with the docker container or locally, enter the following into your command window to use the jupyter notebook (replace YourWorkingDirectory)
-
-#### A) Docker
-
-
-    cd /YourWorkingDirectory
-    docker run -it --rm -p 6688:8888 --name uneye -v $(pwd)/.:/home/jovyan mebellet/uneye:v-0.2
-
-<b>!! Important:</b> Now, don't just copy the output of the into your browser, but do the following:
-
-Open your web browser. Enter "localhost:6688" as URL. Then you will be asked for a token. This token appeared when you entered the command above. It looks something like this: http://6688:8888/?token=775c758f58cdc82bf6ddf51a112228f4dd4229c5b3847bb1 . Copy the token (in this case 775c758f58cdc82bf6ddf51a112228f4dd4229c5b3847bb1) and log in. Now you should see the content of your folder in the web browser.
-
-#### B) Local
-
-	alias python=python3
-	cd /YourWorkingDirectory
-	jupyter notebook
-
-
-To stop jupyter notebook, press **Ctrl + C** .
-
-
-[back to start](#content)
-
-### <a name="cmd">Command line</a> 
-With the .py file **UnEye.py** you can use the package from the command line. So far it takes the following input arguments:
-
-***
-
-Input arguments (*=necessary):
-**mode***: train or predict
-
-**x***: filename of the horizontal eye position (.csv or .mat file)
-
-**y***: filename of the vertical eye position (.csv or .mat file)
-
-**labels**(*for training): filename of the eye movement ground truth labels (.csv or .mat file)
-
-**sampfreq***: sampling frequency of the data (Hz)
-
-**weights**: ouput/input filename of trained weights
-
-***
-
-first run the following, depending on whether you use the Docker container or work locally. Note: /YourWorkingDirectory **must contain the .py file UnEye.py** from this repo.
-#### A) Docker
-
-	cd /YourWorkingDirectory
-	docker run -it -p 6688:8888 --name uneye -v $(PWD)/:/home/jovyan mebellet/uneye:v-0.2 /bin/bash
-#### B) Local
-
-	cd /YourWorkingDirectory
-	alias python=python3
-
-
-
-Now, stay in the command window. You can from here either **train** a new network or **predict** eye movements from new data:
-
-#### Training
-
-	python UnEye.py -m train -x data/x_name -y data/y_name -l data/labels_name -f sampfreq
-Note: In this example the files are located in the directory _/YourWorkingDirectory/data_
-
-The trained weights will be saves to _training/weights_ or to _training/weightsname_ if the argument _-w weightsname_ is given.
-
-
-#### Prediction
-
-	python UnEye.py -m predict -x data/x_name -y data/y_name -f sampfreq
-
-Note: This will automatically use the weights saved under _training/weights_ unless you specify your weightsname by giving the input argument _-w training/weightsname_ .
-
-The predicted saccade probability and the binary prediction are saved to _data/Sacc_prob_ and _data/Sacc_pred_ respectively.
-
-***
-If you use docker, exit after usage with:
-
-	exit
-
-
-[back to start](#content)
-
-## <a name="module">Module description</a> 
-
-The uneye module contains the **DNN** class 
-
-	model = uneye.DNN(max_iter=500, sampfreq=1000,
-                 lr=0.001, weights_name='weights',
-                min_sacc_dist=1,min_sacc_dur=6,augmentation=True,
-                 ks=5,mp=5,inf_correction=1.5,val_samples=30)
-                
-   
-   -----
-   
- Arguments:
-	
-max_iter: maximum number of epochs during training
-
-sampfreq: sampling frequency of the eye tracker (Hz)
-
-lr: learning rate of the network training 
-
-weights_name: input/output filename for trained network weights
-
-min*_*sacc_dist: minimum distance between two saccades in ms for merging of saccades
-
-min*_*sacc_dur: minimum saccade duration in ms for removal of small events
-
-augmentation: whether or not to use data augmentation for training, default: True
-
-ks: kernel size of convolution operations, default=5
-
-mp: size of max pooling operation, default=5
-
-inf_correction: float, value to replace Infs occuring after differential of input signal
-
-val_samples: int, number of validation samples (for early stopping criterion)
-    
-
-
-*** 
-	
-### Methods
-
-### train: 
-
-Train the network weights with your own training data. It is recommended to label at least 500 seconds of data. Arrange the data into a matrix of _samples*timebins_ or input them as a vector of length _timebins_ . In case you arrange the data into a matrix, the time length of each sample should be at least 1000 ms.
-
-During training, the current iteration and maximum number of iterations will be shown. Note that training stops earlier most of the times.
-
-	model.train(X,Y,Labels)
-
-X,Y : horizontal and vertical eye positions, array-like, shape: {(nsamples, nbins) or (nbins)}
-
-Labels: eye movement ground truth labels with k different values for k different classes (e.g. fixation=0, saccade=1, saccades should always be labelled with 1), array-like, shape: {(nsamples, nbins) or (nbins)}
-
-
-
-Output: the trained weights are saved into the folder **training**. 
-
-***
-
-### test: 
-
-Test performance of the network after training on your own test data. Arrange the data into a matrix of _samples*timebins_ or input them as a vector of length _timebins_ .
-
-	Prediction, Probability, Performance = model.test(X,Y,Labels)
-
-Input parameters:
-
-X,Y : horizontal and vertical eye positions, {array-like, shape: {(nsamples, nbins) or (nbins)}
-
-Labels: eye movement ground truth labels, array-like, shape: {(nsamples, nbins) or (nbins)}
-
-
-Output:
-
-Prediction: eye movement class prediction for each time bin, same shape as input
-
-Probability: softmax probability output of network, shape: {n_samples,classes,time) or (classes,time)}
-
-Performance: numpy dictionary containing different performance measures: **Cohen's Kappa**, **F1**, **onset distance**, **offset distance**. To call these measures, use
-
-	cohens_kappa = Performance['kappa']
-	f1 = Performance['f1']
-	on_dist = Performance['on']
-	off_dist = Performance['off']
-
-
-
-***
-### predict: 
-
-Predict saccades in recordings with pretrained weights. Arrange the data into a matrix of _samples*timebins_ or input them as a vector of length _timebins_ .
-
-	Prediction, Probability = model.predict(X,Y)
-
-Input parameters:
-
-X,Y : horizontal and vertical eye positions, {array-like, shape: {(nsamples, nbins) or (nbins)}
-
-
-Output:
-
-Prediction: eye movement class prediction for each time bin, same shape as input
-
-Probability: softmax probability output of network, shape: {n_samples,classes,time) or (classes,time)}
-
-***
-### crossvalidate: 
-
-Implementation of K-fold cross-validation.
-
-	crossvalidate(self,X,Y,Labels,X_val,Y_val,Labels_val,Labels_test=None,K=10)
-
-Input parameters:
-
-X,Y : horizontal and vertical eye positions, {array-like, shape: {(nsamples, nbins) or (nbins)}
-
-Labels: array-like, shape: {(n_timepoints),(n_samples, n_timepoints)}, class labels in range [0 classes-1], fixation=0, saccades=1
-        
-X_val,Y_val: array-like, shape: {(n_timepoints),(n_samples, n_timepoints)}, additional horizontal and vertical eye positions in degree for early stopping criterion. Can be small.
-        
-Labels_val: array-like, shape: {(n_timepoints),(n_samples, n_timepoints)}, additional class labels in range [0 classes-1], fixation=0, saccades=1 for early stopping criterion. Can be small.
-        
-Labels_test: array-like, shape: {(n_timepoints),(n_samples, n_timepoints)}, if test Labels different from training labels (for training with missing labels only), optional
-        
-K: float, number of folds of cross validation
-
-[back to start](#content)
-
-## <a name="further">Further use</a> 
-
-**Adding other python modules to the docker container**
-
-You can add other python modules to the docker container once you pulled the image (as described above). For this, run:
-
-    docker run -it -p 6688:8888 --name uneye mebellet/uneye:v-0.2 /bin/bash
-    pip install module_name
-    
-    
-This installs the python module 'module_name'.
-Exit the container by pressing Control+p and Control+q, then commit the changes to the image:
-
-	docker commit uneye mebellet/uneye:v-0.2
-	
-[back to start](#content)
+`AGENT.md` at the root is the router for coding agents (what lives where, conventions, environment); every folder has its own `AGENT.md`.

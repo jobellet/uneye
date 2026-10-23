@@ -85,6 +85,17 @@ int main() {
     s.refine_mark(0, 500, 500, 540, 1);
     s.mark_epoch_reviewed(0, 0, 999);
     CHECK(s.reviewed_seconds() > 0.9, "epoch reviewed after all marks refined, got %.2f s", s.reviewed_seconds());
+    {   // the human's events only: detector events he did not confirm are not ground truth in a reviewed epoch
+        int n_det = 0; for (auto& e : s.events(0)) if (e.from_prelabel) ++n_det;
+        CHECK(n_det == 0, "no unconfirmed detector event stays in a reviewed epoch (%d)", n_det);
+        // a new mark inside the reviewed epoch re-opens the stretch around it until it is refined
+        const double before_s = s.reviewed_seconds();
+        s.add_point_mark(0, 700, 1);
+        CHECK(s.reviewed_seconds() < before_s, "a new point mark re-opens the reviewed stretch around it");
+        s.remove_point_mark(0, 700);
+        s.mark_epoch_reviewed(0, 0, 999);
+        CHECK(s.reviewed_seconds() >= before_s - 1e-9, "reviewing the epoch again restores it");
+    }
     // undo reverts the last edit
     CHECK(s.expert().undo(), "undo");
 

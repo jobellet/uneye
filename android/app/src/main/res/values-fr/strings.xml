@@ -89,4 +89,5 @@
     <string name="tool_saccade">Saccade</string>
     <string name="tool_blink">Clignement</string>
     <string name="tool_eraser">Gomme</string>
+    <string name="window_ms_hint">Fenêtre (ms)</string>
 </resources>

@@ -70,6 +70,9 @@ class LabelingScreen : AppCompatActivity() {
     private lateinit var nextTrialBtn: Button
     private lateinit var prevEpochBtn: Button
     private lateinit var nextEpochBtn: Button
+    private lateinit var winMsEdit: EditText
+    private lateinit var menuBtn: Button
+    private lateinit var settingsPanel: View
 
     private lateinit var pass2Controls: View
     private lateinit var prevEventBtn: Button
@@ -136,6 +139,11 @@ class LabelingScreen : AppCompatActivity() {
         nextTrialBtn = findViewById(R.id.nextTrialBtn)
         prevEpochBtn = findViewById(R.id.prevEpochBtn)
         nextEpochBtn = findViewById(R.id.nextEpochBtn)
+        winMsEdit = findViewById(R.id.winMsEdit)
+        menuBtn = findViewById(R.id.menuBtn)
+        settingsPanel = findViewById(R.id.settingsPanel)
+        epochMs = getSharedPreferences("uneye_prefs", MODE_PRIVATE).getLong("winMs", 500L).coerceIn(20L, 60_000L)
+        winMsEdit.setText(epochMs.toString())
 
         pass2Controls = findViewById(R.id.pass2Controls)
         prevEventBtn = findViewById(R.id.prevEventBtn)
@@ -184,7 +192,20 @@ class LabelingScreen : AppCompatActivity() {
         eraserToolBtn.setTextColor(if (tool == TraceView.TOOL_ERASER) 0xFFFFFFFF.toInt() else 0xFF37474F.toInt())
     }
 
+    private fun applyWinMs() {
+        val v = winMsEdit.text.toString().toLongOrNull() ?: return
+        val ms = v.coerceIn(20L, 60_000L)
+        epochMs = ms
+        getSharedPreferences("uneye_prefs", MODE_PRIVATE).edit().putLong("winMs", ms).apply()
+        if (pass == Session.Pass.ONE) { traceView.centerOn(traceView.fromSample + ms / 2, ms); refresh() }
+    }
+
     private fun setupListeners() {
+        menuBtn.setOnClickListener {
+            settingsPanel.visibility = if (settingsPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        winMsEdit.setOnEditorActionListener { _, _, _ -> applyWinMs(); true }
+        winMsEdit.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) applyWinMs() }
         undoBtn.setOnClickListener { session.undo(trial); refresh() }
 
         // Pass 1 Navigation
@@ -209,16 +230,24 @@ class LabelingScreen : AppCompatActivity() {
         prevEventBtn.setOnClickListener {
             if (refineIdx > 0) {
                 refineIdx--
-                zoomMultiplier = 1.0
-                focusCurrentMark()
+            } else {
+                val pt = findTrialWithEvents(trial, -1)
+                if (pt < 0) return@setOnClickListener
+                enterTrialForRefine(pt, atEnd = true)
             }
+            zoomMultiplier = 1.0
+            focusCurrentMark()
         }
         nextEventBtn.setOnClickListener {
             if (refineIdx < refineQueue.size - 1) {
                 refineIdx++
-                zoomMultiplier = 1.0
-                focusCurrentMark()
+            } else {
+                val nt = findTrialWithEvents(trial, +1)       // after the last event of a trial: first event of the next trial that has some
+                if (nt < 0) return@setOnClickListener
+                enterTrialForRefine(nt, atEnd = false)
             }
+            zoomMultiplier = 1.0
+            focusCurrentMark()
         }
         acceptPreBtn.setOnClickListener {
             if (currentMarkAt >= 0) {
@@ -293,9 +322,9 @@ class LabelingScreen : AppCompatActivity() {
 
     private fun switchPass() {
         if (pass == Session.Pass.ONE) {
-            // Enter Pass 2: build refinement queue from point marks
-            val pm = session.trialUi(trial).pointMarks
-            refineQueue = pm.sortedBy { it.first }.toMutableList()
+            // Enter Pass 2: the window on screen has been seen; the queue holds the marks of windows that were seen
+            session.addScan(trial, traceView.fromSample, min(traceView.toSample, session.trialSamples - 1))
+            refineQueue = queueFor(trial).toMutableList()
             refineIdx = 0
             zoomMultiplier = 1.0
             session.setPass(Session.Pass.TWO)
@@ -318,7 +347,7 @@ class LabelingScreen : AppCompatActivity() {
             pass2Controls.visibility = View.VISIBLE
 
             if (refineQueue.isEmpty()) {
-                refineQueue = session.trialUi(trial).pointMarks.sortedBy { it.first }.toMutableList()
+                refineQueue = queueFor(trial).toMutableList()
             }
             refineIdx = 0
             focusCurrentMark()
@@ -338,9 +367,8 @@ class LabelingScreen : AppCompatActivity() {
         if (pass != Session.Pass.ONE) return
 
         if (activeTool == TraceView.TOOL_ERASER) {
-            // Eraser tool: removes point mark or expert event covering sample
-            session.removePointMark(trial, s)
-            session.deleteMark(trial, s)
+            // Eraser tool, tap: everything within 8 samples of the tap (a drag erases a whole interval)
+            session.eraseRange(trial, s - 8, s + 8)
             refresh()
             return
         }
@@ -362,20 +390,66 @@ class LabelingScreen : AppCompatActivity() {
         val winStep = (epochMs * 0.9).roundToInt()
         val nextFrom = ((lastMarkSample + margin) / winStep + 1) * winStep
         if (nextFrom > traceView.toSample) {
+            session.addScan(trial, traceView.fromSample, min(traceView.toSample, session.trialSamples - 1))
             traceView.centerOn(nextFrom + epochMs / 2, epochMs)
         }
         refresh()
     }
 
+    /**
+     * Next / previous window of the same trial (10 % overlap); after the last window of a trial, the first window of the next one.
+     * The window left with Next counts as seen: the visible range, or the whole epoch width when the view is at least that wide.
+     */
     private fun moveEpoch(dir: Int) {
-        val winStep = (epochMs * 0.9).roundToInt()
+        val n = session.trialSamples
+        val step = max(1L, (epochMs * 0.9).roundToInt().toLong())
         val cur = traceView.fromSample
-        val next = (cur + dir * winStep).coerceIn(0, max(0, session.trialSamples - 1))
-        // Scanned region marked reviewed
-        val leaveTo = min(cur + epochMs - 1, session.trialSamples - 1)
-        session.markEpochReviewed(trial, cur, leaveTo)
-        traceView.centerOn(next + epochMs / 2, epochMs)
+        if (dir > 0) {
+            val vis = traceView.toSample - cur + 1
+            val seenTo = if (vis >= (epochMs * 0.9)) max(traceView.toSample, cur + epochMs - 1) else traceView.toSample
+            session.addScan(trial, cur, min(n - 1, seenTo))
+            if (cur + epochMs >= n) {                               // last window of the trial
+                if (trial < session.nTrials.value - 1) {
+                    session.setTrial(trial + 1)
+                    traceView.centerOn(epochMs / 2, epochMs)
+                }
+            } else {
+                val next = min(cur + step, max(0L, n - epochMs))    // the last window is clipped to the end of the trial
+                traceView.centerOn(next + epochMs / 2, epochMs)
+            }
+        } else {
+            if (cur <= 0) {
+                if (trial > 0) {
+                    session.setTrial(trial - 1)
+                    val last = max(0L, n - epochMs)
+                    traceView.centerOn(last + epochMs / 2, epochMs)
+                }
+            } else {
+                val prev = max(0L, cur - step)
+                traceView.centerOn(prev + epochMs / 2, epochMs)
+            }
+        }
         refresh()
+    }
+
+    // Pass 2 only offers the marks that lie in windows displayed in pass 1
+    private fun queueFor(t: Long): List<Pair<Long, Int>> =
+        session.trialUi(t).pointMarks.filter { session.inScanned(t, it.first) }.sortedBy { it.first }
+
+    private fun findTrialWithEvents(from: Long, dir: Int): Long {
+        var t = from + dir
+        while (t >= 0 && t < session.nTrials.value) {
+            if (queueFor(t).isNotEmpty()) return t
+            t += dir
+        }
+        return -1L
+    }
+
+    private fun enterTrialForRefine(t: Long, atEnd: Boolean) {
+        session.setTrial(t)
+        refineQueue = queueFor(t).toMutableList()
+        refineIdx = if (atEnd) max(0, refineQueue.size - 1) else 0
+        zoomMultiplier = 1.0
     }
 
     // --- Pass 2: Focused Event-by-Event Centering -----------------------------------
@@ -387,6 +461,8 @@ class LabelingScreen : AppCompatActivity() {
      */
     private fun focusCurrentMark() {
         if (refineQueue.isEmpty()) {
+            val nt = findTrialWithEvents(trial, +1)
+            if (nt >= 0) { enterTrialForRefine(nt, atEnd = false); focusCurrentMark(); return }
             currentMarkAt = -1L
             currentPutativeOnset = -1L
             currentPutativeOffset = -1L
@@ -398,11 +474,12 @@ class LabelingScreen : AppCompatActivity() {
 
         if (refineIdx < 0) refineIdx = 0
         if (refineIdx >= refineQueue.size) {
+            // end of this trial: the next event is the first one of the next trial that has events
+            val nt = findTrialWithEvents(trial, +1)
+            if (nt >= 0) { enterTrialForRefine(nt, atEnd = false); focusCurrentMark(); return }
             currentMarkAt = -1L
             traceView.activePutativeRange = null
             eventCounterBadge.text = getString(R.string.all_reviewed)
-            // Mark entire trial scanned/reviewed
-            session.markEpochReviewed(trial, 0, session.trialSamples - 1)
             refresh()
             return
         }
@@ -454,6 +531,17 @@ class LabelingScreen : AppCompatActivity() {
     }
 
     private fun onDragSpan(onset: Long, offset: Long) {
+        if (activeTool == TraceView.TOOL_ERASER) {
+            // eraser: everything between the two times goes (saccades, blinks, marks, pre-labels)
+            session.eraseRange(trial, onset, offset)
+            if (pass == Session.Pass.TWO) {
+                refineQueue = queueFor(trial).toMutableList()
+                refineIdx = min(refineIdx, refineQueue.size)
+                focusCurrentMark()
+            }
+            refresh()
+            return
+        }
         if (pass != Session.Pass.TWO || currentMarkAt < 0) return
         if (session.refineMark(trial, currentMarkAt, onset, offset, currentMarkCls)) {
             refineIdx++

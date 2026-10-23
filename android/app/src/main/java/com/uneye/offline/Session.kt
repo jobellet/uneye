@@ -139,6 +139,7 @@ class Session(private val filesDir: File) {
                 trialSamples = if (nT > 0) per else 1000
                 this.degPerUnit = res.degPerUnit
                 this.recordingName = recordingName
+                scans.clear(); erased.clear()
                 _loaded.value = res.ok
                 _reviewedSeconds.value = native.reviewedSeconds()
                 onDone(res.ok, if (res.ok) "" else res.error.ifEmpty { res.prelabelerError })
@@ -152,6 +153,40 @@ class Session(private val filesDir: File) {
     }
 
     fun isTestTrial(k: Long): Boolean = k in testTrials
+
+    // --- windows seen in pass 1 -----------------------------------------------------
+    // Only a stretch that was on screen in pass 1 can become reviewed (= can be trained on). The facade reviews it
+    // only when no point mark is still waiting for its refinement, so the scans are re-applied after every edit.
+    private val scans = HashMap<Long, MutableList<LongArray>>()
+    // ranges wiped with the eraser: their automatic pre-labels are no longer drawn nor snapped to
+    private val erased = HashMap<Long, MutableList<LongArray>>()
+
+    fun addScan(trial: Long, from: Long, to: Long) {
+        if (to < from) return
+        val l = scans.getOrPut(trial) { mutableListOf() }
+        if (l.none { it[0] == from && it[1] == to }) l.add(longArrayOf(from, to))
+        applyScans(trial)
+    }
+
+    fun inScanned(trial: Long, at: Long): Boolean = scans[trial]?.any { at >= it[0] && at <= it[1] } == true
+
+    fun applyScans(trial: Long) {
+        scans[trial]?.forEach { native.markEpochReviewed(trial, it[0], it[1]) }
+        _reviewedSeconds.value = native.reviewedSeconds()
+    }
+
+    /** Eraser: removes every event (saccade or blink), point mark and pre-label overlapping [a]..[b]. */
+    fun eraseRange(trial: Long, a: Long, b: Long) {
+        val lo = minOf(a, b); val hi = maxOf(a, b)
+        val ui = trialUi(trial)
+        for (m in ui.marks) if (m.offset >= lo && m.onset <= hi) native.deleteMark(trial, m.onset)
+        for (p in ui.pointMarks) if (p.first in lo..hi) native.removePointMark(trial, p.first)
+        erased.getOrPut(trial) { mutableListOf() }.add(longArrayOf(lo, hi))
+        applyScans(trial)
+    }
+
+    private fun isErased(trial: Long, onset: Long, offset: Long): Boolean =
+        erased[trial]?.any { offset >= it[0] && onset <= it[1] } == true
 
     // --- trace / labels for drawing -------------------------------------------------
 
@@ -169,7 +204,7 @@ class Session(private val filesDir: File) {
         }
         val pre = native.prelabels(k).let { e ->
             e[0].indices.map { i -> MarkUi(e[0][i].toLong(), e[1][i].toLong(), e[2][i], e[3][i] == 1) }
-        }
+        }.filter { !isErased(k, it.onset, it.offset) }
         val pm = native.pointMarks(k)
         val points = pm.first.indices.map { i -> Pair(pm.first[i].toLong(), pm.second[i]) }
         return TrialUi(k, trialSamples, marks, pre, points, k in testTrials)
@@ -178,17 +213,30 @@ class Session(private val filesDir: File) {
     // --- pass 1 ----------------------------------------------------------------------
 
     fun addPointMark(trial: Long, at: Long, cls: Int) = native.addPointMark(trial, at, cls)
-    fun removePointMark(trial: Long, at: Long): Boolean = native.removePointMark(trial, at)
+    fun removePointMark(trial: Long, at: Long): Boolean {
+        val ok = native.removePointMark(trial, at)
+        if (ok) applyScans(trial)
+        return ok
+    }
     fun clearPointMarks(trial: Long) = native.clearPointMarks(trial)
-    fun snapToPrelabel(trial: Long, at: Long, tolerance: Long): Long =
-        native.snapToPrelabel(trial, at, tolerance)
+    fun snapToPrelabel(trial: Long, at: Long, tolerance: Long): Long {
+        val s = native.snapToPrelabel(trial, at, tolerance)
+        return if (s >= 0 && erased[trial]?.any { s >= it[0] && s <= it[1] } == true) -1L else s
+    }
 
     // --- pass 2 ----------------------------------------------------------------------
 
-    fun refineMark(trial: Long, at: Long, onset: Long, offset: Long, cls: Int): Boolean =
-        native.refineMark(trial, at, onset, offset, cls)
+    fun refineMark(trial: Long, at: Long, onset: Long, offset: Long, cls: Int): Boolean {
+        val ok = native.refineMark(trial, at, onset, offset, cls)
+        if (ok) applyScans(trial)          // the stretch may have no pending mark left
+        return ok
+    }
 
-    fun deleteMark(trial: Long, at: Long): Boolean = native.deleteMark(trial, at)
+    fun deleteMark(trial: Long, at: Long): Boolean {
+        val ok = native.deleteMark(trial, at)
+        applyScans(trial)
+        return ok
+    }
 
     /** The epoch [from]..[to] was scanned and all its marks refined (facade checks). */
     fun markEpochReviewed(trial: Long, from: Long, to: Long) {
@@ -204,8 +252,26 @@ class Session(private val filesDir: File) {
 
     // --- persistence ------------------------------------------------------------------
 
-    fun saveLabels(path: String): Boolean = native.saveLabels(path)
-    fun loadLabels(path: String): Boolean = native.loadLabels(path)
+    fun saveLabels(path: String): Boolean {
+        val ok = native.saveLabels(path)
+        try {
+            val lines = scans.flatMap { (t, l) -> l.map { "$t ${it[0]} ${it[1]}" } }
+            File(File(path).parentFile, "scans.txt").writeText(lines.joinToString("\n"))
+        } catch (_: Exception) { }
+        return ok
+    }
+
+    fun loadLabels(path: String): Boolean {
+        val ok = native.loadLabels(path)
+        try {
+            scans.clear()
+            File(File(path).parentFile, "scans.txt").takeIf { it.exists() }?.readLines()?.forEach { line ->
+                val p = line.trim().split(" ")
+                if (p.size == 3) scans.getOrPut(p[0].toLong()) { mutableListOf() }.add(longArrayOf(p[1].toLong(), p[2].toLong()))
+            }
+        } catch (_: Exception) { }
+        return ok
+    }
 
     // --- training (phase 3) --------------------------------------------------------------
 

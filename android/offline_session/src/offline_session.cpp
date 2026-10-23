@@ -24,6 +24,7 @@ namespace offline {
 namespace {
 
 constexpr double kTargetRate = 1000.0;
+constexpr int64_t kReopenSamples = 150;      // a new point mark un-reviews +-150 ms around it
 constexpr int64_t kMinReviewedSamples = 250;   // 0.25 s at 1 kHz (engine glue rule)
 
 std::vector<double> resample_linear(const std::vector<double>& in, double from_hz, double to_hz) {
@@ -393,6 +394,8 @@ void OfflineSession::add_point_mark(int64_t trial, int64_t at, uint8_t cls) {
     Trial& t = impl_->trials[size_t(trial)];
     if (at < 0 || at >= int64_t(t.x.size())) return;
     t.points.push_back({at, cls});
+    // a new mark in an already reviewed stretch: that stretch has to be refined again before it can train
+    t.labels.mark_reviewed(std::max<int64_t>(0, at - kReopenSamples), std::min<int64_t>(int64_t(t.x.size()) - 1, at + kReopenSamples), false, false);
 }
 
 bool OfflineSession::remove_point_mark(int64_t trial, int64_t at) {
@@ -476,6 +479,15 @@ void OfflineSession::mark_epoch_reviewed(int64_t trial, int64_t from, int64_t to
     bool all_refined = true;
     for (const auto& p : t.points) if (p.at >= from && p.at <= to) { all_refined = false; break; }
     if (!all_refined) return;
+    // Automatic (detector) events the human did not confirm in a stretch he has seen are not ground truth: drop them,
+    // so that a reviewed stretch holds only his own events (a stretch without event is a true "no event" stretch).
+    {
+        const int64_t f = std::max<int64_t>(0, from), e = std::min<int64_t>(n - 1, to);
+        for (size_t i = t.labels.events().size(); i-- > 0;) {
+            const auto& ev = t.labels.events()[i];
+            if (ev.origin == eyelive::EventOrigin::Detector && ev.onset >= f && ev.offset <= e) t.labels.remove(i);
+        }
+    }
     t.labels.mark_reviewed(std::max<int64_t>(0, from), std::min<int64_t>(n - 1, to), true, false);
 }
 
