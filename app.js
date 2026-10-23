@@ -1638,6 +1638,11 @@
     }
 
     function handleFile(file) {
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        if (!['csv', 'txt', 'dat', 'mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {
+            alert('Unsupported file type ".' + ext + '". Open a .csv, .txt, .mat, .npz or .h5 file.');
+            return;
+        }
         pendingFileToLoad = file;
         elements.modalFileName.textContent = file.name;
         elements.loadModal.classList.remove('hidden');

@@ -88,7 +88,8 @@
         </footer>
 
         <!-- Hidden file inputs -->
-        <input type="file" id="fileInput" accept=".csv,.mat,.txt,.dat,.npz,.h5,.hdf5" style="display: none;">
+        <!-- no "accept" filter on purpose: iPadOS greys out every file whose extension has no registered type (.npz, .h5, .mat), so they could not be picked; the extension is checked in app.js -->
+        <input type="file" id="fileInput" style="display: none;">
         <input type="file" id="filePairInput" accept=".csv,.txt,.dat" multiple style="display: none;">
 
         <!-- Load Dialog Modal -->
