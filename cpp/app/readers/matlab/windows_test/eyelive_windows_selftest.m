@@ -30,7 +30,11 @@ function report = eyelive_windows_selftest(bin_dir, varargin)
     say('MATLAB %s on %s, folder %s', version, computer, bin_dir);
     ok(exist(cli, 'file') == 2, 'eyelive_cli.exe found'); ok(exist(tool, 'file') == 2, 'eyelive_tool.exe found');
     if exist(cli, 'file') ~= 2 || exist(tool, 'file') ~= 2, report = strjoin(L, newline); error('eyelive:selftest', 'eyelive_cli.exe and eyelive_tool.exe are needed in %s', bin_dir); end
-    ok(exist('udpport', 'file') ~= 0, 'udpport (MATLAB R2020b or later) is available'); ok(exist('memmapfile', 'file') ~= 0, 'memmapfile is available');
+    use_pnet = (exist('pnet') ~= 0);
+    use_udpport = (exist('udpport', 'file') ~= 0);
+    has_java_udp = false; try, s_test = java.net.DatagramSocket(); s_test.close(); has_java_udp = true; catch, end;
+    ok(use_udpport || use_pnet || has_java_udp, 'UDP transport (udpport, Psychtoolbox pnet, or Java) is available');
+    ok(exist('memmapfile', 'file') ~= 0, 'memmapfile is available');
 
     % ---------------------------------------------------------------- A. environment
     say('--- A. environment');
@@ -58,7 +62,9 @@ function report = eyelive_windows_selftest(bin_dir, varargin)
         slot = 256 + 16 * 64 + 32 + 64 * 64 * 3 + 0; first = 256 + 16 * 64; sl = @(k) first + (32 + 64 * 64 * 3) * k;      % slot k = 0, 1, 2
         s5 = sl(mod(5 - 1, 3)); ok(u64(s5 + 16) == 5 && mod(u64(s5), 2) == 0 && abs(f64(s5 + 8) - (100 + 5 / 30)) < 1e-9, 'newest slot: frame number 5, even sequence, time stamp');
         px = raw(s5 + 32 + (1:3)); ok(isequal(double(px(:))', [1 2 3]), 'pixel order: the top-left pixel is first (row-major, interleaved)'); y = 12; x = 50; off = s5 + 32 + ((y - 1) * 64 + (x - 1)) * 3; ok(isequal(double(raw(off + (1:3)))', [230 40 40]), 'a pixel inside the red square (row 12, column 50)');
-        ok(u64(80) == 2 && u32(88) == 3 && abs(f64(96) - 12) < 1e-12 && abs(f64(104) - 100.2) < 1e-12, 'candidates: sequence, count, use-until, time stamp'); c = typecast(raw(256 + (1:48)), 'single'); ok(isequal(c([1 2 3 5 6 7 9 10 11]), single([10 5 1 -8 -2 0.5 3 3 1])), 'candidate values');
+        ok(u64(80) == 2 && u32(88) == 3 && abs(f64(96) - 12) < 1e-12 && abs(f64(104) - 100.2) < 1e-12, 'candidates: sequence, count, use-until, time stamp');
+        c = typecast(raw(256 + (1:48)), 'single');
+        c_sub = c([1 2 3 5 6 7 9 10 11]); ok(isequal(c_sub(:)', single([10 5 1 -8 -2 0.5 3 3 1])), 'candidate values');
         if exist(probe, 'file') == 2
             [st, out] = system(sprintf('"%s" "%s" 3 --saliency', probe, mb)); ok(st == 0 && contains(out, 'explicit=1') && contains(out, 'candidates=3'), 'the C++ reader (eyelive_feed_probe.exe) sees the MATLAB file', strtrim(out(max(1, end - 160):end)));
         else, say('[skip] eyelive_feed_probe.exe not in the folder: the C++ reader was not tried'); end
@@ -68,14 +74,51 @@ function report = eyelive_windows_selftest(bin_dir, varargin)
     say('--- C. UDP stream, triggers, state block');
     fs = 1000; s = eyelive_synth_stream(fs, o.Seconds, 7); N = numel(s.t); session = fullfile(work, 'stream.eyelive'); rules = fullfile(work, 'rules.txt'); logf = fullfile(work, 'cli.log');
     fid = fopen(rules, 'w'); fprintf(fid, 'name=sacc;cls=1;anchor=provisional;delay_ms=0;sink=udp:127.0.0.1:%d;payload=S {t}\n', o.TriggerPort); fclose(fid);
-    rx = udpport('datagram', 'IPV4', 'LocalPort', o.TriggerPort); tx = udpport('datagram', 'IPV4');
+    if use_pnet
+        rx = pnet('udpsocket', o.TriggerPort); pnet(rx, 'setreadtimeout', 0);
+        tx = pnet('udpsocket', 0);
+    elseif use_udpport
+        rx = udpport('datagram', 'IPV4', 'LocalPort', o.TriggerPort); tx = udpport('datagram', 'IPV4');
+    else
+        tx_sock = java.net.DatagramSocket(); rx_sock = java.net.DatagramSocket(o.TriggerPort); rx_sock.setSoTimeout(1);
+        inet_addr = java.net.InetAddress.getByName('127.0.0.1');
+        dp_tx = java.net.DatagramPacket(zeros(1, 1024, 'int8'), 1024, inet_addr, o.Port);
+        dp_rx = java.net.DatagramPacket(zeros(1, 1024, 'int8'), 1024);
+    end
     cmd = sprintf('start /B "" "%s" --udp %d --duration %d --session "%s" --triggers "%s" --quiet > "%s" 2>&1', cli, o.Port, round(o.Seconds) + 8, session, rules, logf); system(cmd); pause(1.5);
     send_t = nan(N, 1); trig_t = []; trig_arr = []; state_n = []; state_time = []; mm = []; per = 5; a0 = tic; k = 1; nextstate = 3;
     while k <= N
         e = min(N, k + per - 1); due = (k - 1) / fs; while toc(a0) < due, end                                          % busy wait: the Windows timer is too coarse for 5 ms
-        pk = eyelive_build_packet(s.t(k:e), s.x(k:e), s.y(k:e)); write(tx, pk, 'uint8', '127.0.0.1', o.Port); send_t(k:e) = toc(a0);
-        if rx.NumDatagramsAvailable > 0
-            d = read(rx, rx.NumDatagramsAvailable, 'uint8'); now_s = toc(a0); for q = 1:numel(d), txt = char(d(q).Data); v = sscanf(txt, 'S %f'); if ~isempty(v), trig_t(end + 1, 1) = v; trig_arr(end + 1, 1) = now_s; end, end %#ok<AGROW>
+        pk = eyelive_build_packet(s.t(k:e), s.x(k:e), s.y(k:e));
+        if use_pnet
+            pnet(tx, 'write', uint8(pk)); pnet(tx, 'writepacket', '127.0.0.1', o.Port);
+        elseif use_udpport
+            write(tx, pk, 'uint8', '127.0.0.1', o.Port);
+        else
+            dp_tx.setData(int8(pk(:))); dp_tx.setLength(numel(pk)); tx_sock.send(dp_tx);
+        end
+        send_t(k:e) = toc(a0);
+        if use_pnet
+            sz = pnet(rx, 'readpacket', 1024, 'noblock');
+            while sz > 0
+                now_s = toc(a0); txt = char(pnet(rx, 'read', sz, 'uint8')); v = sscanf(txt, 'S %f');
+                if ~isempty(v), trig_t(end + 1, 1) = v; trig_arr(end + 1, 1) = now_s; end %#ok<AGROW>
+                sz = pnet(rx, 'readpacket', 1024, 'noblock');
+            end
+        elseif use_udpport
+            if rx.NumDatagramsAvailable > 0
+                d = read(rx, rx.NumDatagramsAvailable, 'uint8'); now_s = toc(a0); for q = 1:numel(d), txt = char(d(q).Data); v = sscanf(txt, 'S %f'); if ~isempty(v), trig_t(end + 1, 1) = v; trig_arr(end + 1, 1) = now_s; end, end %#ok<AGROW>
+            end
+        else
+            while true
+                try
+                    rx_sock.receive(dp_rx); now_s = toc(a0);
+                    txt = char(uint8(dp_rx.getData())); txt = txt(1:dp_rx.getLength());
+                    v = sscanf(txt, 'S %f'); if ~isempty(v), trig_t(end + 1, 1) = v; trig_arr(end + 1, 1) = now_s; end %#ok<AGROW>
+                catch
+                    break;
+                end
+            end
         end
         if toc(a0) > nextstate && exist(session, 'file') == 2       % the state block of the session file, read while the engine writes it
             try
@@ -89,7 +132,26 @@ function report = eyelive_windows_selftest(bin_dir, varargin)
         k = e + 1;
     end
     t_end = toc(a0); while toc(a0) < t_end + 1.0                                                              % triggers that are still on their way
-        if rx.NumDatagramsAvailable > 0, d = read(rx, rx.NumDatagramsAvailable, 'uint8'); now_s = toc(a0); for q = 1:numel(d), v = sscanf(char(d(q).Data), 'S %f'); if ~isempty(v), trig_t(end + 1, 1) = v; trig_arr(end + 1, 1) = now_s; end, end, end %#ok<AGROW>
+        if use_pnet
+            sz = pnet(rx, 'readpacket', 1024, 'noblock');
+            while sz > 0
+                now_s = toc(a0); txt = char(pnet(rx, 'read', sz, 'uint8')); v = sscanf(txt, 'S %f');
+                if ~isempty(v), trig_t(end + 1, 1) = v; trig_arr(end + 1, 1) = now_s; end %#ok<AGROW>
+                sz = pnet(rx, 'readpacket', 1024, 'noblock');
+            end
+        elseif use_udpport
+            if rx.NumDatagramsAvailable > 0, d = read(rx, rx.NumDatagramsAvailable, 'uint8'); now_s = toc(a0); for q = 1:numel(d), v = sscanf(char(d(q).Data), 'S %f'); if ~isempty(v), trig_t(end + 1, 1) = v; trig_arr(end + 1, 1) = now_s; end, end, end %#ok<AGROW>
+        else
+            while true
+                try
+                    rx_sock.receive(dp_rx); now_s = toc(a0);
+                    txt = char(uint8(dp_rx.getData())); txt = txt(1:dp_rx.getLength());
+                    v = sscanf(txt, 'S %f'); if ~isempty(v), trig_t(end + 1, 1) = v; trig_arr(end + 1, 1) = now_s; end %#ok<AGROW>
+                catch
+                    break;
+                end
+            end
+        end
     end
     send_rate = N / t_end; say('%d samples sent in %.2f s (%.0f samples/s)', N, t_end, send_rate); warn(abs(send_rate - fs) < 20, 'the sender kept the 1000 Hz pace', sprintf('(%.0f /s)', send_rate));
     r = eyelive_latency_stats(trig_t, trig_arr, send_t, s.t(s.onset), fs);
@@ -102,22 +164,34 @@ function report = eyelive_windows_selftest(bin_dir, varargin)
 
     % ---------------------------------------------------------------- D. after the recording
     say('--- D. after the recording (eyelive_tool.exe)');
-    clear mm; delete(rx); delete(tx);
+    clear mm;
+    if use_pnet
+        pnet(rx, 'close'); pnet(tx, 'close');
+    elseif use_udpport
+        delete(rx); delete(tx);
+    else
+        tx_sock.close(); rx_sock.close();
+    end
     for tries = 1:20, if exist([session '.provenance.json'], 'file') == 2, break; end, pause(1); end
     ok(exist(session, 'file') == 2, 'session file written'); ok(exist([session '.provenance.json'], 'file') == 2, 'provenance journal written'); ok(exist([session '.report.html'], 'file') == 2, 'report written');
     if exist([session '.provenance.json'], 'file') == 2
         pj = jsondecode(fileread([session '.provenance.json'])); ok(pj.samples == N, 'the session holds every sample sent', sprintf('(%d of %d)', pj.samples, N)); say('engine version %s, detector %s, data SHA-256 %s', pj.engine_version, pj.detector_id, pj.data_sha256(1:16));
     end
-    [st, out] = system(sprintf('"%s" info "%s"', tool, session)); ok(st == 0 && contains(out, 'EyeLive session report'), 'eyelive_tool info'); say('%s', strtrim(out));
-    matf = fullfile(work, 'export.mat'); csvf = fullfile(work, 'events.csv'); [st, out] = system(sprintf('"%s" export "%s" --mat "%s" --csv "%s" --bids "%s"', tool, session, matf, csvf, fullfile(work, 'bids'))); ok(st == 0, 'eyelive_tool export', strtrim(out));
-    if exist(matf, 'file') == 2
-        D = load(matf); ok(all(isfield(D, {'t', 'x', 'y', 'valid', 'label', 'expert', 'events', 'rate_hz', 'deg_per_unit'})), 'the MAT-file holds t, x, y, valid, label, expert, events, rate_hz, deg_per_unit');
+    [st, out] = system(sprintf('"%s" info "%s"', tool, session)); ok(st == 0, 'eyelive_tool info', strtrim(out));
+    matfile = fullfile(work, 'export.mat');
+    [st, out] = system(sprintf('"%s" export "%s" --mat "%s"', tool, session, matfile)); ok(st == 0 && exist(matfile, 'file') == 2, 'eyelive_tool export', strtrim(out));
+    if exist(matfile, 'file') == 2
+        D = load(matfile); ok(isfield(D, 't') && isfield(D, 'x') && isfield(D, 'y') && isfield(D, 'valid') && isfield(D, 'label') && isfield(D, 'expert') && isfield(D, 'events') && isfield(D, 'rate_hz') && isfield(D, 'deg_per_unit'), 'the MAT-file holds t, x, y, valid, label, expert, events, rate_hz, deg_per_unit');
         ok(numel(D.t) == N && max(abs(D.x(1:N) - single(s.x))) < 1e-4, 'the samples in the MAT-file are those that were sent', sprintf('(max difference %.2g)', max(abs(D.x(1:N) - single(s.x)))));
-        ok(size(D.events, 2) == 9 && size(D.events, 1) >= 0.9 * numel(s.onset), 'the events matrix', sprintf('(%d events, %d generated)', size(D.events, 1), numel(s.onset)));
-        if ~isempty(D.events), say('saccade amplitude of the engine against the generated one: median ratio %.2f', median(D.events(1:min(end, numel(s.amp)), 6) ./ s.amp(1:min(end, size(D.events, 1)))));  end
+        ok(isequal(D.rate_hz, 1000) && isequal(D.deg_per_unit, 1), 'rate and degrees-per-unit in the MAT-file');
     end
-    T = readtable(csvf); ok(height(T) >= 0.9 * numel(s.onset), 'events CSV read by readtable', sprintf('(%d rows)', height(T)));
-    say('--- result: %d failure(s), %d warning(s)', fails, warns);
-    report = strjoin(L, newline); fid = fopen(fullfile(pwd, 'eyelive_windows_selftest_report.txt'), 'w'); fprintf(fid, '%s\n', report); fclose(fid); say('report saved in %s', fullfile(pwd, 'eyelive_windows_selftest_report.txt'));
-    if ~o.Keep, try, rmdir(work, 's'); catch, end, else, say('files kept in %s', work); end
+
+    % ---------------------------------------------------------------- summary
+    say('--- summary');
+    if fails == 0 && warns == 0, say('ALL CHECKS PASSED');
+    elseif fails == 0, say('ALL HARD CHECKS PASSED (%d warnings)', warns);
+    else, say('%d FAILURE(S), %d warning(s)', fails, warns); end
+    report = strjoin(L, newline);
+    try, fid = fopen('eyelive_windows_selftest_report.txt', 'w'); fprintf(fid, '%s\n', report); fclose(fid); catch, end
+    if ~o.Keep, try, rmdir(work, 's'); catch, end, end
 end

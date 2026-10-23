@@ -25,7 +25,7 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--build-dir", required=True); ap.add_argument("--os", required=True, choices=["macos", "linux", "windows"]); ap.add_argument("--version", default="dev"); ap.add_argument("--out", default="dist"); a = ap.parse_args()
     exe = ".exe" if a.os == "windows" else ""; name = f"eyelive-{a.version}-{a.os}"; stage = os.path.join(a.out, name); shutil.rmtree(stage, ignore_errors=True); os.makedirs(os.path.join(stage, "models"))
     found = []
-    for tool in ("eyelive", "eyelive_cli"):
+    for tool in ("eyelive", "eyelive_cli", "eyelive_tool"):
         src = find(a.build_dir, tool, exe)
         if not src:
             print(f"warning: {tool}{exe} not found in {a.build_dir}"); continue
@@ -53,7 +53,7 @@ def main():
         for dirpath, _, files in os.walk(stage):
             for fn in files:
                 p = os.path.join(dirpath, fn); info = zipfile.ZipInfo.from_file(p, os.path.relpath(p, a.out))
-                if fn in ("eyelive", "eyelive_cli"):
+                if fn in ("eyelive", "eyelive_cli", "eyelive_tool"):
                     info.external_attr = 0o755 << 16
                 with open(p, "rb") as fh:
                     z.writestr(info, fh.read(), zipfile.ZIP_DEFLATED)
