@@ -68,11 +68,11 @@ class Data:
         rng = np.random.RandomState(10)
         for s in sets:
             X, Y, L, fs = load(s, "A")
-            self.tr[s] = (velocity(X, Y), (L > 0).astype(np.float32), fs)
+            self.tr[s] = (velocity(X, Y, fs=fs), (L > 0).astype(np.float32), fs)
             self.raw[s] = (X, Y, fs)
             X, Y, L, fs = load(s, "B")
             ind = rng.permutation(X.shape[0])[:n_test]
-            self.te[s] = (velocity(X[ind], Y[ind]), (L[ind] > 0).astype(np.float32), fs)
+            self.te[s] = (velocity(X[ind], Y[ind], fs=fs), (L[ind] > 0).astype(np.float32), fs)
             self.te_pos[s] = (X[ind], Y[ind])
 
     def weak(self):

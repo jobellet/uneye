@@ -210,6 +210,7 @@ int main(int argc, char** argv) {
         else if (s == "--min-dur") a.cfg.min_sacc_dur_ms = std::atof(need(i));
         else if (s == "--min-dist") a.cfg.min_sacc_dist_ms = std::atof(need(i));
         else if (s == "--scale") a.cfg.input_scale = std::atof(need(i));
+        else if (s == "--max-speed") a.cfg.max_speed_deg_s = std::atof(need(i));   // deg/s, 0 = no speed limit (default 1300)
         else if (s == "--label-delay") a.cfg.label_delay = std::atoi(need(i));
         else if (s == "--sim") a.mode = "sim";
         else if (s == "--stdin") a.mode = "stdin";
@@ -225,7 +226,7 @@ int main(int argc, char** argv) {
     }
     a.cfg.window_ms = a.window_ms;
     a.window = window_samples(a.cfg.fs, a.window_ms);
-    if (a.mode.empty()) { std::fprintf(stderr, "usage: uneye_rt --model M (--sim | --replay X.csv Y.csv [Labels.csv] | --stdin) [--window-ms 200 --hop 1 --fast --lookahead 25 --fs 1000 --realtime --sweep-lookahead]\n"); return 2; }
+    if (a.mode.empty()) { std::fprintf(stderr, "usage: uneye_rt --model M (--sim | --replay X.csv Y.csv [Labels.csv] | --stdin) [--window-ms 200 --hop 1 --fast --lookahead 25 --fs 1000 --max-speed 1300 --realtime --sweep-lookahead]\n"); return 2; }
     if (a.mode == "stdin") { run_live(a); return 0; }
 
     // gather traces

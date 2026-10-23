@@ -34,6 +34,15 @@ def velocity(pos, fs):
     return v, valid
 
 
+def limit_speed(v, max_speed):
+    """limit the speed of velocities v (..., 2) (deg/s) to max_speed, keeping the direction (norm clip); None or 0: unchanged.
+    The peak speed of the largest saccades is about 700 deg/s in humans and 1000-1300 deg/s in rhesus monkeys: more is a blink or a tracker loss."""
+    if not max_speed:
+        return v
+    n = np.hypot(v[..., 0], v[..., 1])[..., None]
+    return v * np.where(n > max_speed, max_speed / np.where(n > 0, n, 1.0), 1.0)
+
+
 def speed_of(pos, fs):
     v, valid = velocity(pos, fs)
     return np.hypot(v[..., 0], v[..., 1]), valid

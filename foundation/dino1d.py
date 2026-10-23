@@ -26,14 +26,14 @@ from free_saccade import detectors as D
 from free_saccade.cebra_seed import feats as feats6
 
 
-def feats(pos, fs):
+def feats(pos, fs, max_speed=None):
     """the 6 rotation-invariant channels of cebra_seed.feats + the two velocity components (vx, vy) / robust noise, arcsinh-compressed:
     NOT invariant to rotation (like U'n'Eye's input); the random rotations of the augmentation make the network learn it. They let it integrate the
     displacement along a direction, i.e. see the position jump between before and after a saccade (bidirectional attention, as for an image)."""
     p = np.asarray(pos, np.float64)
     if os.environ.get("UNEYE_AXIS_EQ") == "1": p = equalize_axes(p, fs)           # per-axis rescaling robust variant (see foundation/rerun_eq.py)
     f6 = feats6(p, fs)
-    v, valid = D.velocity(p, fs); sg = np.maximum(D.robust_sigma(v).mean(2, keepdims=True), 1e-9)
+    v, valid = D.velocity(p, fs); v = D.limit_speed(v, max_speed); sg = np.maximum(D.robust_sigma(v).mean(2, keepdims=True), 1e-9)
     vv = np.arcsinh(v / sg); vv[~valid] = 0.0
     return np.concatenate([f6, vv.astype(np.float32)], 2)
 
@@ -42,16 +42,17 @@ def equalize_axes(p, fs):
     """divide each position axis of every window by the robust noise level of ITS OWN velocity: the result does not depend on a per-axis rescaling of the input (the archive is z-scored axis by axis)"""
     v, _ = D.velocity(p, fs); return p / np.maximum(D.robust_sigma(v), 1e-9)
 
-def feats2(pos, fs):
-    """only the two velocity components (vx, vy) / robust noise, arcsinh-compressed (the vv channels of feats): the minimal input"""
-    p = np.asarray(pos, np.float64); v, valid = D.velocity(p, fs); sg = np.maximum(D.robust_sigma(v).mean(2, keepdims=True), 1e-9)
+def feats2(pos, fs, max_speed=None):
+    """only the two velocity components (vx, vy) / robust noise, arcsinh-compressed (the vv channels of feats): the minimal input.
+    max_speed: limit of the speed in deg/s before the noise normalisation (cpp/src/bitcn.cpp::features2 uses 1300); None = no limit, for the unit-free archive"""
+    p = np.asarray(pos, np.float64); v, valid = D.velocity(p, fs); v = D.limit_speed(v, max_speed); sg = np.maximum(D.robust_sigma(v).mean(2, keepdims=True), 1e-9)
     vv = np.arcsinh(v / sg); vv[~valid] = 0.0; return vv.astype(np.float32)
 
 
-def feats2c(pos, fs):
+def feats2c(pos, fs, max_speed=None):
     """like feats2 but each velocity component is divided by ITS OWN robust noise level: robust to a per-axis rescaling of the positions (the unlabeled archive is z-scored axis by axis, which makes the x noise
     2-4x smaller than the y noise; the benchmarks in degrees have x / y noise ratios of 0.8-1, 2 for the search-coil dataset 2). Loses the real noise anisotropy of a tracker, keeps the rest."""
-    p = np.asarray(pos, np.float64); v, valid = D.velocity(p, fs); sg = np.maximum(D.robust_sigma(v), 1e-9)          # (n, 1, 2): one level per component
+    p = np.asarray(pos, np.float64); v, valid = D.velocity(p, fs); v = D.limit_speed(v, max_speed); sg = np.maximum(D.robust_sigma(v), 1e-9)          # (n, 1, 2): one level per component
     vv = np.arcsinh(v / sg); vv[~valid] = 0.0; return vv.astype(np.float32)
 
 

@@ -8,7 +8,8 @@ namespace uneye {
 
 // pos: T x 2 interleaved (x, y), NaN = invalid. out: T x 2 interleaved arcsinh(v / sigma), 0 at invalid samples.
 // v = 5-point moving difference (Engbert & Kliegl) * fs / 6 on the linearly interpolated trace; sigma = mean over x, y of the median-based std of the whole trace.
-void features2(const float* pos, int T, double fs, float* out);
+// max_speed: limit of the speed (deg/s, norm of (vx, vy), direction kept) before the noise normalisation; 0 = off. Same as foundation/dino1d.py::feats2(..., max_speed=)
+void features2(const float* pos, int T, double fs, float* out, double max_speed = 1300.0);
 
 class BiTCN {
  public:
@@ -23,6 +24,6 @@ class BiTCN {
 };
 
 // raw positions (T x 2, NaN allowed) -> saccade mask (logit > 0)
-std::vector<unsigned char> detect(const BiTCN& net, const float* pos, int T, double fs);
+std::vector<unsigned char> detect(const BiTCN& net, const float* pos, int T, double fs, double max_speed = 1300.0);
 
 }  // namespace uneye

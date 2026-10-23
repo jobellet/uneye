@@ -42,12 +42,12 @@ for s in a.sets.split(","):
     p = np.random.permutation(X.shape[0])           # shuffle, then first trials = validation (as in DNN.train)
     X, Y, L = X[p], Y[p], L[p]
     nv = a.val_samples
-    groups_val.append((velocity(X[:nv], Y[:nv]), (L[:nv] > 0).astype(np.float32)))
+    groups_val.append((velocity(X[:nv], Y[:nv], fs=fs), (L[:nv] > 0).astype(np.float32)))
     Xt, Yt, Lt = X[nv:], Y[nv:], L[nv:]
     xs, ys = [Xt], [Yt]
     for t in np.arange(0.25, 2, 0.5):               # rotation augmentation
         x2, y2 = rotate(Xt, Yt, t); xs.append(x2); ys.append(y2)
-    V = np.concatenate([velocity(x, y) for x, y in zip(xs, ys)])
+    V = np.concatenate([velocity(x, y, fs=fs) for x, y in zip(xs, ys)])
     Ltr = np.tile((Lt > 0).astype(np.float32), (len(xs), 1))
     groups_tr.append((V, Ltr))
     print("set", s, "train", V.shape[0], "val", nv, "saccade fraction %.3f" % Ltr.mean())

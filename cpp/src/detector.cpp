@@ -55,6 +55,10 @@ void StreamingDetector::push(double x, double y) {
     if (std::isnan(dx) || std::isnan(dy)) { dx = dy = 0; }
     if (std::isinf(dx)) dx = cfg_.inf_correction;
     if (std::isinf(dy)) dy = cfg_.inf_correction;
+    if (cfg_.max_speed_deg_s > 0) {   // speed limit, as uneye/functions.py::clip_speed (same order: after NaN / Inf, before the network)
+        const double lim = cfg_.max_speed_deg_s / cfg_.fs, n = std::hypot(dx, dy);
+        if (n > lim) { dx *= lim / n; dy *= lim / n; }
+    }
     if (std::isfinite(x) && std::isfinite(y)) { px_ = x; py_ = y; have_prev_ = true; }
     if (step_) { last_dx_ = dx; last_dy_ = dy; ++n_; step_causal(); return; }
     const size_t slot = size_t(n_ % W_) * 2;

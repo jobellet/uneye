@@ -9,7 +9,7 @@ np.random.seed(1)
 val = []
 for s in "123":
     X, Y, L, fs = load(s, "A"); p = np.random.permutation(X.shape[0])[:30]
-    val.append((velocity(X[p], Y[p]), L[p] > 0))
+    val.append((velocity(X[p], Y[p], fs=fs), L[p] > 0))
 
 def f1(P, T, thr):
     p = P > thr; tp = (p & T).sum(); return 2 * tp / max(2 * tp + (p & ~T).sum() + (~p & T).sum(), 1)

@@ -12,6 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 LOOKAHEAD = 20                     # samples at 1 kHz (20 ms)
+MAX_SPEED = 1300.0                 # deg/s, limit of the speed of the input (norm, direction kept): the fastest saccades of monkeys; more = blink / tracker loss
 IN_CH, CH, DIM = 5, 64, 32
 DILATIONS = (1, 2, 4, 8, 16, 32, 64)
 
@@ -23,7 +24,8 @@ def inputs(pos, fs=1000.0):
     v = np.zeros_like(p); v[:, 1:] = (p[:, 1:] - p[:, :-1]) * fs
     ok = valid.copy(); ok[:, 1:] &= valid[:, :-1]
     v[~ok] = 0.0
-    v = np.clip(v, -2000.0, 2000.0)
+    nv = np.hypot(v[..., 0], v[..., 1])[..., None]
+    v = v * np.where(nv > MAX_SPEED, MAX_SPEED / np.where(nv > 0, nv, 1.0), 1.0)      # was a per-axis clip at +-2000 deg/s
     # causal running median over the last 100 samples (computed with a strided window; edge = shorter window)
     w = 100; n, T, _ = v.shape
     pad = np.concatenate([np.repeat(v[:, :1], w - 1, 1), v], 1)

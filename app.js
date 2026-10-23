@@ -293,6 +293,10 @@
         return { smooth, d1, d2 };
     }
 
+    // Speed limit of the velocities used by the pre-labeler, the thresholds and the display (deg/s): the fastest saccades of monkeys
+    // reach 1000-1300 deg/s (humans about 700); more is a blink or a tracker loss. Same value as the C++ engine, the Python package and the Android app.
+    const MAX_SPEED_DEG_S = 1300.0;
+
     function computeRobustSigma(arr, valid) {
         const vals = [];
         for (let i = 0; i < arr.length; i++) if (valid[i]) vals.push(Math.abs(arr[i]));
@@ -321,8 +325,10 @@
                 if (tr.valid[i] && tr.valid[i - 1]) {
                     const dx = (tr.x[i] - tr.x[i - 1]) * state.degPerUnit;
                     const dy = (tr.y[i] - tr.y[i - 1]) * state.degPerUnit;
-                    tr.vx[i] = dx / dt; tr.vy[i] = dy / dt;
-                    tr.speed[i] = Math.sqrt(dx * dx + dy * dy) / dt;
+                    let vx = dx / dt, vy = dy / dt, sp = Math.sqrt(dx * dx + dy * dy) / dt;
+                    if (sp > MAX_SPEED_DEG_S) { const f = MAX_SPEED_DEG_S / sp; vx *= f; vy *= f; sp = MAX_SPEED_DEG_S; }   // speed limit, direction kept
+                    tr.vx[i] = vx; tr.vy[i] = vy;
+                    tr.speed[i] = sp;
                 }
             }
             return;
@@ -346,8 +352,9 @@
         const sc = state.degPerUnit;
         for (let i = 0; i < n; i++) {
             if (tr.valid[i]) {
-                const vx = rx.d1[i] * sc, vy = ry.d1[i] * sc;
-                const sp = Math.sqrt(vx * vx + vy * vy);
+                let vx = rx.d1[i] * sc, vy = ry.d1[i] * sc;
+                let sp = Math.sqrt(vx * vx + vy * vy);
+                if (sp > MAX_SPEED_DEG_S) { const f = MAX_SPEED_DEG_S / sp; vx *= f; vy *= f; sp = MAX_SPEED_DEG_S; }   // speed limit, direction kept
                 tr.vx[i] = vx; tr.vy[i] = vy; tr.speed[i] = sp;
                 const ax = rx.d2[i] * sc, ay = ry.d2[i] * sc;
                 tr.tangentialAccel[i] = sp > 1e-6 ? (vx * ax + vy * ay) / sp : 0;

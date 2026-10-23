@@ -19,7 +19,7 @@ static double median(std::vector<double>& v) {
     return 0.5 * (lo + hi);
 }
 
-void features2(const float* pos, int T, double fs, float* out) {
+void features2(const float* pos, int T, double fs, float* out, double max_speed) {
     if (T <= 0) return;
     std::vector<double> p(2 * (size_t)T);
     std::vector<unsigned char> valid(T);
@@ -42,6 +42,11 @@ void features2(const float* pos, int T, double fs, float* out) {
     for (int t = 2; t < T - 2; ++t)
         for (int a = 0; a < 2; ++a)
             v[2 * (size_t)t + a] = (p[2 * (size_t)(t + 2) + a] + p[2 * (size_t)(t + 1) + a] - p[2 * (size_t)(t - 1) + a] - p[2 * (size_t)(t - 2) + a]) * fs / 6.0;
+    if (max_speed > 0)                                          // speed limit: norm of (vx, vy), direction kept
+        for (int t = 0; t < T; ++t) {
+            const double n = std::hypot(v[2 * (size_t)t], v[2 * (size_t)t + 1]);
+            if (n > max_speed) { v[2 * (size_t)t] *= max_speed / n; v[2 * (size_t)t + 1] *= max_speed / n; }
+        }
     double sg = 0;
     for (int a = 0; a < 2; ++a) {
         std::vector<double> c(T), c2(T);
@@ -113,9 +118,9 @@ void BiTCN::forward(const float* feats, int T, float* logit) const {
     }
 }
 
-std::vector<unsigned char> detect(const BiTCN& net, const float* pos, int T, double fs) {
+std::vector<unsigned char> detect(const BiTCN& net, const float* pos, int T, double fs, double max_speed) {
     std::vector<float> f((size_t)T * net.nin()), lg(T);
-    features2(pos, T, fs, f.data()); net.forward(f.data(), T, lg.data());
+    features2(pos, T, fs, f.data(), max_speed); net.forward(f.data(), T, lg.data());
     std::vector<unsigned char> m(T);
     for (int t = 0; t < T; ++t) m[t] = lg[t] > 0 && std::isfinite(pos[2 * (size_t)t]) && std::isfinite(pos[2 * (size_t)t + 1]);
     return m;

@@ -28,6 +28,7 @@ struct Config {
     double min_sacc_dur_ms = 6;  // drop events shorter than this (2-class models)
     double min_sacc_dist_ms = 1; // merge events closer than this (1 = off)
     double inf_correction = 1.5; // replacement for inf velocity
+    double max_speed_deg_s = 1300.0; // limit of the speed of the network input (deg/s, direction kept; 0 = off): the fastest saccades of monkeys reach 1000-1300 deg/s (humans about 700); more is a blink or a tracker loss and would reach the network at up to a thousand times the size of a saccade
     double input_scale = 1.0;    // multiply input positions to obtain degrees
     int label_delay = 0;         // causal model trained with lookahead L: its output at time t describes sample t-L (see online/export_causal.py .json)
 };

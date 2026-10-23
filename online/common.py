@@ -12,14 +12,20 @@ def load(setname, which):
     return p("X"), p("Y"), p("Labels"), fs
 
 
-def velocity(X, Y, inf_correction=1.5):
-    """differentiated signal exactly as in uneye/classifier.py (first sample 0, NaN->0, Inf->1.5)"""
+MAX_SPEED_DEG_S = 1300.0   # speed limit of the network input (deg/s), see uneye.functions.clip_speed
+
+
+def velocity(X, Y, inf_correction=1.5, fs=1000.0, max_speed=MAX_SPEED_DEG_S):
+    """differentiated signal exactly as in uneye/classifier.py (first sample 0, NaN->0, Inf->1.5, then the speed limited to
+    max_speed deg/s with the direction kept; fs = sampling rate of X, Y; max_speed None or 0: no limit)"""
     n = X.shape[0]
     dx = np.concatenate((np.zeros((n, 1)), np.diff(X, axis=-1)), 1)
     dy = np.concatenate((np.zeros((n, 1)), np.diff(Y, axis=-1)), 1)
     for d in (dx, dy):
         d[np.isinf(d)] = inf_correction
         d[np.isnan(d)] = 0
+    from uneye.functions import clip_speed
+    dx, dy = clip_speed(dx, dy, max_speed, fs)
     return np.stack([dx, dy], 1).astype(np.float32)  # (n, 2, T)
 
 

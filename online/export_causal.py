@@ -40,7 +40,7 @@ def export(net, out, window=200, golden=None, lookahead_samples=0):
     torch.onnx.export(net, torch.zeros(1, 2, window), out + ".onnx", input_names=["dxy"], output_names=["prob"], opset_version=13,
                       dynamo=False, dynamic_axes={"dxy": {0: "batch", 2: "time"}, "prob": {0: "batch", 2: "time"}})
     X, Y, L, fs = load("1", "B")
-    V = velocity(X[:1], Y[:1])[:, :, :400]
+    V = velocity(X[:1], Y[:1], fs=fs)[:, :, :400]
     ref = net(torch.from_numpy(V)).detach().numpy()
     try:  # the check is optional: the .bin / .onnx files are already written
         import onnxruntime as ort

@@ -44,6 +44,7 @@ class DNN():
     augmentation: bool, whether or not to use data augmentation for training. Default: True
 
     inf_correction: float, value to replace Infs occuring after differential of input signal
+    max_speed: float, limit of the speed of the network input in deg/s (default 1300: the fastest saccades of monkeys; humans reach about 700). The first difference of the eye position (dx, dy) is scaled down, keeping its direction, where the speed exceeds it, in training, validation, test and prediction alike; blinks and tracker losses would otherwise enter the network at up to a thousand times the size of a saccade. None or 0: no limit
 
     val_samples: int, number of validation samples (for early stopping criterion)
     
@@ -51,7 +52,7 @@ class DNN():
     def __init__(self, max_iter=500, sampfreq=1000,
                  lr=0.001, weights_name='weights',
                  min_sacc_dist=1,min_sacc_dur=6,augmentation=True,
-                 ks=5,mp=5,inf_correction=1.5,val_samples=30):
+                 ks=5,mp=5,inf_correction=1.5,val_samples=30,max_speed=1300.0):
         
         if max_iter<10:
             max_iter = 10
@@ -67,6 +68,7 @@ class DNN():
         self.use_gpu = torch.cuda.is_available()
         self.inf_correction = inf_correction
         self.val_samples = val_samples
+        self.max_speed = max_speed
 
     def train(self,X,Y,Labels,seed=1):
         '''
@@ -164,6 +166,7 @@ class DNN():
         Ydiff[np.isinf(Ydiff)] = self.inf_correction
         Ydiff = np.concatenate((np.zeros((n_training,1)),Ydiff),1)  
         # input matrix:
+        Xdiff, Ydiff = clip_speed(Xdiff, Ydiff, self.max_speed, self.sampfreq)
         V = np.tile((Xdiff,Ydiff),1)
         V = np.swapaxes(np.swapaxes(V,0,1),1,2) 
         # torch Variable:
@@ -181,6 +184,7 @@ class DNN():
         Ydiff[np.isinf(Ydiff)] = self.inf_correction
         Ydiff = np.concatenate((np.zeros((n_validation,1)),Ydiff),1)  
         # input matrix:
+        Xdiff, Ydiff = clip_speed(Xdiff, Ydiff, self.max_speed, self.sampfreq)
         V = np.tile((Xdiff,Ydiff),1)
         V = np.swapaxes(np.swapaxes(V,0,1),1,2) 
         # torch Variable:
@@ -382,6 +386,7 @@ class DNN():
         Ydiff = np.concatenate((np.zeros((n_samples,1)),Ydiff),1)
         
         # input matrix:
+        Xdiff, Ydiff = clip_speed(Xdiff, Ydiff, self.max_speed, self.sampfreq)
         V = np.tile((Xdiff,Ydiff),1)
         V = np.swapaxes(np.swapaxes(V,0,1),1,2)
         # torch Variable:
@@ -509,6 +514,7 @@ class DNN():
         Ydiff = np.concatenate((np.zeros((n_samples,1)),Ydiff),1)
         
         # input matrix:
+        Xdiff, Ydiff = clip_speed(Xdiff, Ydiff, self.max_speed, self.sampfreq)
         V = np.tile((Xdiff,Ydiff),1)
         V = np.swapaxes(np.swapaxes(V,0,1),1,2)
         # torch Variable:
@@ -712,6 +718,7 @@ class DNN():
         Ydiff[np.isinf(Ydiff)] = self.inf_correction
         Ydiff = np.concatenate((np.zeros((n_val_samp,1)),Ydiff),1) 
         # input matrix:
+        Xdiff, Ydiff = clip_speed(Xdiff, Ydiff, self.max_speed, self.sampfreq)
         V = np.tile((Xdiff,Ydiff),1)
         V = np.swapaxes(np.swapaxes(V,0,1),1,2) 
         # torch Variable:
@@ -776,6 +783,7 @@ class DNN():
             Ydiff[np.isinf(Ydiff)] = 1.5
             Ydiff = np.concatenate((np.zeros((n_training,1)),Ydiff),1) 
             # input matrix:
+            Xdiff, Ydiff = clip_speed(Xdiff, Ydiff, self.max_speed, self.sampfreq)
             V = np.tile((Xdiff,Ydiff),1)
             V = np.swapaxes(np.swapaxes(V,0,1),1,2) 
             # torch Variable:
@@ -794,6 +802,7 @@ class DNN():
             Ydiff[np.isinf(Ydiff)] = 1.5
             Ydiff = np.concatenate((np.zeros((n_test_samp,1)),Ydiff),1) 
             # input matrix:
+            Xdiff, Ydiff = clip_speed(Xdiff, Ydiff, self.max_speed, self.sampfreq)
             V = np.tile((Xdiff,Ydiff),1)
             V = np.swapaxes(np.swapaxes(V,0,1),1,2) 
             # torch Variable:

@@ -72,7 +72,7 @@ def pred_causal_tcn(S, bin_path, delay_ms=0.0):
     """the causal TCN of online/ (cpp/models/causal.bin = trained on set A of datasets 1, 2, 3, supervised), no lookahead
     (tcn_l10.bin: label of sample t-10 emitted at t)"""
     net = _causal_from_bin(bin_path).eval(); pos = native_pos(S); fs = NATIVE[S.name]
-    V = unet_velocity(pos[..., 0].astype(np.float64), pos[..., 1].astype(np.float64))
+    V = unet_velocity(pos[..., 0].astype(np.float64), pos[..., 1].astype(np.float64), fs=fs)
     with torch.no_grad():
         P = np.concatenate([net(torch.from_numpy(V[i:i + 50]))[:, 1].numpy() for i in range(0, len(V), 50)])
     d = int(round(delay_ms * fs / 1000.0))
@@ -84,7 +84,7 @@ def pred_unet(S, weights, classes=2):
     """the original U'n'Eye (training/weights_*), offline, whole trial"""
     from uneye.functions import UNet
     net = UNet(classes, 5, 5); net.load_state_dict(torch.load(os.path.join(ROOT, "training", weights), weights_only=False)); net.eval()
-    pos = native_pos(S); V = unet_velocity(pos[..., 0].astype(np.float64), pos[..., 1].astype(np.float64))
+    pos = native_pos(S); V = unet_velocity(pos[..., 0].astype(np.float64), pos[..., 1].astype(np.float64), fs=NATIVE[S.name])
     T = V.shape[2] // 25 * 25; P = np.zeros((V.shape[0], V.shape[2]), np.float32)
     with torch.no_grad():
         for i in range(0, V.shape[0], 50):

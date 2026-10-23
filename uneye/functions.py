@@ -148,6 +148,32 @@ def lr_decay(optimizer, lr_decay=0.5):
     return optimizer
 
 
+def clip_speed(dx, dy, max_speed=1300.0, fs=1000.0):
+    """
+    Limit the speed of the network input to max_speed (deg/s), keeping the direction.
+
+    Eye movements have a physiological ceiling: the peak speed of the largest saccades is about 700 deg/s in humans and
+    1000-1300 deg/s in rhesus monkeys. Larger values in the data are blinks, loss of the tracker or digitising glitches;
+    unlimited, they reach the network at a thousand times the size of a saccade and the network learns badly.
+
+    Parameters
+    ----------
+    dx, dy: array-like, first difference of the horizontal / vertical eye position, in degree per sample (any shape)
+    max_speed: float, limit in deg/s, default 1300. None or 0: no limit
+    fs: float, sampling rate (Hz), converts deg/s into deg per sample
+
+    Output
+    ------
+    dx, dy: (dx, dy) scaled by max_speed / |v| where the speed |v| = hypot(dx, dy) * fs exceeds max_speed. NaN stays NaN.
+    """
+    if not max_speed:
+        return dx, dy
+    lim = max_speed / fs
+    n = np.hypot(dx, dy)
+    f = np.where(n > lim, lim / np.where(n > 0, n, 1.0), 1.0)
+    return dx * f, dy * f
+
+
 def add_noise(X,Y,sd):
     """
     Add white noise to data for data augmentation

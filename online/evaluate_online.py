@@ -128,7 +128,7 @@ np.random.seed(1)
 val = {}
 for s in "123":
     X, Y, L, fs = load(s, "A"); p = np.random.permutation(X.shape[0])[:30]
-    val[s] = (velocity(X[p], Y[p]), L[p], fs)
+    val[s] = (velocity(X[p], Y[p], fs=fs), L[p], fs)
 
 np.random.seed(10)
 results = {}
@@ -137,7 +137,7 @@ allL, allfs = [], []
 for s in "123":
     X, Y, L, fs = load(s, "B")
     ind = np.random.permutation(X.shape[0])[:a.n_test]
-    V, Lt = velocity(X[ind], Y[ind]), L[ind]
+    V, Lt = velocity(X[ind], Y[ind], fs=fs), L[ind]
     W = int(round(a.bin_ms * fs / 1000)); W = (W + 24) // 25 * 25
     Pc, Pu, Po = causal_lastbin(V, W), unet_lastbin(V, W), unet_offline(V)
     print(f"set {s}: bin {W} samples (causal receptive field {cnet.receptive_field})", flush=True)
