@@ -132,8 +132,8 @@
                 <h3>Load Eye Trace</h3>
                 <div class="form-row">
                     <label>Selected eye trace:</label>
-                    <div style="display: flex; gap: 8px; align-items: center; width: 60%;">
-                        <span id="modalFileName" class="filename-display" style="flex: 1;">-</span>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+                        <span id="modalFileName" class="filename-display" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">-</span>
                         <button id="modalChangeTraceBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
                     </div>
                 </div>
@@ -169,16 +169,16 @@
                 </div>
                 <div id="localModelRow" class="form-row hidden">
                     <label>Local weights file:</label>
-                    <div style="display: flex; gap: 8px; align-items: center; width: 60%;">
-                        <span id="modalModelFileName" class="filename-display" style="flex: 1;">No file chosen</span>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+                        <span id="modalModelFileName" class="filename-display" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">No file chosen</span>
                         <button id="modalPickModelBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
                     </div>
                     <input type="file" id="modalModelFile" accept=".bin" style="display: none;">
                 </div>
                 <div class="form-row">
                     <label>Previous labels (optional):</label>
-                    <div style="display: flex; gap: 8px; align-items: center; width: 60%;">
-                        <span id="modalLabelsFileName" class="filename-display" style="flex: 1;">(none)</span>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+                        <span id="modalLabelsFileName" class="filename-display" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">(none)</span>
                         <button id="modalPickLabelsBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
                     </div>
                     <input type="file" id="modalLabelsFile" accept=".json,.mat,.csv,.bin" style="display: none;">

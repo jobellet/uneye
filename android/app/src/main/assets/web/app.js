@@ -1313,7 +1313,10 @@
             ctx.textAlign = 'center';
             const clsName = state.activeClass === CLS_SACCADE ? 'Saccade' : 'Blink';
             const durMs = Math.round((offset - onset) * (1000.0 / state.rateHz));
-            ctx.fillText(`Pass 2: Event ${state.refineIdx + 1}/${state.refineQueue.length} (${clsName}) — Putative: [${onset}..${offset}] (${durMs} ms) — Window: [-50ms .. +50ms]`, w / 2, 17);
+            const bannerText = w < 520
+                ? `Event ${state.refineIdx + 1}/${state.refineQueue.length} (${clsName}, ${durMs} ms) [${onset}..${offset}]`
+                : `Pass 2: Event ${state.refineIdx + 1}/${state.refineQueue.length} (${clsName}) — Putative: [${onset}..${offset}] (${durMs} ms) — Window: [-50ms .. +50ms]`;
+            ctx.fillText(bannerText, w / 2, 17);
 
             // Shaded region between putative onset & offset
             ctx.fillStyle = state.activeClass === CLS_SACCADE ? 'rgba(21, 101, 192, 0.12)' : 'rgba(198, 40, 40, 0.12)';

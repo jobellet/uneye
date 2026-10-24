@@ -195,6 +195,23 @@ const disabledAgain = await ev(() => state.autoSlide);
 check(disabledAgain === false, 'clicking autoSlideBtn again disables autoSlide');
 await page.click('#menuBtn');
 
+// --- Mobile phone viewport (360x740): hamburger menu and all controls must fit within screen width
+await page.setViewport({ width: 360, height: 740 });
+await sleep(100);
+const mobileCheck = await ev(() => {
+  const menuRect = document.getElementById('menuBtn').getBoundingClientRect();
+  const topRect = document.getElementById('top-bar').getBoundingClientRect();
+  const botRect = document.getElementById('bottom-bar').getBoundingClientRect();
+  return {
+    menuVisible: menuRect.width > 0 && menuRect.left >= 0 && menuRect.right <= 360,
+    topFits: topRect.right <= 360 && topRect.height <= 50,
+    botFits: botRect.right <= 360,
+  };
+});
+check(mobileCheck.menuVisible && mobileCheck.topFits && mobileCheck.botFits,
+  `on 360x740 phone screen, hamburger menuBtn and all bars fit inside screen dimensions: ${JSON.stringify(mobileCheck)}`);
+await page.setViewport({ width: 1024, height: 620 });
+
 check(errors.length === 0, 'no page error' + (errors.length ? ': ' + errors.join(' | ') : ''));
 await page.screenshot({ path: process.env.SHOT || '/tmp/labeler.png' });
 await browser.close();

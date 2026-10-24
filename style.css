@@ -464,19 +464,152 @@ html, body {
 #eraserBtn.active { background: #212121; color: #fff; border-color: #212121; }
 #autoSlideBtn.active { background: var(--primary); color: #fff; border-color: var(--primary-dark); }
 
-/* many buttons in the header: wrap onto a second row instead of pushing Export off screen */
-#top-bar { flex-wrap: wrap; row-gap: 6px; }
-.bar-left, .bar-center, .bar-right { flex-wrap: wrap; }
-#top-bar .btn { padding-left: 10px; padding-right: 10px; font-size: 13px; }
-
 /* header kept to the annotation tools; the rest is in the settings panel (menu button) */
-#top-bar { min-height: 0; padding: 4px 10px; flex-wrap: nowrap; gap: 8px; }
-#top-bar .btn { padding: 6px 10px; }
-.bar-center, .bar-right { flex-wrap: nowrap; }
-#menuBtn { font-size: 18px; line-height: 1; padding: 4px 12px; }
+#top-bar {
+    min-height: 0;
+    padding: 4px 10px;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    width: 100%;
+    max-width: 100vw;
+}
+.badge, .btn, .btn-class-opt {
+    white-space: nowrap;
+}
+.bar-left, .bar-center, .bar-right {
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+#top-bar .btn {
+    padding: 6px 10px;
+    height: 36px;
+}
+.btn-class-opt {
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+}
+#menuBtn {
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px 10px;
+    height: 36px;
+    flex-shrink: 0;
+}
 #menuBtn.active { background: #212121; color: #fff; border-color: #212121; }
-.tools-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 10px; background: var(--bg-card); border-bottom: 1px solid var(--border); z-index: 10; }
+.tools-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    padding: 6px 10px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    z-index: 10;
+    max-width: 100vw;
+    max-height: 45dvh;
+    overflow-y: auto;
+}
 .tools-panel.hidden { display: none; }
-#bottom-bar { padding: 4px 10px; gap: 3px; }
+#bottom-bar { padding: 4px 10px; gap: 4px; max-width: 100vw; }
 .status-row { font-size: 0.78rem; }
-#bottom-bar .btn { padding: 6px 10px; min-height: 0; }
+#bottom-bar .btn { padding: 6px 10px; height: 36px; min-height: 0; }
+.modal-card { max-height: 92dvh; overflow-y: auto; }
+
+/* Compact phone screens (portrait & small mobile viewports) */
+@media (max-width: 640px) {
+    #top-bar {
+        padding: 4px 6px;
+        gap: 4px;
+    }
+    .bar-left, .bar-center, .bar-right {
+        gap: 4px;
+    }
+    .app-logo {
+        font-size: 0.9rem;
+    }
+    #passIndicator {
+        font-size: 11px;
+        padding: 3px 6px;
+        max-width: 86px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    #passIndicator.pass-two {
+        max-width: 195px;
+    }
+    .conv-badge {
+        font-size: 10px;
+        padding: 2px 5px;
+    }
+    .btn-class-opt {
+        padding: 0 7px;
+        font-size: 11.5px;
+        height: 32px;
+    }
+    #top-bar .btn {
+        padding: 0 7px;
+        font-size: 11.5px;
+        height: 32px;
+    }
+    #menuBtn {
+        font-size: 16px;
+        padding: 0 8px;
+        height: 32px;
+    }
+    .tools-panel {
+        padding: 6px;
+        gap: 4px;
+    }
+    .tools-panel .btn, .tools-panel select.btn {
+        height: 32px;
+        padding: 0 8px;
+        font-size: 11.5px;
+    }
+    .win-input {
+        width: 58px;
+        height: 32px;
+        padding: 2px 4px;
+        font-size: 12px;
+    }
+    #bottom-bar {
+        padding: 4px 6px;
+        gap: 3px;
+    }
+    .status-row {
+        font-size: 11px;
+        gap: 2px 8px;
+    }
+    .controls-row {
+        gap: 4px;
+    }
+    .control-group {
+        gap: 4px;
+        flex: 1 1 auto;
+    }
+    #bottom-bar .btn {
+        height: 32px;
+        padding: 0 7px;
+        font-size: 11.5px;
+        flex: 1 1 auto;
+    }
+    .event-counter {
+        font-size: 11px;
+        padding: 2px 6px;
+    }
+    .modal-card {
+        padding: 14px;
+        width: 95%;
+        gap: 10px;
+    }
+    .form-row input, .form-row select {
+        height: 36px;
+        font-size: 0.9rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .app-logo {
+        display: none;
+    }
+}
