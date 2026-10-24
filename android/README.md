@@ -48,6 +48,13 @@ module folders to owners. All new code lives in this folder.
 | `MetricsView.kt` | the learning-curve view (F1 / kappa per class vs reviewed seconds) |
 | `MainActivity.kt` / `FileListDb.kt` / `UneyeApp.kt` | the file list (Room) + the load dialog + the application object |
 
+## Download APK (Smartphone & Tablet)
+
+Every commit with modifications to the Android app is automatically compiled and published:
+- 📦 **[Download uneye-android.zip](https://github.com/jobellet/uneye/releases/download/android-latest/uneye-android.zip)** *(Recommended for smartphones: avoids direct `.apk` download blocks on mobile — download, extract the zip, and tap `uneye-android.apk` to install)*.
+- 📱 **[Direct APK download: uneye-android.apk](https://github.com/jobellet/uneye/releases/download/android-latest/uneye-android.apk)** *(For direct download in mobile browser)*.
+- 🔗 **[Latest release page](https://github.com/jobellet/uneye/releases/tag/android-latest)**
+
 ## Build
 
 Host (first measurement, no phone needed):

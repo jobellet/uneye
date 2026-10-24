@@ -49,11 +49,24 @@ Files: `index.html`, `app.js`, `formats.js`, `train_worker.js`, `sw.js`, `web/un
 
 Offline app for a phone or tablet with the same two-pass labeling as the web labeler (windows with 10 % overlap and a width you set, event-to-event refinement across trials, eraser, 1° scale bar, refractory period after a pinch), plus **background training** of the on-device U-Net (WorkManager), a **convergence flag** (bootstrap confidence interval of the F1 gain over the last rounds) with learning curves, and export of labels CSV (UnEye convention), X / Y CSV, MATLAB v5 `.mat` and the trained model `.bin` / `.json` through the system share sheet.
 
-### Install
-There is no store release; you build the APK once:
+### Direct Download (Smartphone & Tablet)
+
+Every modification to the Android app is automatically compiled and published to the [latest release](https://github.com/jobellet/uneye/releases/tag/android-latest):
+
+- 📦 **[Download uneye-android.zip](https://github.com/jobellet/uneye/releases/download/android-latest/uneye-android.zip)** *(Recommended for smartphones: avoids direct `.apk` download blocks in GitHub app — download, extract the zip, and tap `uneye-android.apk` to install)*.
+- 📱 **[Direct APK download: uneye-android.apk](https://github.com/jobellet/uneye/releases/download/android-latest/uneye-android.apk)** *(For direct download from your phone's web browser, e.g. Chrome)*.
+
+**Quick install on Android:**
+1. Tap the **[uneye-android.zip](https://github.com/jobellet/uneye/releases/download/android-latest/uneye-android.zip)** link above on your smartphone.
+2. In your phone's notification or file manager (*Files* / *Downloads*), tap the `.zip` file to extract `uneye-android.apk`.
+3. Tap `uneye-android.apk` to install. If Android prompts that installation from unknown sources is blocked, tap **Settings** and toggle **Allow from this source**.
+4. Launch the U'n'Eye app, pick your eye trace file (CSV pair or MATLAB `.mat`), specify sampling rate, and start labeling!
+
+### Build from source
+If you prefer building the APK yourself:
 1. Install [Android Studio](https://developer.android.com/studio) with the SDK and the NDK (arm64-v8a), JDK 17.
 2. `cd android && ./gradlew :app:assembleDebug` (or *Run* in Android Studio with the phone connected by USB, developer mode and USB debugging on).
-3. Or install the APK by hand: `adb install app/build/outputs/apk/debug/app-debug.apk`.
+3. Or install the APK by hand via ADB: `adb install app/build/outputs/apk/debug/app-debug.apk`.
 4. Copy your CSV (two files X / Y, trials × time) or a `.mat` (variables `X`, `Y`) to the phone, open the app, pick the file, the sampling rate and the units.
 
 Host-side check without a phone: `cmake -S android -B build-host && cmake --build build-host --target test_offline_session && ctest --test-dir build-host -R test_offline_session`. Design, phases and measurements: [`android/README.md`](android/README.md), [`android/PHASE0_RESULTS.md`](android/PHASE0_RESULTS.md).
