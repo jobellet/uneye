@@ -599,8 +599,10 @@ private:
         std::vector<std::vector<float>> mine = layout;
         if (keep_head) {
             auto own = net.state();
-            mine[mine.size() - 2] = own[own.size() - 2];
-            mine[mine.size() - 1] = own[own.size() - 1];
+            const size_t n = mine.size();
+            transfer_head(layout[n - 2], layout[n - 1], own[n - 2], own[n - 1]);
+            mine[n - 2] = own[n - 2];
+            mine[n - 1] = own[n - 1];
         }
         return net.load_state(mine);
     }

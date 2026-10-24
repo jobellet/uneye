@@ -21,7 +21,7 @@ bool load_bin(const std::string& path, UNet<float>& net, std::string* error) {
     UNet<float> src(classes, net.ks, net.mp); auto layout = src.state(); const bool keep_head = classes != net.K;
     for (auto& t : layout) { f.read(reinterpret_cast<char*>(t.data()), std::streamsize(t.size() * sizeof(float))); if (!f) { if (error) *error = "model file too short: " + path; return false; } }
     std::vector<std::vector<float>> mine = layout;
-    if (keep_head) { auto own = net.state(); mine[mine.size() - 2] = own[own.size() - 2]; mine[mine.size() - 1] = own[own.size() - 1]; }
+    if (keep_head) { auto own = net.state(); const size_t n = mine.size(); transfer_head(layout[n - 2], layout[n - 1], own[n - 2], own[n - 1]); mine[n - 2] = own[n - 2]; mine[n - 1] = own[n - 1]; }
     if (!net.load_state(mine)) { if (error) *error = "model layout mismatch"; return false; }
     return true;
 }

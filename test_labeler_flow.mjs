@@ -5,12 +5,16 @@ import puppeteer from 'puppeteer-core';
 import fs from 'fs';
 const URL = process.argv[2] || 'http://127.0.0.1:8765/index.html';
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox'] });
-const page = await browser.newPage();
+// ANDROID_WS=ws://localhost:9333/devtools/browser runs the test inside the Android app's WebView
+// (debug build; adb forward tcp:9333 localabstract:webview_devtools_remote_<pid>)
+const ANDROID_WS = process.env.ANDROID_WS;
+const browser = ANDROID_WS ? await puppeteer.connect({ browserWSEndpoint: ANDROID_WS, defaultViewport: null })
+  : await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox'] });
+const page = ANDROID_WS ? (await browser.pages()).find(p => p.url().includes('index.html')) : await browser.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
-page.on('dialog', async d => { await d.accept(); });
-await page.setViewport({ width: 1024, height: 620 });
+page.on('dialog', async d => { await d.accept().catch(() => {}); });
+if (!ANDROID_WS) await page.setViewport({ width: 1024, height: 620 });
 await page.evaluateOnNewDocument(() => {
   Element.prototype.setPointerCapture = () => {}; Element.prototype.releasePointerCapture = () => {};
   const blobs = new Map(), orig = URL.createObjectURL.bind(URL);
@@ -18,7 +22,18 @@ await page.evaluateOnNewDocument(() => {
   window.__dl = [];
   HTMLAnchorElement.prototype.click = function () { if (!this.download) return; const name = this.download, b = blobs.get(this.href), fr = new FileReader(); fr.onload = () => window.__dl.push({ name, text: String(fr.result) }); fr.readAsText(b); };
 });
-await page.goto(URL, { waitUntil: 'networkidle0' });
+await page.goto(ANDROID_WS ? 'https://appassets.androidplatform.net/assets/web/index.html' : URL, { waitUntil: ANDROID_WS ? 'load' : 'networkidle0', timeout: 120000 });
+if (ANDROID_WS) {   // the app keeps its session in IndexedDB: start from an empty one, as the headless browser does
+  await page.evaluate(() => new Promise(r => { try { localStorage.clear(); } catch (e) { } const q = indexedDB.deleteDatabase('uneye_db'); q.onsuccess = q.onerror = q.onblocked = () => r(); }));
+  await page.reload({ waitUntil: 'load', timeout: 120000 });
+  await new Promise(r => setTimeout(r, 4000));
+  // native dialogs would block the page until tapped; files go through AndroidBridge.saveFile (Downloads): record them too
+  await page.evaluate(() => {
+    window.alert = m => console.log('alert: ' + m); window.confirm = () => true;
+    const bridge = window.AndroidBridge;
+    window.AndroidBridge = { saveFile: (name, b64, type) => { const bin = atob(b64), u8 = Uint8Array.from(bin, c => c.charCodeAt(0)); window.__dl.push({ name, text: new TextDecoder().decode(u8) }); bridge.saveFile(name, b64, type); }, showToast: m => bridge.showToast(m) };
+  });
+}
 let ok = true; const check = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); if (!c) ok = false; };
 const ev = f => page.evaluate(f);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -39,12 +54,14 @@ check((await ev(() => state.scanWins[0].length)) === 1, 'the window left with Ne
 // --- pinch refractory period
 await page.click('#prevEpochBtn');
 const base = await nMarks();
-await ptr('pointerdown', 1, 300, 100); await ptr('pointerdown', 2, 600, 100);
-await ptr('pointermove', 2, 700, 100); await ptr('pointerup', 2, 700, 100); await ptr('pointerup', 1, 300, 100);
+const K = (await ev(() => document.getElementById('traceCanvas').clientWidth)) / 1024;   // touch positions below are for a 1024 px wide canvas
+const tp = (type, id, x, y) => ptr(type, id, x * K, y);
+await tp('pointerdown', 1, 300, 100); await tp('pointerdown', 2, 600, 100);
+await tp('pointermove', 2, 700, 100); await tp('pointerup', 2, 700, 100); await tp('pointerup', 1, 300, 100);
 check((await nMarks()) === base, 'releasing the fingers of a pinch makes no mark');
-await sleep(100); await ptr('pointerdown', 3, 400, 100); await ptr('pointerup', 3, 400, 100);
+await sleep(100); await tp('pointerdown', 3, 400, 100); await tp('pointerup', 3, 400, 100);
 check((await nMarks()) === base, 'a touch 100 ms after a pinch is ignored (refractory period)');
-await sleep(800); await ptr('pointerdown', 4, 400, 100); await ptr('pointerup', 4, 400, 100);
+await sleep(800); await tp('pointerdown', 4, 400, 100); await tp('pointerup', 4, 400, 100);
 check((await nMarks()) === base + 1, 'a normal tap after the refractory period makes a mark');
 
 // --- reviewed = seen windows without a pending mark
@@ -128,7 +145,9 @@ check(obsDl && obsDl.text && obsDl.text.length > 0, 'exportDataset exports obser
 await page.click('#menuBtn');
 await ev(() => { state.expertEvents[0] = []; state.scanWins[0] = []; });
 fs.writeFileSync('/tmp/uneye_labels_test.json', JSON.stringify(saved));
-await (await page.$('#labelsInput')).uploadFile('/tmp/uneye_labels_test.json'); await sleep(500);
+if (ANDROID_WS) await page.evaluate(j => applyLabelsJson(JSON.parse(j)), JSON.stringify(saved));   // the Android file picker cannot be driven from here
+else await (await page.$('#labelsInput')).uploadFile('/tmp/uneye_labels_test.json');
+await sleep(500);
 const back = await ev(() => [state.expertEvents[0].length, state.scanWins[0].length]);
 check(back[0] >= 1 && back[1] >= 1, `Load labels restores events and windows seen: ${back}`);
 
@@ -196,21 +215,21 @@ check(disabledAgain === false, 'clicking autoSlideBtn again disables autoSlide')
 await page.click('#menuBtn');
 
 // --- Mobile phone viewport (360x740): hamburger menu and all controls must fit within screen width
-await page.setViewport({ width: 360, height: 740 });
+if (!ANDROID_WS) await page.setViewport({ width: 360, height: 740 });   // on Android: the real phone screen
 await sleep(100);
 const mobileCheck = await ev(() => {
   const menuRect = document.getElementById('menuBtn').getBoundingClientRect();
   const topRect = document.getElementById('top-bar').getBoundingClientRect();
   const botRect = document.getElementById('bottom-bar').getBoundingClientRect();
   return {
-    menuVisible: menuRect.width > 0 && menuRect.left >= 0 && menuRect.right <= 360,
-    topFits: topRect.right <= 360 && topRect.height <= 50,
-    botFits: botRect.right <= 360,
+    menuVisible: menuRect.width > 0 && menuRect.left >= 0 && menuRect.right <= innerWidth + 1,
+    topFits: topRect.right <= innerWidth + 1 && topRect.height <= 50,
+    botFits: botRect.right <= innerWidth + 1,
   };
 });
 check(mobileCheck.menuVisible && mobileCheck.topFits && mobileCheck.botFits,
   `on 360x740 phone screen, hamburger menuBtn and all bars fit inside screen dimensions: ${JSON.stringify(mobileCheck)}`);
-await page.setViewport({ width: 1024, height: 620 });
+if (!ANDROID_WS) await page.setViewport({ width: 1024, height: 620 });
 
 // --- Overlapping events of the same class merge into one
 const mergeCheck = await ev(() => {
@@ -361,8 +380,36 @@ check(
   `Pass 2 Prev Event returns to Trial 0 Event 2 [600..640]: ${JSON.stringify(p2Back)}`
 );
 
+// --- a pointerup whose releasePointerCapture throws (iPad Safari / Android WebView) must not leave the selection on screen
+await ev(() => { if (state.pass !== 1) document.getElementById('switchPassBtn').click(); state.currentTrialIdx = 1; state.winIdx = 0; applyGridWindow(); state.eraser = false; render(); });
+await ev(() => { window.__rel = Element.prototype.releasePointerCapture; Element.prototype.releasePointerCapture = () => { throw new DOMException('No active pointer', 'NotFoundError'); }; });
+const evBefore = await ev(() => state.expertEvents[1].length);
+await ptr('pointerdown', 41, 300, 150); await ptr('pointermove', 41, 360, 150); await ptr('pointermove', 41, 420, 150); await ptr('pointerup', 41, 420, 150);
+const afterUp = await ev(() => ({ drag: state.isDraggingSpan, pointers: state.pointers.size, ev: state.expertEvents[1].length }));
+check(!afterUp.drag && afterUp.pointers === 0 && afterUp.ev === evBefore + 1, `a drag whose releasePointerCapture throws still ends (event added, no selection left): ${JSON.stringify(afterUp)}`);
+await ev(() => { Element.prototype.releasePointerCapture = window.__rel; });
+// a pointerup that never arrives: the next window / trial drops the half-finished selection
+await ptr('pointerdown', 42, 300, 150); await ptr('pointermove', 42, 400, 150);
+await page.click('#nextTrialBtn');
+const lost = await ev(() => ({ t: state.currentTrialIdx, drag: state.isDraggingSpan, pointers: state.pointers.size }));
+check(lost.t === 2 && !lost.drag && lost.pointers === 0, `Next Trial drops a selection whose pointerup was lost: ${JSON.stringify(lost)}`);
+await ptr('pointerdown', 43, 500, 150); await ptr('pointerup', 43, 500, 150);   // a new primary gesture works normally afterwards
+// --- tapping a proposed event with the Saccade tool accepts it as a saccade, even when the model proposed a blink (red)
+await sleep(700);
+const tapCls = await ev(() => {
+  state.currentTrialIdx = 3; state.winIdx = 0; applyGridWindow(); state.autoSlide = false;
+  state.expertEvents[3] = []; state.pointMarks[3] = []; state.prelabels[3] = [{ onset: 300, offset: 330, cls: 2 }];
+  document.getElementById('saccadeBtn').click();
+  handleTap(315);
+  return state.expertEvents[3].map(e => [e.onset, e.offset, e.cls]);
+});
+check(JSON.stringify(tapCls) === '[[300,330,1]]', `a red (blink) proposal tapped with the Saccade tool becomes a saccade: ${JSON.stringify(tapCls)}`);
+// --- leaving pass 2 forgets the event that was being refined
+const p1back = await ev(() => { document.getElementById('switchPassBtn').click(); const a = state.currentMarkAt; document.getElementById('switchPassBtn').click(); return [a >= 0, state.pass, state.currentMarkAt, state.currentPutativeOnset]; });
+check(p1back[0] && p1back[1] === 1 && p1back[2] === -1 && p1back[3] === -1, `back in pass 1 there is no event under refinement: ${JSON.stringify(p1back)}`);
+
 check(errors.length === 0, 'no page error' + (errors.length ? ': ' + errors.join(' | ') : ''));
 await page.screenshot({ path: process.env.SHOT || '/tmp/labeler.png' });
-await browser.close();
+if (ANDROID_WS) await browser.disconnect(); else await browser.close();
 console.log(ok ? 'all labeler flow checks passed' : 'SOME CHECKS FAILED');
 process.exit(ok ? 0 : 1);

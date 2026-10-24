@@ -902,12 +902,26 @@
         return { saccades, blinks };
     }
 
+    // A selection being dragged (or a lost pointerup) must never survive a change of window, trial or pass
+    function resetGesture() {
+        state.pointers.clear();
+        state.pointerDown = false;
+        state.isDraggingSpan = false;
+        state.showLoupe = false;
+        state.dragStartSample = -1;
+        state.dragCurrentSample = -1;
+    }
+
     // --- Pass Switching & Navigation ---
     function setPass(newPass) {
+        resetGesture();
         if (state.pass === PASS_ONE && newPass === PASS_TWO) scanCurrentWindow();     // the window on screen has been seen
         state.pass = newPass;
         state.zoomMultiplier = 1.0;
         if (newPass === PASS_ONE) {
+            state.currentMarkAt = -1;
+            state.currentPutativeOnset = -1;
+            state.currentPutativeOffset = -1;
             elements.passIndicator.textContent = "Pass 1: Mark";
             elements.passIndicator.className = "badge pass-badge";
             elements.pass1Controls.classList.remove('hidden');
@@ -965,6 +979,7 @@
         return -1;
     }
     function enterTrialForRefine(t, atEnd) {
+        resetGesture();
         state.currentTrialIdx = t;
         state.zoomMultiplier = 1.0;
         buildRefineQueue();
@@ -1035,8 +1050,7 @@
                 state.activeClass = exp.cls;
             } else if (pre) {
                 putativeOnset = pre.onset;
-                putativeOffset = pre.offset;
-                state.activeClass = pre.cls;
+                putativeOffset = pre.offset;      // the class stays the one of the expert's mark
             } else {
                 const halfDef = Math.max(5, Math.round(15.0 * (state.rateHz / 1000.0)));
                 putativeOnset = Math.max(0, mark.at - halfDef);
@@ -1064,6 +1078,7 @@
 
     // Pass 1: next window of the same trial (10 % overlap), then the first window of the next trial
     function nextEpoch() {
+        resetGesture();
         scanCurrentWindow();
         const t = state.currentTrialIdx;
         const n = trialLenOf(t);
@@ -1087,6 +1102,7 @@
     }
 
     function prevEpoch() {
+        resetGesture();
         scanCurrentWindow();
         const t = state.currentTrialIdx;
         const n = trialLenOf(t);
@@ -1557,23 +1573,26 @@
     // --- Touch & Pointer Event Handlers (iPad & Desktop) ---
     function setupPointerEvents() {
         const canvas = elements.canvas;
+        // position in the canvas from clientX/Y (the offset of synthetic events is wrong in the Android WebView)
+        const local = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
 
         canvas.addEventListener('pointerdown', (e) => {
-            canvas.setPointerCapture(e.pointerId);
+            try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
+            if (e.isPrimary) state.pointers.clear();      // a primary pointer starts a new gesture: drop pointers whose pointerup never arrived
             if (state.pointers.size === 0) {
                 state.gestureMulti = false;
                 state.gestureIgnored = (performance.now() - state.lastMultiTouchEnd) < TOUCH_REFRACTORY_MS;   // refractory period after a pinch
             }
-            state.pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+            state.pointers.set(e.pointerId, local(e));
             if (state.pointers.size >= 2) state.gestureMulti = true;
 
             if (state.pointers.size === 1) {
                 // 1 Finger / Apple Pencil
                 state.pointerDown = true;
-                const sample = pxToSample(e.offsetX, canvas.clientWidth);
+                const sample = pxToSample(local(e).x, canvas.clientWidth);
                 state.dragStartSample = sample;
                 state.dragCurrentSample = sample;
-                state.dragPointerPos = { x: e.offsetX, y: e.offsetY };
+                state.dragPointerPos = local(e);
                 state.isDraggingSpan = false;
                 state.showLoupe = false;
             } else if (state.pointers.size === 2) {
@@ -1590,11 +1609,11 @@
 
         canvas.addEventListener('pointermove', (e) => {
             if (!state.pointers.has(e.pointerId)) return;
-            state.pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+            state.pointers.set(e.pointerId, local(e));
 
             if (state.pointers.size === 1 && state.pointerDown && !state.gestureMulti && !state.gestureIgnored) {
-                state.dragPointerPos = { x: e.offsetX, y: e.offsetY };
-                const sample = pxToSample(e.offsetX, canvas.clientWidth);
+                state.dragPointerPos = local(e);
+                const sample = pxToSample(local(e).x, canvas.clientWidth);
                 state.dragCurrentSample = sample;
 
                 // Threshold to enter drag mode vs tap
@@ -1621,7 +1640,7 @@
         });
 
         canvas.addEventListener('pointerup', (e) => {
-            canvas.releasePointerCapture(e.pointerId);
+            try { canvas.releasePointerCapture(e.pointerId); } catch (err) { }
             state.pointers.delete(e.pointerId);
             if (state.gestureMulti) state.lastMultiTouchEnd = performance.now();
 
@@ -1667,7 +1686,7 @@
         });
 
         canvas.addEventListener('pointercancel', (e) => {
-            canvas.releasePointerCapture(e.pointerId);
+            try { canvas.releasePointerCapture(e.pointerId); } catch (err) { }
             if (state.gestureMulti) state.lastMultiTouchEnd = performance.now();
             state.pointers.clear();
             state.pointerDown = false;
@@ -1681,7 +1700,7 @@
             e.preventDefault();
             const span = state.toSample - state.fromSample;
             const factor = e.deltaY > 0 ? 1.15 : 0.85;
-            const mouseSample = pxToSample(e.offsetX, canvas.clientWidth);
+            const mouseSample = pxToSample(local(e).x, canvas.clientWidth);
             const frac = (mouseSample - state.fromSample) / Math.max(1, span);
 
             const newSpan = Math.max(50, Math.min(curLen(), Math.round(span * factor)));
@@ -1763,10 +1782,12 @@
                 return;
             }
 
-            // 3. Tap on proposed event: accept whole proposed duration as ground truth, then slide
+            // 3. Tap on proposed event: accept whole proposed duration as ground truth, then slide.
+            // The class is the one selected by the expert (Saccade / Blink buttons): a saccade the model proposed
+            // as a blink (red) becomes a saccade when tapped with the Saccade tool.
             const pre = (state.prelabels[trialIdx] || []).find(p => (p.onset <= sample && sample <= p.offset) || Math.abs(p.onset - sample) <= 25 || Math.abs(p.offset - sample) <= 25);
             if (pre) {
-                refineMark(trialIdx, sample, pre.onset, pre.offset, pre.cls);
+                refineMark(trialIdx, sample, pre.onset, pre.offset, state.activeClass);
                 slideWindowAfterEvent(pre.onset);
                 updateStatus();
                 render();
@@ -2033,7 +2054,8 @@
         state.previousPrelabels = JSON.parse(JSON.stringify(state.prelabels));
 
         for (let t = 0; t < state.trials.length; t++) {
-            const tr = state.trials[t];
+            // same NaN fill as the training copy, otherwise a blink reads as zero velocity and is never predicted
+            const tr = trainingCopyOf(state.trials[t], 3000 + t);
             const predPromise = new Promise((resolve) => {
                 const reqId = Date.now() + Math.random();
                 const handler = (e) => {
@@ -2995,6 +3017,7 @@
 
         elements.prevTrialBtn.addEventListener('click', () => {
             if (state.currentTrialIdx > 0) {
+                resetGesture();
                 if (state.pass === PASS_ONE) scanCurrentWindow();
                 state.currentTrialIdx--;
                 state.zoomMultiplier = 1.0;
@@ -3013,6 +3036,7 @@
 
         elements.nextTrialBtn.addEventListener('click', () => {
             if (state.currentTrialIdx < state.trials.length - 1) {
+                resetGesture();
                 if (state.pass === PASS_ONE) scanCurrentWindow();
                 state.currentTrialIdx++;
                 state.zoomMultiplier = 1.0;

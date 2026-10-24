@@ -26,6 +26,20 @@ template <class R> struct Block {                       // conv (or transposed c
     }
 };
 
+// Output head of a model with a different class count: the classes both models have keep the loaded weights (a 2-class
+// fixation / saccade model keeps its saccade detector), an extra class keeps its random weights with a bias below every
+// loaded one, so that it starts out rarely predicted instead of taking over the saccades (with a random head, the first
+// training round on a few blinks labelled many saccades as blinks).
+template <class R> void transfer_head(const std::vector<R>& src_w, const std::vector<R>& src_b, std::vector<R>& w, std::vector<R>& b) {
+    const size_t Ks = src_b.size(), K = b.size(), row = Ks ? src_w.size() / Ks : 0;
+    if (Ks == 0 || row * K != w.size()) return;
+    R lo = src_b[0]; for (R v : src_b) lo = std::min(lo, v);
+    for (size_t k = 0; k < K; ++k) {
+        if (k < Ks) { std::copy(src_w.begin() + k * row, src_w.begin() + (k + 1) * row, w.begin() + k * row); b[k] = src_b[k]; }
+        else b[k] = lo - R(1);
+    }
+}
+
 template <class R> class UNet {
  public:
     int K = 2, ks = 5, mp = 5;

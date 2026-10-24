@@ -46,6 +46,9 @@ import java.io.File
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    // a file opened from another app before the page has loaded waits here (window.loadFromAndroid does not exist yet)
+    private var pageLoaded = false
+    private var pendingJs: String? = null
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
 
     private val filePickerLauncher = registerForActivityResult(
@@ -74,6 +77,8 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webView)
+        // debug builds: the page can be inspected / driven from chrome://inspect (the labeler tests run through it)
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) WebView.setWebContentsDebuggingEnabled(true)
 
         val assetLoader = WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
@@ -91,6 +96,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) {
+                pageLoaded = true
+                pendingJs?.let { view.evaluateJavascript(it, null) }
+                pendingJs = null
+            }
+
             override fun shouldInterceptRequest(
                 view: WebView,
                 request: WebResourceRequest
@@ -205,7 +216,7 @@ class MainActivity : AppCompatActivity() {
                 val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                 withContext(Dispatchers.Main) {
                     val js = "if (window.loadFromAndroid) window.loadFromAndroid('${name.replace("'", "\\'")}', '$base64');"
-                    webView.evaluateJavascript(js, null)
+                    if (pageLoaded) webView.evaluateJavascript(js, null) else pendingJs = js
                 }
             } catch (e: Exception) {
                 android.util.Log.e("MainActivity", "Failed to load incoming file: $uri", e)
