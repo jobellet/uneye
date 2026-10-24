@@ -90,6 +90,7 @@
     <string name="tool_blink">Clignement</string>
     <string name="tool_eraser">Gomme</string>
     <string name="window_ms_hint">Fenêtre (ms)</string>
+    <string name="auto_slide">Glissement auto</string>
     <string name="browse">Parcourir…</string>
     <string name="labels_path">Labels précédents (optionnel)</string>
     <string name="labels_path_hint">.json, .mat, .csv ou .bin</string>

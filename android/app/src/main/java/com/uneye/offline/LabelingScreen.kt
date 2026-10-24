@@ -92,6 +92,7 @@ class LabelingScreen : AppCompatActivity() {
     // Settings & State
     private var filterSettings = FilterSettings.DEFAULT
     private var epochMs = 500L            // epoch length: 500 ms default
+    private var autoSlide = false         // auto-slide 50ms before event (disabled by default)
     private var activeTool = TraceView.TOOL_SACCADE
     private var cls = Native.CLS_SACCADE  // active class for marking
     private var zoomMultiplier = 1.0
@@ -145,6 +146,11 @@ class LabelingScreen : AppCompatActivity() {
         settingsPanel = findViewById(R.id.settingsPanel)
         epochMs = getSharedPreferences("uneye_prefs", MODE_PRIVATE).getLong("winMs", 500L).coerceIn(20L, 60_000L)
         winMsEdit.setText(epochMs.toString())
+
+        findViewById<android.widget.CheckBox>(R.id.autoSlideCheck)?.let { chk ->
+            chk.isChecked = autoSlide
+            chk.setOnCheckedChangeListener { _, isChecked -> autoSlide = isChecked }
+        }
 
         pass2Controls = findViewById(R.id.pass2Controls)
         prevEventBtn = findViewById(R.id.prevEventBtn)
@@ -375,6 +381,7 @@ class LabelingScreen : AppCompatActivity() {
     // --- Pass 1 Gestures & Logic -----------------------------------------------------
 
     private fun slideWindowAfterEvent(eventOnset: Long) {
+        if (!autoSlide) return
         if (pass != Session.Pass.ONE) return
         val n = session.trialSamples
         val pad50 = (50.0 * session.rateHz / 1000.0).roundToLong().coerceAtLeast(1L)

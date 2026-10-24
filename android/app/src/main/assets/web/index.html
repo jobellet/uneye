@@ -55,6 +55,8 @@
         <section id="toolsPanel" class="tools-panel hidden">
             <label for="winMsInput" class="win-label">Window (ms)</label>
             <input type="number" id="winMsInput" class="win-input" value="500" min="20" max="60000" step="50" title="Width of the visible window in pass 1; the next window overlaps by 10 %">
+            <button id="autoSlideBtn" class="btn btn-secondary" title="Automatically slide window after selecting an event (disabled by default)">Auto-slide: Off</button>
+            <input type="checkbox" id="autoSlideToggle" style="display: none;" aria-hidden="true">
             <button id="demoBtn" class="btn btn-accent">⚡ Demo</button>
             <button id="openBtn" class="btn btn-secondary">Open…</button>
             <button id="saveLabelsBtn" class="btn btn-secondary" title="Save my manual labels (marks, refined events, windows seen) to a file I can reload later">Save labels</button>

@@ -146,9 +146,13 @@ await ev(() => {
   render();
 });
 
-// Tap on proposed prelabel at sample 210:
+// Auto-slide toggle check: must be disabled by default
+const defaultAutoSlide = await ev(() => state.autoSlide);
+check(defaultAutoSlide === false, 'auto-slide is disabled by default');
+
+// Tap on proposed prelabel at sample 210 with autoSlide disabled:
 // 1) Must accept full [200, 235] as ground truth (expertEvents), without adding point mark
-// 2) Must slide window: starts 50 ms before onset (200 - 50 = 150) and ends at 150 + 500 - 1 = 649
+// 2) Must NOT slide window because autoSlide is disabled by default (window stays 0..499)
 await ev(() => handleTap(210));
 const tapPreResult = await ev(() => ({
   expCount: state.expertEvents[0].length,
@@ -159,10 +163,17 @@ const tapPreResult = await ev(() => ({
 }));
 check(tapPreResult.expCount === 1 && tapPreResult.expEvent.onset === 200 && tapPreResult.expEvent.offset === 235 && tapPreResult.pmCount === 0,
   `tapping proposed event accepts full duration [200..235] as ground truth without adding point mark: ${JSON.stringify(tapPreResult.expEvent)}`);
-check(tapPreResult.from === 150 && tapPreResult.to === 649,
-  `window glides to start 50 ms before event onset (150..649): from=${tapPreResult.from}, to=${tapPreResult.to}`);
+check(tapPreResult.from === 0 && tapPreResult.to === 499,
+  `window does not slide when autoSlide is disabled (remains 0..499): from=${tapPreResult.from}, to=${tapPreResult.to}`);
 
-// Tap on empty space at sample 450:
+// Now open menu and toggle autoSlide ON via autoSlideBtn
+await page.click('#menuBtn');
+await page.click('#autoSlideBtn');
+const enabledAutoSlide = await ev(() => state.autoSlide);
+check(enabledAutoSlide === true, 'clicking autoSlideBtn enables autoSlide');
+await page.click('#menuBtn');
+
+// Tap on empty space at sample 450 with autoSlide enabled:
 // 1) Adds a point mark at 450
 // 2) Glides window so it starts 50 ms before sample (450 - 50 = 400) and ends at 400 + 500 - 1 = 899
 await ev(() => handleTap(450));
@@ -175,7 +186,14 @@ const tapEmptyResult = await ev(() => ({
 check(tapEmptyResult.pmCount === 1 && tapEmptyResult.pmAt === 450,
   `tapping empty space places point mark at 450: ${JSON.stringify(tapEmptyResult)}`);
 check(tapEmptyResult.from === 400 && tapEmptyResult.to === 899,
-  `window glides to start 50 ms before new mark (400..899): from=${tapEmptyResult.from}, to=${tapEmptyResult.to}`);
+  `with autoSlide enabled, window glides to start 50 ms before new mark (400..899): from=${tapEmptyResult.from}, to=${tapEmptyResult.to}`);
+
+// Toggle autoSlide back OFF
+await page.click('#menuBtn');
+await page.click('#autoSlideBtn');
+const disabledAgain = await ev(() => state.autoSlide);
+check(disabledAgain === false, 'clicking autoSlideBtn again disables autoSlide');
+await page.click('#menuBtn');
 
 check(errors.length === 0, 'no page error' + (errors.length ? ': ' + errors.join(' | ') : ''));
 await page.screenshot({ path: process.env.SHOT || '/tmp/labeler.png' });

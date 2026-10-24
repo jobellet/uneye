@@ -63,6 +63,7 @@
         showLoupe: false,
         lastTapTime: 0,
         lastTapSample: -1,
+        autoSlide: false,           // auto-slide window 50ms before event after manual selection (disabled by default)
         eraser: false,              // eraser tool: drag between two times to delete every event / mark / pre-label in between
         gestureMulti: false,        // a second finger touched during this gesture (pinch zoom)
         gestureIgnored: false,      // the gesture started inside the refractory period after a pinch
@@ -115,6 +116,8 @@
         menuBtn: document.getElementById('menuBtn'),
         toolsPanel: document.getElementById('toolsPanel'),
         eraserBtn: document.getElementById('eraserBtn'),
+        autoSlideBtn: document.getElementById('autoSlideBtn'),
+        autoSlideToggle: document.getElementById('autoSlideToggle'),
         saveLabelsBtn: document.getElementById('saveLabelsBtn'),
         loadLabelsBtn: document.getElementById('loadLabelsBtn'),
         labelsInput: document.getElementById('labelsInput'),
@@ -1536,6 +1539,7 @@
     }
 
     function slideWindowAfterEvent(eventOnset) {
+        if (!state.autoSlide) return;
         if (state.pass !== PASS_ONE) return;
         const t = state.currentTrialIdx;
         const n = trialLenOf(t);
@@ -2613,6 +2617,17 @@
         }
     }
 
+    function setAutoSlide(enabled) {
+        state.autoSlide = !!enabled;
+        if (elements.autoSlideBtn) {
+            elements.autoSlideBtn.classList.toggle('active', state.autoSlide);
+            elements.autoSlideBtn.textContent = state.autoSlide ? 'Auto-slide: On' : 'Auto-slide: Off';
+        }
+        if (elements.autoSlideToggle) {
+            elements.autoSlideToggle.checked = state.autoSlide;
+        }
+    }
+
     function setupListeners() {
         // Class selection (side-by-side buttons: selecting one grises the other and deactivates eraser)
         if (elements.saccadeBtn) elements.saccadeBtn.addEventListener('click', () => setActiveClass(CLS_SACCADE));
@@ -2632,6 +2647,17 @@
             elements.eraserBtn.classList.toggle('active', state.eraser);
             elements.eraserBtn.textContent = state.eraser ? 'Eraser ON' : 'Eraser';
         });
+
+        if (elements.autoSlideBtn) {
+            elements.autoSlideBtn.addEventListener('click', () => {
+                setAutoSlide(!state.autoSlide);
+            });
+        }
+        if (elements.autoSlideToggle) {
+            elements.autoSlideToggle.addEventListener('change', (e) => {
+                setAutoSlide(e.target.checked);
+            });
+        }
 
         elements.saveLabelsBtn.addEventListener('click', saveLabelsJson);
         elements.loadLabelsBtn.addEventListener('click', () => elements.labelsInput.click());
@@ -2875,5 +2901,6 @@
     window.updateStatus = updateStatus;
     window.syncRenderedLabels = syncRenderedLabels;
     window.slideWindowAfterEvent = slideWindowAfterEvent;
+    window.setAutoSlide = setAutoSlide;
     window.handleTap = handleTap;
 })();
