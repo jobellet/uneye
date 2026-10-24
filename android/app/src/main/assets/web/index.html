@@ -73,6 +73,7 @@
                     <option value="h5">HDF5 .h5</option>
                 </select>
             <button id="exportBtn" class="btn btn-success">Export</button>
+            <span id="appBuild" class="win-label" title="Version of the labeler"></span>
         </section>
 
         <!-- Main Interactive Canvas View -->
@@ -270,8 +271,8 @@
         </div>
     </div>
 
-    <script src="formats.js?v=4"></script>
-    <script src="app.js?v=4"></script>
+    <script src="formats.js?v=5"></script>
+    <script src="app.js?v=5"></script>
 <script>
     if ("serviceWorker" in navigator && !window.AndroidBridge) {
         window.addEventListener("load", () => {

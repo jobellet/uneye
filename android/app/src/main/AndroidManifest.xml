@@ -26,12 +26,17 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- open eye-trace files (CSV / MAT) from a file manager -->
+            <!-- open eye-trace files (CSV / MAT / NPZ / HDF5) and saved labels (JSON) from a file manager -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/*" />
                 <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-hdf5" />
+                <data android:mimeType="application/x-hdf" />
+                <data android:mimeType="application/x-matlab-data" />
                 <data android:scheme="content" />
             </intent-filter>
         </activity>

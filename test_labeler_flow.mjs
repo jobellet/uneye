@@ -408,6 +408,25 @@ check(JSON.stringify(tapCls) === '[[300,330,1]]', `a red (blink) proposal tapped
 const p1back = await ev(() => { document.getElementById('switchPassBtn').click(); const a = state.currentMarkAt; document.getElementById('switchPassBtn').click(); return [a >= 0, state.pass, state.currentMarkAt, state.currentPutativeOnset]; });
 check(p1back[0] && p1back[1] === 1 && p1back[2] === -1 && p1back[3] === -1, `back in pass 1 there is no event under refinement: ${JSON.stringify(p1back)}`);
 
+// --- a session saved by an earlier version (model without modelVersion, every proposal a blink) comes back without that model
+await page.evaluate(() => new Promise(res => {
+  const q = indexedDB.open('uneye_db', 1);
+  q.onsuccess = () => {
+    const db = q.result, tx = db.transaction('uneye_store', 'readwrite');
+    tx.objectStore('uneye_store').put({
+      trials: state.trials.map(tr => ({ x: Array.from(tr.x), y: Array.from(tr.y), name: tr.name })), labels: state.labels.map(l => Array.from(l)),
+      reviewedRanges: state.reviewedRanges, scanWins: state.scanWins, expertEvents: state.expertEvents, pointMarks: state.pointMarks,
+      prelabels: state.prelabels.map(P => P.map(p => ({ onset: p.onset, offset: p.offset, cls: 2 }))), rateHz: state.rateHz, convergenceHistory: [{ testF1Saccade: 0 }],
+      trainedModelBin: new Uint8Array([85, 78, 69, 89, 1, 0, 0, 0, 3, 0, 0, 0, 5, 0, 0, 0, 5, 0, 0, 0]), trainedModelJson: '{}'
+    }, 'autosave');
+    tx.oncomplete = () => res();
+  };
+}));
+await page.reload({ waitUntil: ANDROID_WS ? 'load' : 'networkidle0' }); await sleep(ANDROID_WS ? 5000 : 1500);
+const stale = await ev(() => ({ model: state.trainedModelBin, hist: state.convergenceHistory.length, cls: [...new Set(state.prelabels.flat().map(p => p.cls))], n: state.prelabels.flat().length, build: document.getElementById('appBuild').textContent }));
+check(stale.model === null && stale.hist === 0 && stale.cls.includes(1),   // the rule-based detector proposes saccades again (and blinks on NaN stretches)
+  `a model saved by an earlier version is dropped on restore, with its (red) proposals: ${JSON.stringify(stale)}`);
+
 check(errors.length === 0, 'no page error' + (errors.length ? ': ' + errors.join(' | ') : ''));
 await page.screenshot({ path: process.env.SHOT || '/tmp/labeler.png' });
 if (ANDROID_WS) await browser.disconnect(); else await browser.close();

@@ -8,11 +8,29 @@ on:
       - 'android/**'
       - 'cpp/**'
       - '.github/workflows/android.yml'
+      # the app shows the web labeler (copied into the APK by syncWebAssets)
+      - 'index.html'
+      - 'style.css'
+      - 'app.js'
+      - 'formats.js'
+      - 'train_worker.js'
+      - 'sw.js'
+      - 'web/**'
+      - 'models/**'
   pull_request:
     paths:
       - 'android/**'
       - 'cpp/**'
       - '.github/workflows/android.yml'
+      # the app shows the web labeler (copied into the APK by syncWebAssets)
+      - 'index.html'
+      - 'style.css'
+      - 'app.js'
+      - 'formats.js'
+      - 'train_worker.js'
+      - 'sw.js'
+      - 'web/**'
+      - 'models/**'
   workflow_dispatch:
 
 permissions:
