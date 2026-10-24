@@ -273,7 +273,7 @@
     <script src="formats.js?v=3"></script>
     <script src="app.js?v=3"></script>
 <script>
-    if ("serviceWorker" in navigator) {
+    if ("serviceWorker" in navigator && !window.AndroidBridge) {
         window.addEventListener("load", () => {
             navigator.serviceWorker.register("./sw.js").catch(err => console.log("SW reg failed:", err));
         });

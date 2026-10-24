@@ -95,18 +95,37 @@ class MainActivity : AppCompatActivity() {
                 view: WebView,
                 request: WebResourceRequest
             ): WebResourceResponse? {
-                val response = assetLoader.shouldInterceptRequest(request.url) ?: return null
-                val headers = response.responseHeaders?.toMutableMap() ?: mutableMapOf()
-                headers["Cross-Origin-Opener-Policy"] = "same-origin"
-                headers["Cross-Origin-Embedder-Policy"] = "require-corp"
-                return WebResourceResponse(
-                    response.mimeType,
-                    response.encoding,
-                    response.statusCode,
-                    response.reasonPhrase,
-                    headers,
-                    response.data
-                )
+                return try {
+                    val url = request.url ?: return null
+                    val response = assetLoader.shouldInterceptRequest(url) ?: return null
+                    if (response.data == null) return response
+                    val path = url.path?.lowercase() ?: ""
+                    val mime = when {
+                        path.endsWith(".html") || path.endsWith("/") -> "text/html"
+                        path.endsWith(".css") -> "text/css"
+                        path.endsWith(".js") || path.endsWith(".mjs") -> "application/javascript"
+                        path.endsWith(".wasm") -> "application/wasm"
+                        path.endsWith(".json") -> "application/json"
+                        path.endsWith(".png") -> "image/png"
+                        path.endsWith(".jpg") || path.endsWith(".jpeg") -> "image/jpeg"
+                        path.endsWith(".svg") -> "image/svg+xml"
+                        path.endsWith(".bin") -> "application/octet-stream"
+                        else -> response.mimeType ?: "application/octet-stream"
+                    }
+                    val headers = HashMap<String, String>()
+                    response.responseHeaders?.let { headers.putAll(it) }
+                    headers["Cross-Origin-Opener-Policy"] = "same-origin"
+                    headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+                    headers["Access-Control-Allow-Origin"] = "*"
+                    response.mimeType = mime
+                    response.encoding = "UTF-8"
+                    response.setStatusCodeAndReasonPhrase(200, "OK")
+                    response.responseHeaders = headers
+                    response
+                } catch (e: Throwable) {
+                    android.util.Log.e("MainActivity", "shouldInterceptRequest error", e)
+                    null
+                }
             }
         }
 
