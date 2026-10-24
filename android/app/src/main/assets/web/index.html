@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="U'n'Eye">
+    <meta name="theme-color" content="#1565C0">
+    <title>U'n'Eye — Offline Saccade Labeler</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/png" href="logo_circle.png">
+    <link rel="apple-touch-icon" href="logo_circle.png">
+
+    <!-- Thumbnail & Open Graph Metadata for Social / App previews -->
+    <meta name="thumbnail" content="https://jobellet.github.io/uneye/logo_circle.png">
+    <meta property="og:title" content="U'n'Eye — Offline Saccade Labeler">
+    <meta property="og:description" content="Touch-friendly offline labeling and on-device training for saccades, microsaccades, and blinks.">
+    <meta property="og:image" content="https://jobellet.github.io/uneye/logo_circle.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="512">
+    <meta property="og:image:height" content="512">
+    <meta property="og:url" content="https://jobellet.github.io/uneye/">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="U'n'Eye — Offline Saccade Labeler">
+    <meta name="twitter:description" content="Touch-friendly offline labeling and on-device training for saccades, microsaccades, and blinks.">
+    <meta name="twitter:image" content="https://jobellet.github.io/uneye/logo_circle.png">
+</head>
+<body>
+    <div id="app">
+        <!-- Top Navigation / Action Bar -->
+        <header id="top-bar">
+            <div class="bar-left">
+                <span class="app-logo">U’n’Eye</span>
+                <span id="passIndicator" class="badge pass-badge">Pass 1: Mark</span>
+                <span id="convergenceBadge" class="badge conv-badge hidden">Collecting</span>
+            </div>
+
+            <div class="bar-center">
+                <div class="class-btn-group">
+                    <button id="saccadeBtn" class="btn-class-opt saccade active" title="Select Saccade tool">Saccade</button>
+                    <button id="blinkBtn" class="btn-class-opt blink inactive" title="Select Blink tool">Blink</button>
+                </div>
+                <button id="classToggle" style="opacity: 0.01; width: 1px; height: 1px; position: absolute; left: 0; top: 0; z-index: -1;" aria-hidden="true"></button>
+                <button id="eraserBtn" class="btn btn-secondary" title="Eraser: drag between two times to delete every saccade, blink, mark and pre-label in between (a tap erases around the tap)">Eraser</button>
+                <button id="undoBtn" class="btn btn-secondary">Undo</button>
+            </div>
+
+            <div class="bar-right">
+                <button id="menuBtn" class="btn btn-secondary" title="Show / hide the settings, files, training and export buttons">☰</button>
+            </div>
+        </header>
+
+        <!-- Settings panel: hidden by default so that the traces get the whole screen -->
+        <section id="toolsPanel" class="tools-panel hidden">
+            <label for="winMsInput" class="win-label">Window (ms)</label>
+            <input type="number" id="winMsInput" class="win-input" value="500" min="20" max="60000" step="50" title="Width of the visible window in pass 1; the next window overlaps by 10 %">
+            <button id="demoBtn" class="btn btn-accent">⚡ Demo</button>
+            <button id="openBtn" class="btn btn-secondary">Open…</button>
+            <button id="saveLabelsBtn" class="btn btn-secondary" title="Save my manual labels (marks, refined events, windows seen) to a file I can reload later">Save labels</button>
+            <button id="loadLabelsBtn" class="btn btn-secondary" title="Reload labels saved earlier (open the same eye traces first)">Load labels</button>
+            <button id="filterBtn" class="btn btn-secondary">⚙ Filter</button>
+            <button id="metricsBtn" class="btn btn-secondary">Metrics</button>
+            <button id="trainNowBtn" class="btn btn-train">Train</button>
+            <button id="cancelTrainBtn" class="btn btn-danger hidden">Cancel</button>
+            <button id="downloadModelBtn" class="btn btn-secondary" title="Download model">Model</button>
+            <select id="exportFormat" class="btn btn-secondary" title="Export format: CSV (L, X, Y files) or one file with all trials, labels and names">
+                    <option value="csv" selected>CSV</option>
+                    <option value="npz">NumPy .npz</option>
+                    <option value="mat">MATLAB .mat</option>
+                    <option value="h5">HDF5 .h5</option>
+                </select>
+            <button id="exportBtn" class="btn btn-success">Export</button>
+        </section>
+
+        <!-- Main Interactive Canvas View -->
+        <main id="canvas-container">
+            <canvas id="traceCanvas"></canvas>
+            <div id="loupeLabel" class="loupe-info hidden"></div>
+        </main>
+
+        <!-- Bottom Controls & Status Bar -->
+        <footer id="bottom-bar">
+            <div class="status-row">
+                <span id="trialStatus">Trial 1/1</span>
+                <span id="reviewedStatus">Reviewed: 0.0 s</span>
+                <span id="eventsStatus">0 saccades, 0 blinks</span>
+                <span id="trainStatus" class="train-idle">Training: idle</span>
+            </div>
+
+            <div class="controls-row">
+                <!-- Navigation -->
+                <div id="trialNavGroup" class="control-group">
+                    <button id="prevTrialBtn" class="btn btn-nav">◀ Prev Trial</button>
+                    <button id="nextTrialBtn" class="btn btn-nav">Next Trial ▶</button>
+                </div>
+
+                <!-- Pass 2 specific controls: One event at a time -->
+                <div id="pass2Controls" class="control-group hidden">
+                    <button id="prevEventBtn" class="btn btn-nav">◀ Prev Event</button>
+                    <span id="eventCounterBadge" class="badge event-counter">Event 1/1</span>
+                    <button id="nextEventBtn" class="btn btn-nav">Next Event ▶</button>
+                    <button id="acceptPreBtn" class="btn btn-accent">Accept Pre-label</button>
+                    <button id="notEventBtn" class="btn btn-danger">Not an Event</button>
+                    <button id="widerBtn" class="btn btn-secondary">Wider</button>
+                </div>
+
+                <!-- Pass 1 specific controls -->
+                <div id="pass1Controls" class="control-group">
+                    <button id="prevEpochBtn" class="btn btn-nav">◀ Prev window</button>
+                    <button id="nextEpochBtn" class="btn btn-primary">Next window ▶</button>
+                </div>
+
+                <!-- Mode Switch -->
+                <div class="control-group">
+                    <button id="switchPassBtn" class="btn btn-mode">Switch Pass ⇄</button>
+                </div>
+            </div>
+        </footer>
+
+        <!-- Hidden file inputs -->
+        <!-- no "accept" filter on purpose: iPadOS greys out every file whose extension has no registered type (.npz, .h5, .mat), so they could not be picked; the extension is checked in app.js -->
+        <input type="file" id="fileInput" style="display: none;">
+        <input type="file" id="labelsInput" style="display: none;">
+        <input type="file" id="filePairInput" accept=".csv,.txt,.dat" multiple style="display: none;">
+
+        <!-- Load Dialog Modal -->
+        <div id="loadModal" class="modal hidden">
+            <div class="modal-card">
+                <h3>Load Eye Trace</h3>
+                <div class="form-row">
+                    <label>Selected eye trace:</label>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 60%;">
+                        <span id="modalFileName" class="filename-display" style="flex: 1;">-</span>
+                        <button id="modalChangeTraceBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <label for="rateInput">Sampling rate (Hz):</label>
+                    <input type="number" id="rateInput" value="1000" min="50" max="2000" step="50">
+                </div>
+                <div class="form-row">
+                    <label for="scaleInput">Degrees per unit:</label>
+                    <input type="number" id="scaleInput" value="1.0" min="0.001" max="100" step="0.1">
+                </div>
+                <div class="form-row">
+                    <label for="modalWinMs">Visible window in pass 1 (ms):</label>
+                    <input type="number" id="modalWinMs" value="500" min="20" max="60000" step="50">
+                </div>
+                <div class="form-row">
+                    <label for="modalSgWindow">Savitzky-Golay filter:</label>
+                    <select id="modalSgWindow">
+                        <option value="21" selected>21 ms (standard / recommended)</option>
+                        <option value="11">11 ms (light)</option>
+                        <option value="31">31 ms (medium)</option>
+                        <option value="51">51 ms (strong)</option>
+                        <option value="0">Off (raw trace)</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="initialModelSelect">Model weights:</label>
+                    <select id="initialModelSelect">
+                        <option value="pretrained" selected>Pretrained (combined.bin)</option>
+                        <option value="local">Custom local weights (.bin)…</option>
+                        <option value="scratch">From scratch (random)</option>
+                    </select>
+                </div>
+                <div id="localModelRow" class="form-row hidden">
+                    <label>Local weights file:</label>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 60%;">
+                        <span id="modalModelFileName" class="filename-display" style="flex: 1;">No file chosen</span>
+                        <button id="modalPickModelBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
+                    </div>
+                    <input type="file" id="modalModelFile" accept=".bin" style="display: none;">
+                </div>
+                <div class="form-row">
+                    <label>Previous labels (optional):</label>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 60%;">
+                        <span id="modalLabelsFileName" class="filename-display" style="flex: 1;">(none)</span>
+                        <button id="modalPickLabelsBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
+                    </div>
+                    <input type="file" id="modalLabelsFile" accept=".json,.mat,.csv,.bin" style="display: none;">
+                </div>
+                <div class="form-row">
+                    <label for="prelabelerSelect">Automatic pre-labeler:</label>
+                    <select id="prelabelerSelect">
+                        <option value="hmm" selected>Adaptive HMM / Engbert (λ·σ, High Accuracy)</option>
+                        <option value="model">Neural Network (selected weights)</option>
+                        <option value="none">None (manual)</option>
+                    </select>
+                </div>
+                <div class="modal-buttons">
+                    <button id="modalCancelBtn" class="btn btn-secondary">Cancel</button>
+                    <button id="modalConfirmBtn" class="btn btn-primary">Load Trace</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter & Detection Settings Modal -->
+        <div id="filterModal" class="modal hidden">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Signal Filter & Detection Settings</h3>
+                    <button id="filterCloseBtn" class="btn-close">&times;</button>
+                </div>
+                <div class="form-row">
+                    <label for="enableSg">Savitzky-Golay Smoothing:</label>
+                    <input type="checkbox" id="enableSg" checked>
+                </div>
+                <div class="form-row">
+                    <label for="sgWindowMs">Window Length (ms):</label>
+                    <select id="sgWindowMs">
+                        <option value="11">11 ms (light smoothing)</option>
+                        <option value="21" selected>21 ms (standard / recommended)</option>
+                        <option value="31">31 ms (medium smoothing)</option>
+                        <option value="51">51 ms (heavy smoothing)</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="lambdaThreshold">Adaptive Saccade Threshold (λ · σ):</label>
+                    <input type="number" id="lambdaThreshold" value="6.0" min="3.0" max="15.0" step="0.5">
+                </div>
+                <div class="form-help">
+                    <span>Higher λ (e.g. 6.0–8.0) prioritizes accuracy by rejecting noise; lower λ increases recall.</span>
+                </div>
+                <div class="form-row">
+                    <label for="minPeakVel">Min Peak Velocity (°/s):</label>
+                    <input type="number" id="minPeakVel" value="50" min="15" max="250" step="5">
+                </div>
+                <div class="form-row">
+                    <label for="minAmplitude">Min Saccade Amplitude (°):</label>
+                    <input type="number" id="minAmplitude" value="0.20" min="0.05" max="2.0" step="0.05">
+                </div>
+                <div class="modal-buttons">
+                    <button id="filterCancelBtn" class="btn btn-secondary">Cancel</button>
+                    <button id="filterApplyBtn" class="btn btn-primary">Apply & Re-detect</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Metrics Modal -->
+        <div id="metricsModal" class="modal hidden">
+            <div class="modal-card modal-large">
+                <div class="modal-header">
+                    <h3>Learning Curves (Test Set)</h3>
+                    <button id="metricsCloseBtn" class="btn-close">&times;</button>
+                </div>
+                <div class="metrics-canvas-wrap">
+                    <canvas id="metricsCanvas"></canvas>
+                </div>
+                <div id="metricsLegend" class="metrics-legend">
+                    <span class="legend-item"><span class="dot sac"></span> Saccade (Blue)</span>
+                    <span class="legend-item"><span class="dot blink"></span> Blink (Red)</span>
+                    <span class="legend-item"><span class="line conv"></span> Convergence threshold</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Convergence Alert Modal -->
+        <div id="alertModal" class="modal hidden">
+            <div class="modal-card">
+                <h3 class="success-title">🎉 Convergence Reached!</h3>
+                <p id="alertMessage">The on-device model has converged to your ground truth.</p>
+                <div class="modal-buttons">
+                    <button id="alertOkBtn" class="btn btn-primary">Continue</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="formats.js?v=3"></script>
+    <script src="app.js?v=3"></script>
+<script>
+    if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+            navigator.serviceWorker.register("./sw.js").catch(err => console.log("SW reg failed:", err));
+        });
+    }
+</script>
+</body>
+</html>

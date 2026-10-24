@@ -35,14 +35,27 @@ module folders to owners. All new code lives in this folder.
 
 | file | role |
 |---|---|
+| `MainActivity.kt` | main host activity serving the unified touch-optimized web UI with offline `WebViewAssetLoader`, native file picker and download bridges |
 | `Native.kt` | the single JNI entry point (1:1 with `offline_session_jni.cpp`) |
 | `Session.kt` | the labeling session state machine; Kotlin owns only the UI state, every label/edit decision lives in the C++ facade |
-| `LabelingScreen.kt` | the two-pass labeling UI (pass 1: tap + auto-scroll; pass 2: press-drag-lift with focused event centering [-50 ms, +50 ms]) |
+| `LabelingScreen.kt` | the standalone native labeling UI fallback |
 | `Kinematics.kt` | Savitzky-Golay cubic filter, derivative engine, robust noise estimation, and adaptive threshold detector |
 | `TraceView.kt` | the Canvas touch view (traces, label band, marks, zoom/pan) |
 | `TraceFiles.kt` | CSV + MATLAB v5 readers (`CsvParser`, `MatReader`) |
 | `Exporter.kt` / `MatWriter.kt` | the export writers (labels CSV, X/Y CSV, `.mat`, model `.bin` + `.json`) |
 | `ExportHelper.kt` | the SAF `CREATE_DOCUMENT` launcher + the `ACTION_SEND_MULTIPLE` share intent (FileProvider) |
+
+## Unified Web & Android UI Architecture
+
+The Android app shares the exact same modern, touch-optimized UI frontend as the web app:
+- **Single Source of Truth**: Gradle task `syncWebAssets` automatically packages the repo root frontend files (`index.html`, `style.css`, `app.js`, `formats.js`, `train_worker.js`, `web/`, `models/`, `logo_circle.png`) into `src/main/assets/web/`. Any UI or stylesheet change made to the web app is automatically and instantaneously present in the Android app upon compilation.
+- **Performance & Offline Integrity**: Hosted through a full-screen, hardware-accelerated Android `WebView` using `WebViewAssetLoader` and Cross-Origin Isolation headers (`COOP`/`COEP`). Works 100% offline with full WebAssembly, Web Worker background training, and high-DPI 60 fps Canvas rendering.
+- **Seamless Native Bridges**:
+  - `WebChromeClient.onShowFileChooser`: opens Android's native system file picker when clicking "Load MAT", "Load CSV" or "Select Model".
+  - `AndroidBridge.saveFile`: saves exported labels (`.json`), training datasets (`.csv`), or trained models directly to the Android `Downloads` folder.
+  - `Intent.ACTION_VIEW`: opens eye-trace files directly from external file managers or cloud storage apps.
+- **Circular Launcher Icon**: The application features a crisp circular crop of the U'n'Eye logo across all mipmap densities (adaptive icon + round launcher icon).
+
 | `TrainingScheduler.kt` / `TrainingWorker.kt` | the background training (WorkManager, charging/idle constraints) |
 | `ConvergenceStore.kt` / `ConvergenceFlag.kt` | the convergence history + the flag (bootstrap CI over the last rounds) |
 | `MetricsView.kt` | the learning-curve view (F1 / kappa per class vs reviewed seconds) |

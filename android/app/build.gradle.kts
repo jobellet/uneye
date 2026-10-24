@@ -49,6 +49,30 @@ android {
     }
 }
 
+val syncWebAssets by tasks.registering(Copy::class) {
+    description = "Synchronizes web app assets into Android assets for unified UI"
+    from(rootProject.file("..")) {
+        include("index.html")
+        include("style.css")
+        include("app.js")
+        include("formats.js")
+        include("train_worker.js")
+        include("sw.js")
+        include("logo.jpeg")
+        include("logo_circle.png")
+        include("web/**")
+        include("models/**")
+    }
+    into(file("src/main/assets/web"))
+}
+
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
+    dependsOn(syncWebAssets)
+}
+tasks.named("preBuild") {
+    dependsOn(syncWebAssets)
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
@@ -64,6 +88,8 @@ dependencies {
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
+
+    implementation("androidx.webkit:webkit:1.12.1")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

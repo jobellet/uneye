@@ -1,78 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fitsSystemWindows="true"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:background="#0F172A">
 
-    <TextView
+    <WebView
+        android:id="@+id/webView"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/main_title"
-        android:textSize="22sp"
-        android:textStyle="bold" />
+        android:layout_height="match_parent" />
 
-    <TextView
-        android:id="@+id/fileListText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="@string/no_file_picked"
-        android:textSize="16sp" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/openBtn"
-            android:layout_width="0dp"
-            android:layout_height="64dp"
-            android:layout_weight="1"
-            android:text="@string/open_mat"
-            android:textSize="16sp" />
-
-        <Button
-            android:id="@+id/openXBtn"
-            android:layout_width="0dp"
-            android:layout_height="64dp"
-            android:layout_weight="1"
-            android:text="@string/open_x"
-            android:textSize="16sp" />
-
-        <Button
-            android:id="@+id/openYBtn"
-            android:layout_width="0dp"
-            android:layout_height="64dp"
-            android:layout_weight="1"
-            android:text="@string/open_y"
-            android:textSize="16sp" />
-    </LinearLayout>
-
-    <Button
-        android:id="@+id/startLabelingBtn"
-        android:layout_width="match_parent"
-        android:layout_height="72dp"
-        android:layout_marginTop="12dp"
-        android:text="@string/start_labeling"
-        android:textSize="18sp" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:text="@string/known_files"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/knownFilesText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/no_known_files"
-        android:textSize="14sp" />
-
-</LinearLayout>
+</FrameLayout>

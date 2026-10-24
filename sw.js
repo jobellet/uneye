@@ -14,7 +14,8 @@ const ASSETS_TO_CACHE = [
     './web/uneye_train.wasm',
     './models/combined.bin',
     './models/combined.json',
-    './logo.jpeg'
+    './logo.jpeg',
+    './logo_circle.png'
 ];
 
 self.addEventListener('install', (event) => {

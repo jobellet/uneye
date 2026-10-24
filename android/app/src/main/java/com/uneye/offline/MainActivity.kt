@@ -1,87 +1,154 @@
 package com.uneye.offline
 
+import android.annotation.SuppressLint
+import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.OpenableColumns
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.EditText
-import android.widget.Spinner
-import android.widget.TextView
+import android.util.Base64
+import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import java.io.File
+import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
- * Entry screen (phase 2): the file list (Room) + the load dialog (sampling
- * rate, units/scale, pre-labeler). Opening the app on a CSV / MAT file (from
- * a file manager) lands here with the file pre-filled.
+ * Main Activity hosting the unified, touch-optimized U'n'Eye UI.
+ *
+ * UI frontend assets (HTML, CSS, JS, WASM, Web Worker) are shared directly
+ * with the web app and packaged into Android assets by Gradle `syncWebAssets`.
+ * This guarantees 100% visual and functional parity: any UI change in web
+ * is automatically reflected in Android upon build.
+ *
+ * Native bridges:
+ *  - Native document file picker via WebChromeClient.onShowFileChooser
+ *  - Direct file saving to Android Downloads via AndroidBridge.saveFile
+ *  - External file intent opening (MAT / CSV / JSON) via handleIncomingIntent
+ *  - Full offline capability with WebViewAssetLoader and COOP/COEP headers
  */
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var app: UneyeApp
-    private lateinit var fileListText: TextView
-    private lateinit var openBtn: Button
-    private lateinit var openXBtn: Button
-    private lateinit var openYBtn: Button
+    private lateinit var webView: WebView
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
 
-    private var pendingX: Uri? = null
-    private var pendingY: Uri? = null
-    private var pendingMat: Uri? = null
-    private var pendingModelUri: Uri? = null
-    private var pendingLabelsUri: Uri? = null
-    private var modelEditRef: EditText? = null
-    private var labelsEditRef: EditText? = null
-
-    private val pickModelFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@registerForActivityResult
-        pendingModelUri = uri
-        modelEditRef?.setText(displayName(uri))
-    }
-
-    private val pickLabelsFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@registerForActivityResult
-        pendingLabelsUri = uri
-        labelsEditRef?.setText(displayName(uri))
-    }
-
-    private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@registerForActivityResult
-        val name = displayName(uri).lowercase()
-        when {
-            name.endsWith(".mat") -> pendingMat = uri
-            name.contains("_x") || name.endsWith("x.csv") -> pendingX = uri
-            name.contains("_y") || name.endsWith("y.csv") -> pendingY = uri
-            else -> pendingX = uri   // first of a pair; the user picks the second
+    private val filePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uris: Array<Uri>? = if (result.resultCode == RESULT_OK) {
+            val data = result.data
+            if (data?.clipData != null) {
+                val count = data.clipData!!.itemCount
+                Array(count) { i -> data.clipData!!.getItemAt(i).uri }
+            } else if (data?.data != null) {
+                arrayOf(data.data!!)
+            } else {
+                null
+            }
+        } else {
+            null
         }
-        updatePicked()
+        fileChooserCallback?.onReceiveValue(uris)
+        fileChooserCallback = null
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        app = application as UneyeApp
         setContentView(R.layout.activity_main)
-        fileListText = findViewById(R.id.fileListText)
-        openBtn = findViewById(R.id.openBtn)
-        openXBtn = findViewById(R.id.openXBtn)
-        openYBtn = findViewById(R.id.openYBtn)
 
-        openBtn.setOnClickListener { if (pendingMat != null) showLoadDialog(pendingMat!!, null) else pickFile.launch(arrayOf("text/*", "application/octet-stream")) }
-        openXBtn.setOnClickListener { pickFile.launch(arrayOf("text/*", "application/octet-stream")) }
-        openYBtn.setOnClickListener { pickFile.launch(arrayOf("text/*", "application/octet-stream")) }
-        findViewById<Button>(R.id.startLabelingBtn).setOnClickListener {
-            startActivity(Intent(this, LabelingScreen::class.java))
+        webView = findViewById(R.id.webView)
+
+        val assetLoader = WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
+
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            allowFileAccess = true
+            allowContentAccess = true
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            cacheMode = WebSettings.LOAD_DEFAULT
+            mediaPlaybackRequiresUserGesture = false
         }
 
+        webView.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest
+            ): WebResourceResponse? {
+                val response = assetLoader.shouldInterceptRequest(request.url) ?: return null
+                val headers = response.responseHeaders?.toMutableMap() ?: mutableMapOf()
+                headers["Cross-Origin-Opener-Policy"] = "same-origin"
+                headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+                return WebResourceResponse(
+                    response.mimeType,
+                    response.encoding,
+                    response.statusCode,
+                    response.reasonPhrase,
+                    headers,
+                    response.data
+                )
+            }
+        }
+
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                view: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = filePathCallback
+                val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                    type = "*/*"
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                }
+                try {
+                    filePickerLauncher.launch(intent)
+                } catch (e: Exception) {
+                    fileChooserCallback?.onReceiveValue(null)
+                    fileChooserCallback = null
+                    return false
+                }
+                return true
+            }
+        }
+
+        webView.addJavascriptInterface(AndroidBridge(this), "AndroidBridge")
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+
+        webView.loadUrl("https://appassets.androidplatform.net/assets/web/index.html")
+
         handleIncomingIntent(intent)
-        refreshFileList()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -91,19 +158,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleIncomingIntent(intent: Intent?) {
         val uri = intent?.data ?: return
-        val name = displayName(uri).lowercase()
-        if (name.endsWith(".mat")) pendingMat = uri
-        else pendingX = uri
-        updatePicked()
-    }
-
-    private fun updatePicked() {
-        val parts = mutableListOf<String>()
-        pendingMat?.let { parts.add("MAT: ${displayName(it)}") }
-        pendingX?.let { parts.add("X: ${displayName(it)}") }
-        pendingY?.let { parts.add("Y: ${displayName(it)}") }
-        fileListText.text = if (parts.isEmpty()) getString(R.string.no_file_picked)
-            else parts.joinToString("\n")
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val name = displayName(uri)
+                val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
+                val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                withContext(Dispatchers.Main) {
+                    val js = "if (window.loadFromAndroid) window.loadFromAndroid('${name.replace("'", "\\'")}', '$base64');"
+                    webView.evaluateJavascript(js, null)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Failed to load incoming file: $uri", e)
+            }
+        }
     }
 
     private fun displayName(uri: Uri): String = contentResolver.query(uri, null, null, null, null)?.use { c ->
@@ -111,155 +178,45 @@ class MainActivity : AppCompatActivity() {
         if (i >= 0 && c.moveToFirst()) c.getString(i) else uri.lastPathSegment ?: uri.toString()
     } ?: (uri.lastPathSegment ?: uri.toString())
 
-    // --- load dialog ---------------------------------------------------------------
-
-    private fun showLoadDialog(mat: Uri, y: Uri?) {
-        val dialog = layoutInflater.inflate(R.layout.dialog_load, null)
-        val rateEdit = dialog.findViewById<EditText>(R.id.rateEdit)
-        val unitEdit = dialog.findViewById<EditText>(R.id.unitEdit)
-        val preSpinner = dialog.findViewById<Spinner>(R.id.preSpinner)
-        val modelEdit = dialog.findViewById<EditText>(R.id.modelEdit)
-        val browseModelBtn = dialog.findViewById<Button>(R.id.browseModelBtn)
-        val labelsEdit = dialog.findViewById<EditText>(R.id.labelsEdit)
-        val browseLabelsBtn = dialog.findViewById<Button>(R.id.browseLabelsBtn)
-        val estimateBox = dialog.findViewById<android.widget.CheckBox>(R.id.estimateBox)
-
-        modelEditRef = modelEdit
-        labelsEditRef = labelsEdit
-        pendingModelUri = null
-        pendingLabelsUri = null
-
-        browseModelBtn.setOnClickListener {
-            pickModelFile.launch(arrayOf("*/*", "application/octet-stream"))
-        }
-        browseLabelsBtn.setOnClickListener {
-            pickLabelsFile.launch(arrayOf("*/*", "application/octet-stream", "application/json", "text/*"))
-        }
-
-        preSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-            listOf(
-                getString(R.string.prelabeler_hmm),
-                getString(R.string.prelabeler_shipped),
-                getString(R.string.prelabeler_last_trained),
-                getString(R.string.prelabeler_none)
-            ))
-        AlertDialog.Builder(this)
-            .setTitle(R.string.load_dialog_title)
-            .setView(dialog)
-            .setPositiveButton(R.string.load) { _, _ ->
-                val rate = rateEdit.text.toString().toDoubleOrNull() ?: 1000.0
-                val unit = unitEdit.text.toString().toDoubleOrNull() ?: 1.0
-                val prelabeler = when (preSpinner.selectedItemPosition) {
-                    0 -> Native.PRELABELER_HMM
-                    1 -> Native.PRELABELER_SHIPPED_MODEL
-                    2 -> Native.PRELABELER_LAST_TRAINED
-                    else -> Native.PRELABELER_NONE
-                }
-                val modelBin = modelEdit.text.toString().trim()
-                loadFile(mat, y, rate, unit, estimateBox.isChecked, prelabeler, modelBin, pendingModelUri, pendingLabelsUri)
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun loadFile(mat: Uri, y: Uri?, rateHz: Double, degPerUnit: Double, estimateScale: Boolean,
-                         prelabeler: Int, modelBin: String, modelUri: Uri?, labelsUri: Uri?) {
-        val session = app.session
-        Toast.makeText(this, R.string.loading, Toast.LENGTH_SHORT).show()
-        lifecycleScope.launch {
-            val trace = withContext(Dispatchers.IO) {
-                try {
-                    if (y == null) {
-                        contentResolver.openInputStream(mat)?.use { TraceFiles.read(it, displayName(mat)) }
-                    } else {
-                        val xText = contentResolver.openInputStream(pendingX!!)?.use { it.readBytes().toString(Charsets.UTF_8) }
-                        val yText = contentResolver.openInputStream(y)?.use { it.readBytes().toString(Charsets.UTF_8) }
-                        if (xText != null && yText != null) TraceFiles.readCsvPair(xText, yText) else null
+    fun saveFileToDownloads(filename: String, base64Content: String, mimeType: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val bytes = Base64.decode(base64Content, Base64.DEFAULT)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                        put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                     }
-                } catch (e: Exception) {
-                    null
-                }
-            }
-            if (trace == null) {
-                Toast.makeText(this@MainActivity, R.string.load_failed, Toast.LENGTH_LONG).show()
-                return@launch
-            }
-            val modelPath = withContext(Dispatchers.IO) {
-                if (modelUri != null) {
-                    val tmp = File(cacheDir, "chosen_model.bin")
-                    contentResolver.openInputStream(modelUri)?.use { input ->
-                        tmp.outputStream().use { input.copyTo(it) }
-                    }
-                    tmp.absolutePath
-                } else if (prelabeler == Native.PRELABELER_SHIPPED_MODEL && modelBin.isEmpty()) {
-                    app.shippedModelPath()
+                    val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    uri?.let { contentResolver.openOutputStream(it)?.use { stream -> stream.write(bytes) } }
                 } else {
-                    modelBin
+                    val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    val file = File(dir, filename)
+                    file.writeBytes(bytes)
                 }
-            }
-            var result: Pair<Boolean, String>? = null
-            session.load(trace, rateHz, degPerUnit, estimateScale, prelabeler, modelPath,
-                recordingName = displayName(mat).substringBeforeLast('.')) { ok, err ->
-                result = ok to err
-            }
-            // session.load posts onDone on the main thread; wait for it
-            while (result == null) kotlinx.coroutines.delay(20)
-            val (ok, err) = result!!
-            if (ok) {
-                // If previous labels were selected, import them into the session
-                if (labelsUri != null) {
-                    withContext(Dispatchers.IO) {
-                        try {
-                            val lName = displayName(labelsUri).lowercase()
-                            if (lName.endsWith(".mat")) {
-                                val b = contentResolver.openInputStream(labelsUri)?.use { it.readBytes() }
-                                if (b != null) {
-                                    val v = TraceFiles.readAll(b)
-                                    val arr = v["Sacc"] ?: v["labels"] ?: v["L"]
-                                    if (arr != null) session.importLabelsMatrix(arr)
-                                }
-                            } else if (lName.endsWith(".bin")) {
-                                val tmp = File(cacheDir, "chosen_labels.bin")
-                                contentResolver.openInputStream(labelsUri)?.use { input ->
-                                    tmp.outputStream().use { input.copyTo(it) }
-                                }
-                                session.loadLabels(tmp.absolutePath)
-                            } else {
-                                val txt = contentResolver.openInputStream(labelsUri)?.use { it.readBytes().toString(Charsets.UTF_8) }
-                                if (txt != null) session.importLabelsText(txt)
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.e("MainActivity", "Failed to import previous labels", e)
-                        }
-                    }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Saved $filename to Downloads", Toast.LENGTH_SHORT).show()
                 }
-
-                // the convergence test set is chosen per trial before pass 1
-                session.chooseTestSet(5, 2)
-                val dao = FileListDb.get(this@MainActivity).traceFiles()
-                dao.insert(TraceFileEntity(
-                    uri = (pendingMat ?: pendingX!!).toString(),
-                    yUri = y?.toString() ?: "",
-                    displayName = displayName(pendingMat ?: pendingX!!),
-                    rateHz = rateHz,
-                    degPerUnit = session.degPerUnit,
-                    labelsPath = app.labelsPathFor(session, 0),
-                    modelPath = "",
-                ))
-                refreshFileList()
-                startActivity(Intent(this@MainActivity, LabelingScreen::class.java))
-            } else {
-                Toast.makeText(this@MainActivity, getString(R.string.load_failed_arg, err), Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Save error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
 
-    private fun refreshFileList() {
-        lifecycleScope.launch {
-            val files = withContext(Dispatchers.IO) { FileListDb.get(this@MainActivity).traceFiles().all() }
-            val list = findViewById<TextView>(R.id.knownFilesText)
-            list.text = if (files.isEmpty()) getString(R.string.no_known_files)
-            else files.joinToString("\n") { "${it.displayName}  (${it.rateHz.toInt()} Hz, labels: ${it.labelsPath})" }
+    class AndroidBridge(private val activity: MainActivity) {
+        @JavascriptInterface
+        fun saveFile(filename: String, base64Content: String, mimeType: String) {
+            activity.saveFileToDownloads(filename, base64Content, mimeType)
+        }
+
+        @JavascriptInterface
+        fun showToast(message: String) {
+            activity.runOnUiThread {
+                Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
+            }
         }
     }
 }

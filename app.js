@@ -2500,6 +2500,31 @@
     }
 
     function downloadFile(filename, content, type) {
+        if (window.AndroidBridge && typeof window.AndroidBridge.saveFile === 'function') {
+            try {
+                let base64 = '';
+                if (typeof content === 'string') {
+                    base64 = btoa(unescape(encodeURIComponent(content)));
+                } else if (content instanceof ArrayBuffer) {
+                    const bytes = new Uint8Array(content);
+                    let binary = '';
+                    const len = bytes.byteLength;
+                    for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+                    base64 = btoa(binary);
+                } else if (content instanceof Uint8Array) {
+                    let binary = '';
+                    const len = content.byteLength;
+                    for (let i = 0; i < len; i++) binary += String.fromCharCode(content[i]);
+                    base64 = btoa(binary);
+                }
+                if (base64) {
+                    window.AndroidBridge.saveFile(filename, base64, type || 'application/octet-stream');
+                    return;
+                }
+            } catch (e) {
+                console.warn('AndroidBridge.saveFile error, falling back to browser blob:', e);
+            }
+        }
         const blob = new Blob([content], { type: `${type};charset=utf-8;` });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -2510,6 +2535,55 @@
         document.body.removeChild(link);
         setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
+
+    window.loadFromAndroid = function(filename, base64) {
+        try {
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            const lower = filename.toLowerCase();
+            if (lower.endsWith('.mat')) {
+                const r = UnEyeFormats.readMatFile(bytes.buffer);
+                if (r && r.trials) {
+                    loadDataset(r.trials, r.fs || 1000.0, 1.0, 'hmm');
+                    updateStatus();
+                    render();
+                }
+            } else if (lower.endsWith('.json')) {
+                const text = new TextDecoder().decode(bytes);
+                applyLabelsJson(JSON.parse(text));
+                updateStatus();
+                render();
+            } else if (lower.endsWith('.csv') || lower.endsWith('.txt')) {
+                const text = new TextDecoder().decode(bytes);
+                const rows = parseCSV(text);
+                if (rows.length > 0) {
+                    const nTrials = rows.length;
+                    const nSamples = rows[0].length;
+                    const trials = [];
+                    for (let t = 0; t < nTrials; t++) {
+                        const x = new Float32Array(nSamples);
+                        const y = new Float32Array(nSamples);
+                        const valid = new Uint8Array(nSamples);
+                        for (let s = 0; s < nSamples; s++) {
+                            const v = rows[t][s];
+                            x[s] = isNaN(v) ? 0 : v;
+                            y[s] = 0;
+                            valid[s] = isNaN(v) ? 0 : 1;
+                        }
+                        trials.push({ x, y, valid });
+                    }
+                    loadDataset(trials, 1000.0, 1.0, 'hmm');
+                    updateStatus();
+                    render();
+                }
+            }
+        } catch (e) {
+            console.error("loadFromAndroid failed:", e);
+        }
+    };
 
     // --- Setup UI Listeners ---
     function setActiveClass(cls) {
