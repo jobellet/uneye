@@ -485,16 +485,65 @@
         state.fromSample = f; state.toSample = e;
     }
 
-    // Reviewed = displayed in pass 1 (scanned) AND without a point mark still waiting for its refinement in pass 2.
+    function mergeRangeList(ranges, maxLen) {
+        const clean = [];
+        for (const r of (ranges || [])) {
+            if (!Array.isArray(r) || r.length < 2) continue;
+            const s = Math.max(0, Math.min(maxLen - 1, Math.round(r[0])));
+            const e = Math.max(0, Math.min(maxLen - 1, Math.round(r[1])));
+            if (s <= e) clean.push([s, e]);
+        }
+        clean.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+        const merged = [];
+        for (const r of clean) {
+            const prev = merged[merged.length - 1];
+            if (prev && r[0] <= prev[1] + 1) {
+                prev[1] = Math.max(prev[1], r[1]);
+            } else {
+                merged.push([r[0], r[1]]);
+            }
+        }
+        return merged;
+    }
+
+    // Merge any two overlapping (or touching) expert events of the same class into one single event
+    function mergeOverlappingEvents(trialIdx) {
+        const evs = state.expertEvents[trialIdx];
+        if (!evs || evs.length === 0) return;
+        evs.sort((a, b) => a.onset - b.onset || a.offset - b.offset);
+        const merged = [];
+        for (const e of evs) {
+            let didMerge = false;
+            for (let i = merged.length - 1; i >= 0; i--) {
+                if (merged[i].cls === e.cls && e.onset <= merged[i].offset) {
+                    merged[i].onset = Math.min(merged[i].onset, e.onset);
+                    merged[i].offset = Math.max(merged[i].offset, e.offset);
+                    merged[i].fromPrelabel = Boolean(merged[i].fromPrelabel && e.fromPrelabel);
+                    didMerge = true;
+                    break;
+                }
+            }
+            if (!didMerge) {
+                merged.push({ onset: e.onset, offset: e.offset, cls: e.cls, fromPrelabel: Boolean(e.fromPrelabel) });
+            }
+        }
+        state.expertEvents[trialIdx] = merged;
+        if (state.pointMarks[trialIdx]) {
+            state.pointMarks[trialIdx] = state.pointMarks[trialIdx].filter(
+                m => !merged.some(e => e.onset <= m.at && m.at <= e.offset)
+            );
+        }
+    }
+
+    // Reviewed = displayed in pass 1 (scanned) AND without a point mark still waiting for its refinement in pass 2,
+    // plus any explicitly refined/accepted expert event intervals.
     function recomputeReviewed(t, notify) {
         const marks = state.pointMarks[t] || [];
-        const ok = (state.scanWins[t] || []).filter(([f, e]) => !marks.some(m => m.at >= f && m.at <= e)).map(r => r.slice()).sort((a, b) => a[0] - b[0]);
-        const merged = [];
-        for (const r of ok) {
-            const prev = merged[merged.length - 1];
-            if (prev && r[0] <= prev[1] + 1) prev[1] = Math.max(prev[1], r[1]); else merged.push(r);
+        const ok = (state.scanWins[t] || []).filter(([f, e]) => !marks.some(m => m.at >= f && m.at <= e)).map(r => r.slice());
+        for (const ev of (state.expertEvents[t] || [])) {
+            ok.push([ev.onset, ev.offset]);
         }
-        state.reviewedRanges[t] = merged;
+        state.reviewedRanges[t] = mergeRangeList(ok, trialLenOf(t));
         if (notify) {
             saveToIndexedDB();
             const totRev = totalReviewedSeconds();
@@ -748,18 +797,35 @@
         offset = Math.min(trialLenOf(trialIdx) - 1, offset);
         if (onset > offset) return false;
 
-        // Remove point mark closest to `at`
-        const pmIdx = state.pointMarks[trialIdx].findIndex(m => Math.abs(m.at - at) <= 35);
-        if (pmIdx !== -1) {
-            state.pointMarks[trialIdx].splice(pmIdx, 1);
+        // Remove any point mark inside [onset, offset] or closest to `at`
+        state.pointMarks[trialIdx] = (state.pointMarks[trialIdx] || []).filter(
+            m => !(m.at >= onset && m.at <= offset) && Math.abs(m.at - at) > 35
+        );
+
+        if (state.pass === PASS_TWO) {
+            // In Pass 2, update the event covering `at`, then merge any same-class overlaps
+            state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => !(e.onset <= at && at <= e.offset));
+        } else {
+            // In Pass 1, only remove overlapping events of a DIFFERENT class covering `at`; same-class overlapping events merge!
+            state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => !(e.cls !== cls && e.onset <= at && at <= e.offset));
         }
 
-        // Remove any previous expert event covering `at`
-        state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => !(e.onset <= at && at <= e.offset));
-
-        // Add refined event
+        // Add refined event and merge any overlapping events of the same class
         state.expertEvents[trialIdx].push({ onset, offset, cls, fromPrelabel: false });
-        state.expertEvents[trialIdx].sort((a, b) => a.onset - b.onset);
+        mergeOverlappingEvents(trialIdx);
+
+        if (state.pass === PASS_ONE && state.scanWins[trialIdx]) {
+            let [f, e] = gridWindow(trialIdx, state.winIdx);
+            if (state.fromSample <= f && state.toSample >= e) {
+                f = Math.max(0, state.fromSample);
+                e = Math.min(trialLenOf(trialIdx) - 1, state.toSample);
+            }
+            f = Math.min(f, onset);
+            e = Math.max(e, offset);
+            if (!state.scanWins[trialIdx].some(r => r[0] === f && r[1] === e)) {
+                state.scanWins[trialIdx].push([f, e]);
+            }
+        }
 
         syncRenderedLabels(trialIdx);
         recomputeReviewed(trialIdx, true);
@@ -788,6 +854,9 @@
         saveUndo(trialIdx);
         state.pointMarks[trialIdx] = state.pointMarks[trialIdx].filter(m => Math.abs(m.at - at) > 25);
         state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => !(e.onset <= at && at <= e.offset));
+        if (state.pass === PASS_TWO && state.prelabels[trialIdx]) {
+            state.prelabels[trialIdx] = state.prelabels[trialIdx].filter(p => !(p.onset <= at && at <= p.offset) && Math.abs(p.onset - at) > 25);
+        }
         syncRenderedLabels(trialIdx);
         recomputeReviewed(trialIdx, true);
     }
@@ -870,8 +939,26 @@
         });
     }
 
-    // Pass 2 only shows the marks that lie in windows displayed in pass 1
-    function trialQueue(t) { return state.pointMarks[t].filter(m => inScanned(t, m.at)).sort((a, b) => a.at - b.at); }
+    // Pass 2 shows all events (both pending point marks and refined/accepted expert events) that lie in windows displayed in pass 1
+    function trialQueue(t) {
+        const items = [];
+        const exps = state.expertEvents[t] || [];
+        for (let i = 0; i < exps.length; i++) {
+            const e = exps[i];
+            const mid = Math.round((e.onset + e.offset) / 2);
+            if (inScanned(t, mid) || inScanned(t, e.onset) || inScanned(t, e.offset)) {
+                items.push({ at: mid, onset: e.onset, offset: e.offset, cls: e.cls, isExpert: true });
+            }
+        }
+        const pms = state.pointMarks[t] || [];
+        for (const m of pms) {
+            if (!inScanned(t, m.at)) continue;
+            if (exps.some(e => e.onset <= m.at && m.at <= e.offset)) continue;
+            items.push({ at: m.at, cls: m.cls, isExpert: false });
+        }
+        items.sort((a, b) => a.at - b.at);
+        return items;
+    }
     function buildRefineQueue() { state.refineQueue = trialQueue(state.currentTrialIdx); }
     function findTrialWithEvents(from, dir) {
         for (let t = from + dir; t >= 0 && t < state.trials.length; t += dir) if (trialQueue(t).length > 0) return t;
@@ -885,15 +972,16 @@
     }
 
     /**
-     * Pass 2: Always center the window on one labeled time from Pass 1.
-     * One event at a time.
-     * Window: -50 ms before event (or putative onset) to +50 ms after event (or putative offset).
+     * Pass 2: Always center the window on one labeled event at a time, zoomed in time.
+     * Window: centered on [putativeOnset, putativeOffset] with ±50 ms padding around the event.
      */
     function focusCurrentMark() {
         const trialIdx = state.currentTrialIdx;
         if (state.refineQueue.length === 0) {
             const nt = findTrialWithEvents(trialIdx, 1);
             if (nt >= 0) { enterTrialForRefine(nt, false); focusCurrentMark(); return; }
+            const pt = findTrialWithEvents(trialIdx, -1);
+            if (pt >= 0) { enterTrialForRefine(pt, true); focusCurrentMark(); return; }
             state.currentMarkAt = -1;
             state.currentPutativeOnset = -1;
             state.currentPutativeOffset = -1;
@@ -908,6 +996,7 @@
             // end of this trial: the next event is the first one of the next trial that has some
             const nt = findTrialWithEvents(trialIdx, 1);
             if (nt >= 0) { enterTrialForRefine(nt, false); focusCurrentMark(); return; }
+            state.refineIdx = state.refineQueue.length - 1;
             state.currentMarkAt = -1;
             if (elements.eventCounterBadge) {
                 elements.eventCounterBadge.textContent = "All Reviewed ✓";
@@ -922,42 +1011,50 @@
         state.activeClass = mark.cls;
 
         // Find putative onset and offset:
-        let putativeOnset = mark.at;
-        let putativeOffset = mark.at;
+        let putativeOnset = mark.onset !== undefined ? mark.onset : mark.at;
+        let putativeOffset = mark.offset !== undefined ? mark.offset : mark.at;
 
-        // 1) Check existing expert event
-        const exp = state.expertEvents[trialIdx].find(e => 
-            (e.onset <= mark.at && mark.at <= e.offset) || 
-            Math.abs(e.onset - mark.at) <= 30 || 
-            Math.abs(e.offset - mark.at) <= 30
-        );
+        if (!mark.isExpert) {
+            // 1) Check existing expert event
+            const exp = state.expertEvents[trialIdx].find(e => 
+                (e.onset <= mark.at && mark.at <= e.offset) || 
+                Math.abs(e.onset - mark.at) <= 30 || 
+                Math.abs(e.offset - mark.at) <= 30
+            );
 
-        // 2) Check prelabel covering or closest to mark.at
-        const pre = state.prelabels[trialIdx].find(p => 
-            (p.onset <= mark.at && mark.at <= p.offset) || 
-            Math.abs(p.onset - mark.at) <= 40 || 
-            Math.abs(p.offset - mark.at) <= 40
-        );
+            // 2) Check prelabel covering or closest to mark.at
+            const pre = state.prelabels[trialIdx].find(p => 
+                (p.onset <= mark.at && mark.at <= p.offset) || 
+                Math.abs(p.onset - mark.at) <= 40 || 
+                Math.abs(p.offset - mark.at) <= 40
+            );
 
-        if (exp) {
-            putativeOnset = exp.onset;
-            putativeOffset = exp.offset;
-            state.activeClass = exp.cls;
-        } else if (pre) {
-            putativeOnset = pre.onset;
-            putativeOffset = pre.offset;
-            state.activeClass = pre.cls;
+            if (exp) {
+                putativeOnset = exp.onset;
+                putativeOffset = exp.offset;
+                state.activeClass = exp.cls;
+            } else if (pre) {
+                putativeOnset = pre.onset;
+                putativeOffset = pre.offset;
+                state.activeClass = pre.cls;
+            } else {
+                const halfDef = Math.max(5, Math.round(15.0 * (state.rateHz / 1000.0)));
+                putativeOnset = Math.max(0, mark.at - halfDef);
+                putativeOffset = Math.min(curLen() - 1, mark.at + halfDef);
+            }
         }
 
         state.currentPutativeOnset = putativeOnset;
         state.currentPutativeOffset = putativeOffset;
 
-        // Window: -50 ms before event (or putative onset) to +50 ms after event (or putative offset)
+        // Zoom in time and center on the event: ±50 ms padding around [putativeOnset, putativeOffset]
         const mult = state.zoomMultiplier || 1.0;
         const pad50ms = Math.round(50.0 * (state.rateHz / 1000.0) * mult);
+        const evCenter = Math.round((putativeOnset + putativeOffset) / 2);
+        const halfSpan = Math.max(pad50ms, Math.round((putativeOffset - putativeOnset) / 2) + pad50ms);
 
-        state.fromSample = Math.max(0, putativeOnset - pad50ms);
-        state.toSample = Math.min(curLen() - 1, putativeOffset + pad50ms);
+        state.fromSample = Math.max(0, evCenter - halfSpan);
+        state.toSample = Math.min(curLen() - 1, evCenter + halfSpan);
 
         if (elements.eventCounterBadge) {
             const clsName = state.activeClass === CLS_SACCADE ? "Saccade" : "Blink";
@@ -990,6 +1087,7 @@
     }
 
     function prevEpoch() {
+        scanCurrentWindow();
         const t = state.currentTrialIdx;
         const n = trialLenOf(t);
         const w = winSamples();
@@ -1547,9 +1645,12 @@
                     const offset = Math.max(state.dragStartSample, state.dragCurrentSample);
                     if (offset - onset >= 5) {
                         const markAt = state.currentMarkAt >= 0 ? state.currentMarkAt : state.dragStartSample;
+                        const prevLen = state.refineQueue.length;
                         refineMark(state.currentTrialIdx, markAt, onset, offset, state.activeClass);
                         if (state.pass === PASS_TWO) {
-                            state.refineIdx++;
+                            buildRefineQueue();
+                            const newLen = state.refineQueue.length;
+                            state.refineIdx = newLen < prevLen ? Math.min(state.refineIdx + 1, newLen) : state.refineIdx + 1;
                             state.zoomMultiplier = 1.0;
                             focusCurrentMark();
                         } else if (state.pass === PASS_ONE) {
@@ -1627,8 +1728,11 @@
             if (state.pass === PASS_TWO && state.currentMarkAt >= 0) {
                 const onset = state.currentPutativeOnset >= 0 ? state.currentPutativeOnset : sample - 15;
                 const offset = state.currentPutativeOffset >= 0 ? state.currentPutativeOffset : sample + 15;
+                const prevLen = state.refineQueue.length;
                 refineMark(state.currentTrialIdx, state.currentMarkAt, onset, offset, state.activeClass);
-                state.refineIdx++;
+                buildRefineQueue();
+                const newLen = state.refineQueue.length;
+                state.refineIdx = newLen < prevLen ? Math.min(state.refineIdx + 1, newLen) : state.refineIdx + 1;
                 state.zoomMultiplier = 1.0;
                 focusCurrentMark();
                 updateStatus();
@@ -2278,15 +2382,18 @@
             alert('Unsupported file type ".' + ext + '". Open a .csv, .txt, .mat, .npz or .h5 file (or a saved labels .json file).');
             return;
         }
+        const modalAlreadyOpen = elements.loadModal && !elements.loadModal.classList.contains('hidden');
         pendingFileToLoad = file;
-        pendingModelFile = null;
-        pendingLabelsFile = null;
         elements.modalFileName.textContent = file.name;
-        if (elements.modalModelFileName) elements.modalModelFileName.textContent = 'No file chosen';
-        if (elements.modalLabelsFileName) elements.modalLabelsFileName.textContent = '(none)';
-        if (elements.localModelRow) elements.localModelRow.classList.add('hidden');
-        if (elements.initialModelSelect) elements.initialModelSelect.value = 'pretrained';
-        elements.loadModal.classList.remove('hidden');
+        if (!modalAlreadyOpen) {
+            pendingModelFile = null;
+            pendingLabelsFile = null;
+            if (elements.modalModelFileName) elements.modalModelFileName.textContent = 'No file chosen';
+            if (elements.modalLabelsFileName) elements.modalLabelsFileName.textContent = '(none)';
+            if (elements.localModelRow) elements.localModelRow.classList.add('hidden');
+            if (elements.initialModelSelect) elements.initialModelSelect.value = 'pretrained';
+            elements.loadModal.classList.remove('hidden');
+        }
     }
 
     async function confirmLoadFile() {
@@ -2322,10 +2429,11 @@
                     const r = await UnEyeFormats.readTrialsFile(file.name, e.target.result, loadH5Lib);
                     elements.loadModal.classList.add('hidden');
                     loadDataset(r.trials, r.fs || rate, scale, prelabeler);
+                    if (r.labels) {
+                        applyLoadedLabels(r.labels);
+                    }
                     if (pendingLabelsFile) {
                         await loadPreviousLabels(pendingLabelsFile);
-                    } else if (r.labels) {
-                        applyLoadedLabels(r.labels);
                     }
                     const lens = r.trials.map(t => t.x.length);
                     console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples${r.fs ? ', ' + r.fs + ' Hz' : ''}${r.labels ? ', with labels' : ''}`);
@@ -2392,28 +2500,43 @@
         return window.h5wasm;
     }
 
-    // labels read from a file (Int8Array per trial: 0 fixation, 1 saccade, 2 blink, -1 not reviewed) -> reviewed ranges + expert events
+    // labels read from a file (Int8Array per trial: 0 fixation, 1 saccade, 2 blink, -1 not reviewed) -> merge into reviewed ranges + expert events
     function applyLoadedLabels(labels) {
         for (let t = 0; t < state.trials.length; t++) {
             const L = labels[t];
             if (!L) continue;
             const n = state.trials[t].x.length, reviewed = [], events = [];
-            for (let i = 0; i < n;) {
+            for (let i = 0; i < n && i < L.length;) {
                 if (!(L[i] >= 0)) { i++; continue; }
-                let j = i; while (j + 1 < n && L[j + 1] >= 0) j++;
+                let j = i; while (j + 1 < n && j + 1 < L.length && L[j + 1] >= 0) j++;
                 reviewed.push([i, j]); i = j + 1;
             }
-            for (let i = 0; i < n;) {
+            for (let i = 0; i < n && i < L.length;) {
                 const c = L[i];
                 if (c !== 1 && c !== 2) { i++; continue; }
-                let j = i; while (j + 1 < n && L[j + 1] === c) j++;
+                let j = i; while (j + 1 < n && j + 1 < L.length && L[j + 1] === c) j++;
                 events.push({ onset: i, offset: j, cls: c, fromPrelabel: false }); i = j + 1;
             }
-            state.scanWins[t] = reviewed.map(r => r.slice()); state.expertEvents[t] = events; state.pointMarks[t] = []; recomputeReviewed(t, false);
+            if (reviewed.length === 0 && events.length === 0) continue;
+
+            // Merge loaded reviewed windows with existing scanWins
+            state.scanWins[t] = mergeRangeList([...(state.scanWins[t] || []), ...reviewed, ...events.map(e => [e.onset, e.offset])], n);
+            // Append loaded events and merge overlapping events of the same class
+            state.expertEvents[t] = [...(state.expertEvents[t] || []), ...events];
+            mergeOverlappingEvents(t);
+            // Remove any pending point marks inside the loaded reviewed ranges
+            if (state.pointMarks[t] && reviewed.length > 0) {
+                state.pointMarks[t] = state.pointMarks[t].filter(
+                    m => !reviewed.some(([s, e]) => m.at >= s && m.at <= e)
+                );
+            }
+            recomputeReviewed(t, false);
             syncRenderedLabels(t);
         }
+        if (state.pass === PASS_TWO) { buildRefineQueue(); state.refineIdx = 0; focusCurrentMark(); }
         updateStatus();
         render();
+        saveToIndexedDB();
     }
 
     // positions (raw, so that the index of a label is the index of the sample in the file) and labels (-1 = not reviewed) in .npz / .mat / .h5
@@ -2437,6 +2560,10 @@
     // --- Save / load the manual labels (a session file: marks, refined events, windows seen) ---
     function saveLabelsJson() {
         if (state.trials.length === 0) return;
+        for (let t = 0; t < state.trials.length; t++) {
+            mergeOverlappingEvents(t);
+            recomputeReviewed(t, false);
+        }
         const payload = {
             format: 'uneye-labels-v1',
             saved: new Date().toISOString(),
@@ -2459,11 +2586,10 @@
     }
 
     function loadLabelsFile(file) {
-        const r = new FileReader();
-        r.onload = e => { try { applyLabelsJson(JSON.parse(e.target.result)); } catch (err) { alert('Cannot read the labels file: ' + err.message); } };
-        r.readAsText(file);
+        loadPreviousLabels(file);
     }
 
+    // Merge / append loaded session labels with any labels already in the current session
     function applyLabelsJson(obj) {
         if (!obj || obj.format !== 'uneye-labels-v1' || !Array.isArray(obj.trials)) throw new Error('not a U\'n\'Eye labels file');
         if (state.trials.length === 0) throw new Error('open the eye traces first, then load the labels');
@@ -2471,17 +2597,49 @@
         const curNames = state.trials.map((tr, i) => (state.trialNames && state.trialNames[i]) || tr.name || '');
         const byName = names.length && names.every(n => n) && curNames.every(n => n) && new Set(curNames).size === curNames.length;
         let applied = 0, skipped = 0;
-        const hasWork = state.expertEvents.some(a => a.length) || state.scanWins.some(a => a.length);
-        if (hasWork && !confirm('Replace the labels currently in the page by the saved ones?')) return;
         const index = new Map(); if (byName) names.forEach((n, i) => index.set(n, i));
         for (let t = 0; t < state.trials.length; t++) {
-            const k = byName ? index.get(curNames[t]) : (t < obj.trials.length ? t : undefined);
-            if (k === undefined || lens[k] !== state.trials[t].x.length) { skipped++; continue; }
-            const src = obj.trials[k];
-            state.scanWins[t] = (src.scanWins || []).map(r => [r[0], r[1]]);
-            state.expertEvents[t] = (src.expertEvents || []).map(e => ({ onset: e.onset, offset: e.offset, cls: e.cls, fromPrelabel: false }));
-            state.pointMarks[t] = (src.pointMarks || []).map(m => ({ at: m.at, cls: m.cls }));
-            state.undoStack[t] = [];
+            let k = byName ? index.get(curNames[t]) : undefined;
+            if (k === undefined && t < obj.trials.length) k = t;
+            if (k === undefined || (lens[k] !== undefined && lens[k] !== state.trials[t].x.length)) { skipped++; continue; }
+            const src = obj.trials[k] || {};
+            const n = state.trials[t].x.length;
+
+            const existingRev = (state.reviewedRanges[t] || []).map(r => [r[0], r[1]]);
+            const loadedEvents = (src.expertEvents || []).map(e => ({ onset: e.onset, offset: e.offset, cls: e.cls, fromPrelabel: false }));
+            const loadedRev = mergeRangeList([
+                ...(src.scanWins || []),
+                ...(src.observedPeriods || []),
+                ...(src.reviewedRanges || []),
+                ...((obj.observedPeriods && obj.observedPeriods[k]) || []),
+                ...((obj.reviewedRanges && obj.reviewedRanges[k]) || []),
+                ...loadedEvents.map(e => [e.onset, e.offset]),
+            ], n);
+
+            // 1) Merge scanned / observed windows (existing + loaded)
+            state.scanWins[t] = mergeRangeList([...(state.scanWins[t] || []), ...loadedRev], n);
+
+            // 2) Append loaded expertEvents to existing expertEvents and merge overlapping same-class events
+            state.expertEvents[t] = [...(state.expertEvents[t] || []), ...loadedEvents];
+            mergeOverlappingEvents(t);
+
+            // 3) Merge pointMarks:
+            //    - remove any pre-existing pointMarks that fall inside loaded reviewed ranges (e.g. untouched demo marks)
+            //    - append loaded pointMarks that do not fall inside already-reviewed ranges or expertEvents
+            let keptMarks = (state.pointMarks[t] || []).filter(
+                m => !loadedRev.some(([s, e]) => m.at >= s && m.at <= e) &&
+                     !state.expertEvents[t].some(ev => ev.onset <= m.at && m.at <= ev.offset)
+            );
+            for (const m of (src.pointMarks || [])) {
+                if (existingRev.some(([s, e]) => m.at >= s && m.at <= e)) continue;
+                if (state.expertEvents[t].some(ev => ev.onset <= m.at && m.at <= ev.offset)) continue;
+                if (!keptMarks.some(km => Math.abs(km.at - m.at) <= 5 && km.cls === m.cls)) {
+                    keptMarks.push({ at: m.at, cls: m.cls });
+                }
+            }
+            keptMarks.sort((a, b) => a.at - b.at);
+            state.pointMarks[t] = keptMarks;
+
             recomputeReviewed(t, false);
             syncRenderedLabels(t);
             applied++;
@@ -2495,6 +2653,10 @@
     function exportDataset() {
         if (state.trials.length === 0) return;
         const nTrials = state.trials.length;
+        for (let t = 0; t < nTrials; t++) {
+            mergeOverlappingEvents(t);
+            recomputeReviewed(t, false);
+        }
 
         const fmt = elements.exportFormat ? elements.exportFormat.value : 'csv';
         if (fmt !== 'csv') {
@@ -2611,6 +2773,7 @@
                 const r = UnEyeFormats.readMatFile(bytes.buffer);
                 if (r && r.trials) {
                     loadDataset(r.trials, r.fs || 1000.0, 1.0, 'hmm');
+                    if (r.labels) applyLoadedLabels(r.labels);
                     updateStatus();
                     render();
                 }
@@ -2804,22 +2967,14 @@
             state.filterSettings.minPeakVel = parseFloat(elements.minPeakVel.value) || 50.0;
             state.filterSettings.minAmplitude = parseFloat(elements.minAmplitude.value) || 0.20;
 
-            // Re-preprocess all trials and re-run prelabeling
+            // Re-preprocess all trials and re-run prelabeling without wiping reviewed ranges or expert events
             preprocessAllTrials();
             for (let t = 0; t < state.trials.length; t++) {
                 runPrelabeler(t, 'hmm');
+                syncRenderedLabels(t);
             }
 
-            // If in Pass 1, refresh pointMarks so user immediately sees the refined events
-            if (state.pass === PASS_ONE) {
-                for (let t = 0; t < state.trials.length; t++) {
-                    state.pointMarks[t] = [];
-                    for (const p of state.prelabels[t]) {
-                        state.pointMarks[t].push({ at: Math.round((p.onset + p.offset) / 2), cls: p.cls });
-                    }
-                    state.pointMarks[t].sort((a, b) => a.at - b.at);
-                }
-            } else if (state.pass === PASS_TWO) {
+            if (state.pass === PASS_TWO) {
                 buildRefineQueue();
                 state.refineIdx = 0;
                 focusCurrentMark();
@@ -2840,6 +2995,7 @@
 
         elements.prevTrialBtn.addEventListener('click', () => {
             if (state.currentTrialIdx > 0) {
+                if (state.pass === PASS_ONE) scanCurrentWindow();
                 state.currentTrialIdx--;
                 state.zoomMultiplier = 1.0;
                 if (state.pass === PASS_TWO) {
@@ -2857,6 +3013,7 @@
 
         elements.nextTrialBtn.addEventListener('click', () => {
             if (state.currentTrialIdx < state.trials.length - 1) {
+                if (state.pass === PASS_ONE) scanCurrentWindow();
                 state.currentTrialIdx++;
                 state.zoomMultiplier = 1.0;
                 if (state.pass === PASS_TWO) {
@@ -2904,7 +3061,7 @@
         elements.notEventBtn.addEventListener('click', () => {
             if (state.currentMarkAt >= 0) {
                 deleteMarkAt(state.currentTrialIdx, state.currentMarkAt);
-                state.refineQueue.splice(state.refineIdx, 1);
+                buildRefineQueue();
                 state.zoomMultiplier = 1.0;
                 focusCurrentMark();
                 updateStatus();
@@ -2922,8 +3079,11 @@
             if (state.currentMarkAt >= 0) {
                 const onset = state.currentPutativeOnset >= 0 ? state.currentPutativeOnset : state.currentMarkAt - 15;
                 const offset = state.currentPutativeOffset >= 0 ? state.currentPutativeOffset : state.currentMarkAt + 15;
+                const prevLen = state.refineQueue.length;
                 refineMark(state.currentTrialIdx, state.currentMarkAt, onset, offset, state.activeClass);
-                state.refineIdx++;
+                buildRefineQueue();
+                const newLen = state.refineQueue.length;
+                state.refineIdx = newLen < prevLen ? Math.min(state.refineIdx + 1, newLen) : state.refineIdx + 1;
                 state.zoomMultiplier = 1.0;
                 focusCurrentMark();
                 updateStatus();
@@ -2962,4 +3122,11 @@
     window.slideWindowAfterEvent = slideWindowAfterEvent;
     window.setAutoSlide = setAutoSlide;
     window.handleTap = handleTap;
+    window.refineMark = refineMark;
+    window.mergeOverlappingEvents = mergeOverlappingEvents;
+    window.applyLabelsJson = applyLabelsJson;
+    window.applyLoadedLabels = applyLoadedLabels;
+    window.saveLabelsJson = saveLabelsJson;
+    window.recomputeReviewed = recomputeReviewed;
+    window.buildRefineQueue = buildRefineQueue;
 })();

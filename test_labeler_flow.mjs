@@ -212,6 +212,155 @@ check(mobileCheck.menuVisible && mobileCheck.topFits && mobileCheck.botFits,
   `on 360x740 phone screen, hamburger menuBtn and all bars fit inside screen dimensions: ${JSON.stringify(mobileCheck)}`);
 await page.setViewport({ width: 1024, height: 620 });
 
+// --- Overlapping events of the same class merge into one
+const mergeCheck = await ev(() => {
+  state.pass = 1;
+  state.currentTrialIdx = 0;
+  state.expertEvents[0] = [];
+  state.pointMarks[0] = [];
+  refineMark(0, 110, 100, 150, 1);
+  refineMark(0, 140, 130, 180, 1); // overlaps [100, 150] with same class 1 -> must merge into [100, 180]
+  refineMark(0, 260, 250, 290, 2); // blink class 2 -> stays separate
+  refineMark(0, 280, 275, 320, 2); // overlaps [250, 290] with same class 2 -> must merge into [250, 320]
+  return state.expertEvents[0];
+});
+check(
+  mergeCheck.length === 2 &&
+  mergeCheck[0].onset === 100 && mergeCheck[0].offset === 180 && mergeCheck[0].cls === 1 &&
+  mergeCheck[1].onset === 250 && mergeCheck[1].offset === 320 && mergeCheck[1].cls === 2,
+  `overlapping events of the same class merge into one: ${JSON.stringify(mergeCheck)}`
+);
+
+// --- Loading labels from a previous session and saving new labels appends/merges both
+const appendSessionCheck = await ev(() => {
+  // Simulate a clean dataset
+  for (let t = 0; t < state.trials.length; t++) {
+    state.scanWins[t] = [];
+    state.reviewedRanges[t] = [];
+    state.expertEvents[t] = [];
+    state.pointMarks[t] = [];
+  }
+  // Load previous session labels (Trial 0 window 0..499 has saccade [100..130], Trial 1 window 0..499 has blink [200..260])
+  const prevSession = {
+    format: 'uneye-labels-v1',
+    rateHz: 1000,
+    winMs: 500,
+    trialLengths: state.trials.map(tr => tr.x.length),
+    trials: state.trials.map((_, t) => {
+      if (t === 0) return { scanWins: [[0, 499]], expertEvents: [{ onset: 100, offset: 130, cls: 1 }], pointMarks: [] };
+      if (t === 1) return { scanWins: [[0, 499]], expertEvents: [{ onset: 200, offset: 260, cls: 2 }], pointMarks: [] };
+      return { scanWins: [], expertEvents: [], pointMarks: [] };
+    })
+  };
+  applyLabelsJson(prevSession);
+
+  // Now add new labels in the current session:
+  // 1) In Trial 0 window 450..949, add saccade [600..640]
+  state.currentTrialIdx = 0;
+  state.pass = 1;
+  state.winIdx = 1;
+  applyGridWindow();
+  refineMark(0, 610, 600, 640, 1);
+  // 2) In Trial 2 window 0..499, add saccade [150..185]
+  state.currentTrialIdx = 2;
+  state.winIdx = 0;
+  applyGridWindow();
+  refineMark(2, 160, 150, 185, 1);
+
+  window.__dl = [];
+  saveLabelsJson();
+  return {
+    t0Events: state.expertEvents[0],
+    t0Rev: state.reviewedRanges[0],
+    t1Events: state.expertEvents[1],
+    t1Rev: state.reviewedRanges[1],
+    t2Events: state.expertEvents[2],
+    t2Rev: state.reviewedRanges[2],
+  };
+});
+await sleep(200);
+const mergedSaved = JSON.parse(await ev(() => (window.__dl.find(d => /uneye_labels_.*\.json$/.test(d.name)) || { text: 'null' }).text));
+check(
+  mergedSaved &&
+  mergedSaved.trials[0].expertEvents.length === 2 &&
+  mergedSaved.trials[0].expertEvents[0].onset === 100 &&
+  mergedSaved.trials[0].expertEvents[1].onset === 600 &&
+  mergedSaved.trials[1].expertEvents.length === 1 &&
+  mergedSaved.trials[1].expertEvents[0].onset === 200 &&
+  mergedSaved.trials[2].expertEvents.length === 1 &&
+  mergedSaved.trials[2].expertEvents[0].onset === 150,
+  `saving after loading previous labels preserves both loaded and newly added labels across trials: T0=${JSON.stringify(mergedSaved?.trials[0]?.expertEvents)}, T1=${JSON.stringify(mergedSaved?.trials[1]?.expertEvents)}, T2=${JSON.stringify(mergedSaved?.trials[2]?.expertEvents)}`
+);
+
+// --- Pass 2 navigation across windows & trials (including expertEvents) and centered time zoom
+await ev(() => {
+  state.pass = 1;
+  state.currentTrialIdx = 0;
+  state.winIdx = 0;
+  applyGridWindow();
+});
+await page.click('#switchPassBtn'); // enters Pass 2 on Trial 0 (which has events at [100..130] in win 0 and [600..640] in win 1, plus Trial 1 [200..260] and Trial 2 [150..185])
+const p2Ev0 = await ev(() => ({
+  trial: state.currentTrialIdx,
+  idx: state.refineIdx,
+  from: state.fromSample,
+  to: state.toSample,
+  on: state.currentPutativeOnset,
+  off: state.currentPutativeOffset,
+}));
+check(
+  p2Ev0.trial === 0 && p2Ev0.idx === 0 && p2Ev0.on === 100 && p2Ev0.off === 130 &&
+  p2Ev0.from === 50 && p2Ev0.to === 180 &&
+  Math.abs((p2Ev0.from + p2Ev0.to) / 2 - (p2Ev0.on + p2Ev0.off) / 2) <= 1,
+  `Pass 2 Event 1 (Trial 0, Win 0) is zoomed in time [50..180] and centered on [100..130]: ${JSON.stringify(p2Ev0)}`
+);
+
+await page.click('#nextEventBtn'); // advances to second event of Trial 0 (in Window 1: [600..640])
+const p2Ev1 = await ev(() => ({
+  trial: state.currentTrialIdx,
+  idx: state.refineIdx,
+  from: state.fromSample,
+  to: state.toSample,
+  on: state.currentPutativeOnset,
+  off: state.currentPutativeOffset,
+}));
+check(
+  p2Ev1.trial === 0 && p2Ev1.idx === 1 && p2Ev1.on === 600 && p2Ev1.off === 640 &&
+  p2Ev1.from === 550 && p2Ev1.to === 690 &&
+  Math.abs((p2Ev1.from + p2Ev1.to) / 2 - (p2Ev1.on + p2Ev1.off) / 2) <= 1,
+  `Pass 2 Next Event moves to another window of Trial 0 [600..640], zoomed [550..690] & centered: ${JSON.stringify(p2Ev1)}`
+);
+
+await page.click('#nextEventBtn'); // advances across trial boundary to Trial 1 [200..260]
+const p2Ev2 = await ev(() => ({
+  trial: state.currentTrialIdx,
+  idx: state.refineIdx,
+  from: state.fromSample,
+  to: state.toSample,
+  on: state.currentPutativeOnset,
+  off: state.currentPutativeOffset,
+}));
+check(
+  p2Ev2.trial === 1 && p2Ev2.idx === 0 && p2Ev2.on === 200 && p2Ev2.off === 260 &&
+  p2Ev2.from === 150 && p2Ev2.to === 310 &&
+  Math.abs((p2Ev2.from + p2Ev2.to) / 2 - (p2Ev2.on + p2Ev2.off) / 2) <= 1,
+  `Pass 2 Next Event moves to Trial 1 [200..260], zoomed [150..310] & centered: ${JSON.stringify(p2Ev2)}`
+);
+
+await page.click('#prevEventBtn'); // goes back across trial boundary to Trial 0 Event 2 [600..640]
+const p2Back = await ev(() => ({
+  trial: state.currentTrialIdx,
+  idx: state.refineIdx,
+  from: state.fromSample,
+  to: state.toSample,
+  on: state.currentPutativeOnset,
+  off: state.currentPutativeOffset,
+}));
+check(
+  p2Back.trial === 0 && p2Back.idx === 1 && p2Back.on === 600 && p2Back.off === 640,
+  `Pass 2 Prev Event returns to Trial 0 Event 2 [600..640]: ${JSON.stringify(p2Back)}`
+);
+
 check(errors.length === 0, 'no page error' + (errors.length ? ': ' + errors.join(' | ') : ''));
 await page.screenshot({ path: process.env.SHOT || '/tmp/labeler.png' });
 await browser.close();

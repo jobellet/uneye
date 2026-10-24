@@ -10,7 +10,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const src = fs.readFileSync(path.join(__dirname, 'android/app/src/main/assets/web/app.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+const androidSrc = fs.readFileSync(path.join(__dirname, 'android/app/src/main/assets/web/app.js'), 'utf8');
+if (src !== androidSrc) {
+    console.error('FAIL: app.js and android/app/src/main/assets/web/app.js are out of sync');
+    process.exit(1);
+}
 
 // pull out the helper block between the markers we inserted
 const start = src.indexOf('function noiseStdOf(v)');
