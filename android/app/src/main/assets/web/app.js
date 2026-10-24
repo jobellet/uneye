@@ -350,6 +350,55 @@
         return Math.max(med / 0.6745, 1e-4);
     }
 
+    // --- Training-copy fill of invalid (blink / tracker-loss) stretches ---
+    // The velocity input maps any non-finite difference to 0, so a blink
+    // labelled 2 on a NaN stretch would read as a flat zero-velocity block:
+    // indistinguishable from fixation, and the trainer drops the label
+    // exactly where the blink is -> 3-class training collapses and saccades
+    // come back labelled as blinks (red). A real tracker returns noise during
+    // a blink: fill the invalid stretches of the TRAINING COPY with Gaussian
+    // noise at 3x the local fixation noise (same rule as the native Android
+    // trainer). The raw trace (display, pre-labeler, prediction) is untouched.
+    function noiseStdOf(v) {
+        const d = [];
+        for (let i = 1; i < v.length; i++) if (isFinite(v[i]) && isFinite(v[i - 1])) d.push(Math.abs(v[i] - v[i - 1]));
+        if (d.length < 8) return 0.0;
+        d.sort((a, b) => a - b);
+        return d[Math.floor(d.length / 2)] / 0.6745;
+    }
+
+    // Box-Muller, deterministic per call sequence (seeded by the sample index
+    // mix, good enough for a fill that only has to look like tracker noise).
+    function gauss(rngState) {
+        let u = 0, v = 0;
+        do { u = (rngState.s = (rngState.s * 1103515245 + 12345) & 0x7fffffff) / 0x80000000; } while (u <= 1e-12);
+        v = (rngState.s = (rngState.s * 1103515245 + 12345) & 0x7fffffff) / 0x80000000;
+        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    }
+
+    function fillInvalidCopy(v, std, rngState) {
+        const out = v.slice();
+        let i = 0;
+        while (i < out.length) {
+            if (isFinite(out[i])) { i++; continue; }
+            let j = i;
+            while (j < out.length && !isFinite(out[j])) j++;
+            const c = i > 0 ? out[i - 1] : (j < out.length ? out[j] : 0.0);
+            for (let k = i; k < j; k++) out[k] = c + std * gauss(rngState);
+            i = j;
+        }
+        return out;
+    }
+
+    // Returns a training copy of the trial: NaN stretches filled with noise at
+    // 3x the local fixation noise. The trial itself is not modified.
+    function trainingCopyOf(tr, seed) {
+        const rngState = { s: (seed >>> 0) || 1 };
+        const sx = Math.max(3.0 * noiseStdOf(tr.x), 1e-3);
+        const sy = Math.max(3.0 * noiseStdOf(tr.y), 1e-3);
+        return { x: fillInvalidCopy(tr.x, sx, rngState), y: fillInvalidCopy(tr.y, sy, rngState) };
+    }
+
     function preprocessTrial(trialIdx) {
         const tr = state.trials[trialIdx];
         if (!tr) return;
@@ -1734,15 +1783,21 @@
                     lab[i] = hl[i];
                 }
             }
+            // Training copy: invalid (NaN) stretches filled with noise at 3x
+            // the local fixation noise, so a blink labelled 2 on a tracker
+            // loss keeps its label and stays distinguishable from fixation.
+            // The raw trace (display, prediction) is not modified.
+            const tc = trainingCopyOf(tr, 1000 + t);
             traces.push({
-                x: tr.x.subarray(0, endSample),
-                y: tr.y.subarray(0, endSample),
+                x: tc.x.subarray(0, endSample),
+                y: tc.y.subarray(0, endSample),
                 labels: lab,
                 rateHz: state.rateHz
             });
         }
 
-        // Held-out test trials for unbiased F1 & kappa
+        // Held-out test trials for unbiased F1 & kappa: the same fill, so the
+        // metrics measure the class-2 signal the network was trained on.
         const testTrials = [];
         for (const t of state.testTrials) {
             const tr = state.trials[t];
@@ -1754,9 +1809,10 @@
                     lab[i] = hl[i];
                 }
             }
+            const tc = trainingCopyOf(tr, 2000 + t);
             testTrials.push({
-                x: tr.x,
-                y: tr.y,
+                x: tc.x,
+                y: tc.y,
                 labels: lab,
                 rateHz: state.rateHz
             });

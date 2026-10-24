@@ -1,11 +1,26 @@
 // Training data preparation for the trainer (T09b): windows of ~1 s, held-out validation windows, rotation / noise / gain augmentation, velocity input (dX, dY per sample).
 #pragma once
 #include <cstdint>
+#include <random>
 #include <vector>
 #include "eyelive/trainer.hpp"
 #include "eyelive/types.hpp"
 
 namespace eyelive { namespace train {
+
+// Robust per-axis noise scale of the valid samples: median absolute first
+// difference / 0.6745 (MAD estimator, immune to the large saccade steps).
+double noise_std(const std::vector<float>& v);
+
+// The velocity input maps any non-finite difference to 0, and a constant or
+// interpolated segment reads as a zero-velocity block: a blink labelled 2
+// with such positions collapses 3-class training (validation event F1 stays
+// 0.000 whether the blink is labelled 2 or ignored). A real tracker returns
+// noise during a blink: filling the invalid stretches with Gaussian noise at
+// 3x the local fixation noise makes the blink distinguishable from fixation
+// again. The label of the filled samples is kept (blink = class 2); callers
+// that display or run detection keep their own raw copy of the trace.
+void fill_invalid(std::vector<float>& v, double std_, std::mt19937_64& rng);
 
 struct Windows {                         // n windows of W samples
     int W = 0, n = 0;
