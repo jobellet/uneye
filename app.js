@@ -415,19 +415,14 @@
         if (!cfg.enabled) {
             tr.smoothX = tr.x;
             tr.smoothY = tr.y;
-            tr.vx = new Float32Array(n);
-            tr.vy = new Float32Array(n);
             tr.speed = new Float32Array(n);
-            tr.tangentialAccel = new Float32Array(n);
             const dt = 1.0 / fs;
             for (let i = 1; i < n; i++) {
                 if (tr.valid[i] && tr.valid[i - 1]) {
                     const dx = (tr.x[i] - tr.x[i - 1]) * state.degPerUnit;
                     const dy = (tr.y[i] - tr.y[i - 1]) * state.degPerUnit;
-                    let vx = dx / dt, vy = dy / dt, sp = Math.sqrt(dx * dx + dy * dy) / dt;
-                    if (sp > MAX_SPEED_DEG_S) { const f = MAX_SPEED_DEG_S / sp; vx *= f; vy *= f; sp = MAX_SPEED_DEG_S; }   // speed limit, direction kept
-                    tr.vx[i] = vx; tr.vy[i] = vy;
-                    tr.speed[i] = sp;
+                    const sp = Math.sqrt(dx * dx + dy * dy) / dt;
+                    tr.speed[i] = sp > MAX_SPEED_DEG_S ? MAX_SPEED_DEG_S : sp;   // speed limit
                 }
             }
             return;
@@ -443,28 +438,39 @@
 
         tr.smoothX = rx.smooth;
         tr.smoothY = ry.smooth;
-        tr.vx = new Float32Array(n);
-        tr.vy = new Float32Array(n);
         tr.speed = new Float32Array(n);
-        tr.tangentialAccel = new Float32Array(n);
 
         const sc = state.degPerUnit;
         for (let i = 0; i < n; i++) {
             if (tr.valid[i]) {
-                let vx = rx.d1[i] * sc, vy = ry.d1[i] * sc;
-                let sp = Math.sqrt(vx * vx + vy * vy);
-                if (sp > MAX_SPEED_DEG_S) { const f = MAX_SPEED_DEG_S / sp; vx *= f; vy *= f; sp = MAX_SPEED_DEG_S; }   // speed limit, direction kept
-                tr.vx[i] = vx; tr.vy[i] = vy; tr.speed[i] = sp;
-                const ax = rx.d2[i] * sc, ay = ry.d2[i] * sc;
-                tr.tangentialAccel[i] = sp > 1e-6 ? (vx * ax + vy * ay) / sp : 0;
+                const sp = Math.sqrt(rx.d1[i] * rx.d1[i] + ry.d1[i] * ry.d1[i]) * sc;
+                tr.speed[i] = sp > MAX_SPEED_DEG_S ? MAX_SPEED_DEG_S : sp;   // speed limit
             }
         }
     }
 
-    function preprocessAllTrials() {
-        for (let t = 0; t < state.trials.length; t++) {
-            preprocessTrial(t);
+    // The smoothed traces and the speed are only read for the trial on screen (and by the position export), so they are
+    // computed on demand and only a few trials keep them: a long dataset no longer holds three extra arrays per trial.
+    const DERIVED_CACHE_TRIALS = 4;
+    const derivedOrder = [];
+    function dropDerived(tr) { tr.smoothX = tr.smoothY = tr.speed = null; }
+    function ensureDerived(trialIdx) {
+        const tr = state.trials[trialIdx];
+        if (!tr) return;
+        if (!tr.speed) preprocessTrial(trialIdx);
+        const at = derivedOrder.indexOf(trialIdx);
+        if (at >= 0) derivedOrder.splice(at, 1);
+        derivedOrder.push(trialIdx);
+        while (derivedOrder.length > DERIVED_CACHE_TRIALS) {
+            const old = state.trials[derivedOrder.shift()];
+            if (old) dropDerived(old);
         }
+    }
+
+    // filter settings or dataset changed: forget every derived trace, the next render recomputes the visible trial
+    function preprocessAllTrials() {
+        derivedOrder.length = 0;
+        for (const tr of state.trials) dropDerived(tr);
     }
 
     // --- Dataset Loader & State Initializer ---
@@ -1144,6 +1150,8 @@
             return;
         }
 
+        ensureDerived(state.currentTrialIdx);
+
         // Layout lanes (2 lanes: position X and Y on the same axes, then speed) with top margin in Pass 2 so header never collides with the trace
         const topMargin = state.pass === PASS_TWO ? 26 : 0;
         const availH = height - topMargin;
@@ -1269,12 +1277,38 @@
         for (const [arr, color] of [[arrX, '#1E88E5'], [arrY, '#43A047']]) {
             ctx.strokeStyle = color;
             ctx.beginPath();
-            let started = false;
-            for (let i = from; i <= to && i < arr.length; i++) {
-                if (!valid[i] || isNaN(arr[i])) { started = false; continue; }
-                const px = sampleToPx(i, w);
-                const py = bottom - ((arr[i] - minV) / (maxV - minV)) * h;
-                if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+            const yOf = (v) => bottom - ((v - minV) / (maxV - minV)) * h;
+            if (to - from + 1 > 2 * w) {
+                // more samples than pixels: one min-max pair per pixel column (gaps still break the line)
+                let started = false, col = NaN, lo = 0, hi = 0;
+                const flush = () => {
+                    const px = col + 0.5;
+                    if (!started) { ctx.moveTo(px, yOf(lo)); started = true; } else ctx.lineTo(px, yOf(lo));
+                    if (hi !== lo) ctx.lineTo(px, yOf(hi));
+                };
+                for (let i = from; i <= to && i < arr.length; i++) {
+                    if (!valid[i] || isNaN(arr[i])) {
+                        if (col === col) { flush(); col = NaN; }
+                        started = false;
+                        continue;
+                    }
+                    const c = Math.floor(sampleToPx(i, w));
+                    if (c !== col) {
+                        if (col === col) flush();
+                        col = c; lo = hi = arr[i];
+                    } else {
+                        if (arr[i] < lo) lo = arr[i];
+                        if (arr[i] > hi) hi = arr[i];
+                    }
+                }
+                if (col === col) flush();
+            } else {
+                let started = false;
+                for (let i = from; i <= to && i < arr.length; i++) {
+                    if (!valid[i] || isNaN(arr[i])) { started = false; continue; }
+                    const px = sampleToPx(i, w);
+                    if (!started) { ctx.moveTo(px, yOf(arr[i])); started = true; } else { ctx.lineTo(px, yOf(arr[i])); }
+                }
             }
             ctx.stroke();
         }
@@ -1302,11 +1336,12 @@
         const from = state.fromSample;
         const to = state.toSample;
 
+        const speedArr = tr.speed;
+        const speedAt = (i) => (speedArr && speedArr.length > i) ? speedArr[i] : 0.0;
+        const last = Math.min(to, tr.x.length - 1);
         let maxSpeed = 50.0;
-        const speeds = new Float32Array(to - from + 1);
-        for (let i = from; i <= to && i < tr.x.length; i++) {
-            const s = (tr.speed && tr.speed.length > i) ? tr.speed[i] : 0.0;
-            speeds[i - from] = s;
+        for (let i = from; i <= last; i++) {
+            const s = speedAt(i);
             if (s > maxSpeed) maxSpeed = s;
         }
         maxSpeed = Math.max(100.0, maxSpeed * 1.15);
@@ -1339,13 +1374,35 @@
         ctx.strokeStyle = color;
         ctx.lineWidth = 2.0;
         ctx.beginPath();
-        let started = false;
-        for (let i = from; i <= to && i < tr.x.length; i++) {
-            const s = speeds[i - from];
-            const px = sampleToPx(i, w);
-            const py = bottom - (s / maxSpeed) * h;
-            if (!started) { ctx.moveTo(px, py); started = true; }
-            else { ctx.lineTo(px, py); }
+        const yOf = (s) => bottom - (s / maxSpeed) * h;
+        if (last - from + 1 > 2 * w) {
+            // more samples than pixels: one min-max pair per pixel column keeps every peak with a fraction of the segments
+            let col = NaN, lo = 0, hi = 0, started = false;
+            const flush = () => {
+                const px = col + 0.5;
+                if (!started) { ctx.moveTo(px, yOf(lo)); started = true; } else ctx.lineTo(px, yOf(lo));
+                if (hi !== lo) ctx.lineTo(px, yOf(hi));
+            };
+            for (let i = from; i <= last; i++) {
+                const s = speedAt(i);
+                const c = Math.floor(sampleToPx(i, w));
+                if (c !== col) {
+                    if (col === col) flush();
+                    col = c; lo = hi = s;
+                } else {
+                    if (s < lo) lo = s;
+                    if (s > hi) hi = s;
+                }
+            }
+            if (col === col) flush();
+        } else {
+            let started = false;
+            for (let i = from; i <= last; i++) {
+                const px = sampleToPx(i, w);
+                const py = yOf(speedAt(i));
+                if (!started) { ctx.moveTo(px, py); started = true; }
+                else { ctx.lineTo(px, py); }
+            }
         }
         ctx.stroke();
     }
@@ -1457,7 +1514,19 @@
     function setupPointerEvents() {
         const canvas = elements.canvas;
         // position in the canvas from clientX/Y (the offset of synthetic events is wrong in the Android WebView)
-        const local = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+        // the rect is measured once per gesture (pointerdown), not on every move event
+        let canvasRect = null;
+        const local = (e) => {
+            const r = canvasRect || (canvasRect = canvas.getBoundingClientRect());
+            return { x: e.clientX - r.left, y: e.clientY - r.top };
+        };
+        // pointermove fires faster than the screen refreshes: draw at most once per frame
+        let renderQueued = false;
+        const requestRender = () => {
+            if (renderQueued) return;
+            renderQueued = true;
+            requestAnimationFrame(() => { renderQueued = false; render(); });
+        };
 
         // boundary handle under the finger: the dots at mid-height on the onset / offset lines of the refined events,
         // and in pass 2 of the event under refinement. Dragging one moves that boundary only.
@@ -1483,6 +1552,7 @@
         };
 
         canvas.addEventListener('pointerdown', (e) => {
+            canvasRect = canvas.getBoundingClientRect();
             try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
             if (e.isPrimary) state.pointers.clear();      // a primary pointer starts a new gesture: drop pointers whose pointerup never arrived
             if (state.pointers.size === 0) {
@@ -1532,7 +1602,7 @@
                     // Threshold to enter drag mode vs tap
                     state.isDraggingSpan = true;
                 }
-                render();
+                requestRender();
             } else if (state.pointers.size === 2) {
                 // 2-Finger Pinch Zoom & Pan
                 const pts = Array.from(state.pointers.values());
@@ -1545,7 +1615,7 @@
 
                     state.fromSample = Math.max(0, Math.round(center - newSpan / 2));
                     state.toSample = Math.min(curLen() - 1, state.fromSample + newSpan);
-                    render();
+                    requestRender();
                 }
             }
         });
@@ -2700,6 +2770,7 @@
             // 2. Positions CSV (X.csv, Y.csv) - smooth positions for reproducibility
             let xCsv = "", yCsv = "";
             for (let t = 0; t < nTrials; t++) {
+                ensureDerived(t);
                 const tr = state.trials[t];
                 const px = (state.filterSettings.enabled && tr.smoothX) ? tr.smoothX : tr.x;
                 const py = (state.filterSettings.enabled && tr.smoothY) ? tr.smoothY : tr.y;

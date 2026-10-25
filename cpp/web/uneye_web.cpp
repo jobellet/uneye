@@ -160,15 +160,9 @@ public:
     void add_trace(val x_val, val y_val, val labels_val, double rate_hz) {
         TrainTrace tr;
         tr.rate_hz = rate_hz;
-        const size_t n = x_val["length"].as<size_t>();
-        tr.x.resize(n);
-        tr.y.resize(n);
-        tr.labels.resize(n);
-        for (size_t i = 0; i < n; ++i) {
-            tr.x[i] = x_val[i].as<float>();
-            tr.y[i] = y_val[i].as<float>();
-            tr.labels[i] = labels_val[i].as<uint8_t>();
-        }
+        tr.x = emscripten::convertJSArrayToNumberVector<float>(x_val);
+        tr.y = emscripten::convertJSArrayToNumberVector<float>(y_val);
+        tr.labels = emscripten::convertJSArrayToNumberVector<uint8_t>(labels_val);
         traces_.push_back(std::move(tr));
     }
 
@@ -358,35 +352,20 @@ public:
     bool is_cancelled() const { return cancel_; }
 
     val predict_trial(val x_val, val y_val, double rate_hz, double max_speed_deg_s) {
-        const size_t n = x_val["length"].as<size_t>();
-        std::vector<float> x(n), y(n);
-        for (size_t i = 0; i < n; ++i) {
-            x[i] = x_val[i].as<float>();
-            y[i] = y_val[i].as<float>();
-        }
+        std::vector<float> x = emscripten::convertJSArrayToNumberVector<float>(x_val);
+        std::vector<float> y = emscripten::convertJSArrayToNumberVector<float>(y_val);
 
         std::vector<uint8_t> pred = predict_internal(x, y, rate_hz, max_speed_deg_s);
-        val result = val::global("Uint8Array").new_(pred.size());
-        for (size_t i = 0; i < pred.size(); ++i) {
-            result.set(i, pred[i]);
-        }
-        return result;
+        // new Uint8Array(view) copies out of the wasm heap in one call
+        return val::global("Uint8Array").new_(val(emscripten::typed_memory_view(pred.size(), pred.data())));
     }
 
     val predict_probs(val x_val, val y_val, double rate_hz, double max_speed_deg_s) {
-        const size_t n = x_val["length"].as<size_t>();
-        std::vector<float> x(n), y(n);
-        for (size_t i = 0; i < n; ++i) {
-            x[i] = x_val[i].as<float>();
-            y[i] = y_val[i].as<float>();
-        }
+        std::vector<float> x = emscripten::convertJSArrayToNumberVector<float>(x_val);
+        std::vector<float> y = emscripten::convertJSArrayToNumberVector<float>(y_val);
 
         std::vector<float> probs = predict_probs_internal(x, y, rate_hz, max_speed_deg_s);
-        val result = val::global("Float32Array").new_(probs.size());
-        for (size_t i = 0; i < probs.size(); ++i) {
-            result.set(i, probs[i]);
-        }
-        return result;
+        return val::global("Float32Array").new_(val(emscripten::typed_memory_view(probs.size(), probs.data())));
     }
 
     val export_bin() {

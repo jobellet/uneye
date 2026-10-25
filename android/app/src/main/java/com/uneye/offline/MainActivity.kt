@@ -202,6 +202,17 @@ class MainActivity : AppCompatActivity() {
         handleIncomingIntent(intent)
     }
 
+    // pause timers, workers and rendering while the screen is off or the app is in the background
+    override fun onPause() {
+        webView.onPause()
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        webView.onResume()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIncomingIntent(intent)
