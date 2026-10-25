@@ -57,7 +57,7 @@
             <input type="number" id="winMsInput" class="win-input" value="500" min="20" max="60000" step="50" title="Width of the visible window in pass 1; the next window overlaps by 10 %">
             <button id="autoSlideBtn" class="btn btn-secondary" title="Automatically slide window after selecting an event (disabled by default)">Auto-slide: Off</button>
             <input type="checkbox" id="autoSlideToggle" style="display: none;" aria-hidden="true">
-            <button id="demoBtn" class="btn btn-accent">⚡ Demo</button>
+            <button id="netSuggestBtn" class="btn btn-secondary btn-accent" title="Proposals from the network trained on your labels (On) or from the label-free HMM (Off)">Network suggestions: On</button>
             <button id="openBtn" class="btn btn-secondary">Open…</button>
             <button id="saveLabelsBtn" class="btn btn-secondary" title="Save my manual labels (marks, refined events, windows seen) to a file I can reload later">Save labels</button>
             <button id="loadLabelsBtn" class="btn btn-secondary" title="Reload labels saved earlier (open the same eye traces first)">Load labels</button>
@@ -127,6 +127,19 @@
         <input type="file" id="labelsInput" style="display: none;">
         <input type="file" id="filePairInput" accept=".csv,.txt,.dat" multiple style="display: none;">
 
+        <!-- Start: no data is loaded until a file is chosen -->
+        <div id="startModal" class="modal hidden">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Open eye traces</h3>
+                </div>
+                <p class="form-help">Choose a file of eye traces (.csv, .txt, .mat, .npz or .h5), or a saved labels .json file after its traces.</p>
+                <div class="modal-buttons">
+                    <button id="startOpenBtn" class="btn btn-primary">Choose a file…</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Load Dialog Modal -->
         <div id="loadModal" class="modal hidden">
             <div class="modal-card">
@@ -187,8 +200,7 @@
                 <div class="form-row">
                     <label for="prelabelerSelect">Automatic pre-labeler:</label>
                     <select id="prelabelerSelect">
-                        <option value="hmm" selected>Adaptive HMM / Engbert (λ·σ, High Accuracy)</option>
-                        <option value="model">Neural Network (selected weights)</option>
+                        <option value="hmm" selected>Label-free HMM (no threshold to set)</option>
                         <option value="none">None (manual)</option>
                     </select>
                 </div>
@@ -219,24 +231,12 @@
                         <option value="51">51 ms (heavy smoothing)</option>
                     </select>
                 </div>
-                <div class="form-row">
-                    <label for="lambdaThreshold">Adaptive Saccade Threshold (λ · σ):</label>
-                    <input type="number" id="lambdaThreshold" value="6.0" min="3.0" max="15.0" step="0.5">
-                </div>
                 <div class="form-help">
-                    <span>Higher λ (e.g. 6.0–8.0) prioritizes accuracy by rejecting noise; lower λ increases recall.</span>
-                </div>
-                <div class="form-row">
-                    <label for="minPeakVel">Min Peak Velocity (°/s):</label>
-                    <input type="number" id="minPeakVel" value="50" min="15" max="250" step="5">
-                </div>
-                <div class="form-row">
-                    <label for="minAmplitude">Min Saccade Amplitude (°):</label>
-                    <input type="number" id="minAmplitude" value="0.20" min="0.05" max="2.0" step="0.05">
+                    <span>The smoothing is for the display only. Proposals come from the label-free HMM (nothing to tune) or, once trained and if "Network suggestions" is on, from your network.</span>
                 </div>
                 <div class="modal-buttons">
                     <button id="filterCancelBtn" class="btn btn-secondary">Cancel</button>
-                    <button id="filterApplyBtn" class="btn btn-primary">Apply & Re-detect</button>
+                    <button id="filterApplyBtn" class="btn btn-primary">Apply</button>
                 </div>
             </div>
         </div>
@@ -271,8 +271,9 @@
         </div>
     </div>
 
-    <script src="formats.js?v=5"></script>
-    <script src="app.js?v=5"></script>
+    <script src="formats.js?v=6"></script>
+    <script src="hmm_prelabel.js?v=6"></script>
+    <script src="app.js?v=6"></script>
 <script>
     if ("serviceWorker" in navigator && !window.AndroidBridge) {
         window.addEventListener("load", () => {

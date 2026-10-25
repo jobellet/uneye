@@ -37,6 +37,16 @@ if (ANDROID_WS) {   // the app keeps its session in IndexedDB: start from an emp
 let ok = true; const check = (c, m) => { console.log((c ? 'ok   ' : 'FAIL ') + m); if (!c) ok = false; };
 const ev = f => page.evaluate(f);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// --- start: no simulated data, only a window to choose a file; the simulated traces of the tests are loaded explicitly
+await sleep(500);
+const start = await ev(() => ({ n: state.trials.length, modal: !document.getElementById('startModal').classList.contains('hidden'), demoBtn: !!document.getElementById('demoBtn') }));
+check(start.n === 0 && start.modal && !start.demoBtn, `nothing is loaded at start, only the file window: ${JSON.stringify(start)}`);
+await ev(() => generateDemoDataset());
+// --- proposals come from the label-free HMM (hmm_prelabel.js)
+const hmm = await ev(() => { const tr = state.trials[0]; const ref = UnEyeHMM.detect(tr.x, tr.y, tr.valid, state.rateHz).map(e => e.onset + '-' + e.offset).join();
+  const got = state.prelabels[0].filter(p => p.cls === 1).map(p => p.onset + '-' + p.offset).join(); return [got === ref, state.prelabels[0].length, document.getElementById('startModal').classList.contains('hidden')]; });
+check(hmm[0] && hmm[1] > 0 && hmm[2], `saccade proposals are the HMM's (${hmm[1]} proposals) and the start window is closed`);
 const ptr = (type, id, x, y) => page.evaluate((type, id, x, y) => {
   const c = document.getElementById('traceCanvas'), r = c.getBoundingClientRect();
   c.dispatchEvent(new PointerEvent(type, { pointerId: id, clientX: r.left + x, clientY: r.top + y, bubbles: true, pointerType: 'touch' }));
@@ -407,6 +417,23 @@ check(JSON.stringify(tapCls) === '[[300,330,1]]', `a red (blink) proposal tapped
 // --- leaving pass 2 forgets the event that was being refined
 const p1back = await ev(() => { document.getElementById('switchPassBtn').click(); const a = state.currentMarkAt; document.getElementById('switchPassBtn').click(); return [a >= 0, state.pass, state.currentMarkAt, state.currentPutativeOnset]; });
 check(p1back[0] && p1back[1] === 1 && p1back[2] === -1 && p1back[3] === -1, `back in pass 1 there is no event under refinement: ${JSON.stringify(p1back)}`);
+
+// --- no automatic training during pass 1, whatever the amount reviewed; it starts when a pass 2 is left
+// (the pass-2 navigation above reached the last event, which ends a pass 2 and may have started a training: stop it first)
+await ev(() => { const b = document.getElementById('cancelTrainBtn'); if (state.isTraining && b) b.click(); });
+for (let k = 0; k < 40 && await ev(() => state.isTraining); k++) await sleep(250);
+const auto1 = await ev(() => { setPass(1); state.currentTrialIdx = 0; state.winIdx = 0; applyGridWindow(); state.reviewedAtLastTraining = -30;   // > 20 s 'new' data: the former rule trained during pass 1 here
+  for (let k = 0; k < 400; k++) nextEpoch(); return [state.isTraining, totalReviewed()]; function totalReviewed() { return state.reviewedRanges.flat().reduce((a, r) => a + r[1] - r[0] + 1, 0) / state.rateHz; } });
+check(auto1[0] === false && auto1[1] > 2, `no training during pass 1 (${auto1[1].toFixed(1)} s reviewed, 30 s more than at the last training)`);
+const auto2 = await ev(() => { setPass(2); setPass(1); return [state.isTraining, document.getElementById('trainStatus').textContent]; });
+check(auto2[0] === true, `training starts when pass 2 is left: ${JSON.stringify(auto2)}`);
+await ev(() => { const b = document.getElementById('cancelTrainBtn'); if (b) b.click(); });
+await sleep(1500);
+// --- network-suggestion toggle off: the HMM proposes even when a network exists
+const tog = await ev(async () => { setNetSuggestions(false); await refreshSuggestions(); const tr = state.trials[1];
+  return [document.getElementById('netSuggestBtn').textContent, state.prelabels[1].filter(p => p.cls === 1).map(p => p.onset).join() === UnEyeHMM.detect(tr.x, tr.y, tr.valid, state.rateHz).map(e => e.onset).join()]; });
+check(tog[0].endsWith('Off') && tog[1], `toggle off -> HMM proposals: ${JSON.stringify(tog)}`);
+await ev(() => setNetSuggestions(true));
 
 // --- a session saved by an earlier version (model without modelVersion, every proposal a blink) comes back without that model
 await page.evaluate(() => new Promise(res => {

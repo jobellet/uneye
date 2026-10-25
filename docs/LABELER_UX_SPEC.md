@@ -26,3 +26,11 @@ Implemented in `app.js` / `index.html` (web) and checked by `test_labeler_flow.m
     training, metrics, export and the window width are behind a menu button (hidden by default). One status line.
 11. **One position lane.** X (blue) and Y (green) share the same axes, scaled on the extreme values of the visible window
     (4 % margin, never tighter than 1.25 degrees); the speed lane gets the remaining third.
+12. **No simulated data at start.** The page opens on a file window (`startModal`), or resumes the autosaved session; `generateDemoDataset()`
+    exists for the automated tests only (no button).
+13. **Suggestions.** Default: the label-free universal HMM + acceleration-zero boundaries (`hmm_prelabel.js`, identical to the C++ `hmm_accel`
+    batch detector, `test_hmm_prelabel.js`), blinks = NaN runs. Never the pretrained network. Once a network has been trained, the menu toggle
+    *Network suggestions* (default On, remembered) shows its proposals; Off = HMM. The load dialog offers HMM or None.
+14. **Automatic training only after a pass 2.** Training starts by itself when pass 2 is left (or its last event is reached) and at least
+    `minNewSecondsForAutoTrain` (2 s) were reviewed since the last training; never during pass 1 (point marks are refined in pass 2, so only then are
+    the labels complete). *Train* in the menu still starts it at any time.

@@ -87,6 +87,9 @@
         previousPrelabels: null,
         wakeLock: null,
         initialWeightsMode: 'pretrained',
+        prelabelerMode: 'hmm',      // 'hmm' (label-free HMM, hmm_prelabel.js) or 'none'
+        netSuggestions: true,       // once a network has been trained: show its proposals (on) or the HMM's (off); toggle in the menu
+        minNewSecondsForAutoTrain: 2.0,   // automatic training after a pass 2 needs at least this much newly reviewed data
 
         // Signal Filtering & Preprocessing (Savitzky-Golay + Adaptive Engbert/HMM Threshold)
         filterSettings: {
@@ -125,7 +128,9 @@
         modalWinMs: document.getElementById('modalWinMs'),
         prevEpochBtn: document.getElementById('prevEpochBtn'),
         trialNavGroup: document.getElementById('trialNavGroup'),
-        demoBtn: document.getElementById('demoBtn'),
+        startModal: document.getElementById('startModal'),
+        startOpenBtn: document.getElementById('startOpenBtn'),
+        netSuggestBtn: document.getElementById('netSuggestBtn'),
         openBtn: document.getElementById('openBtn'),
         filterBtn: document.getElementById('filterBtn'),
         metricsBtn: document.getElementById('metricsBtn'),
@@ -174,9 +179,6 @@
         filterApplyBtn: document.getElementById('filterApplyBtn'),
         enableSg: document.getElementById('enableSg'),
         sgWindowMs: document.getElementById('sgWindowMs'),
-        lambdaThreshold: document.getElementById('lambdaThreshold'),
-        minPeakVel: document.getElementById('minPeakVel'),
-        minAmplitude: document.getElementById('minAmplitude'),
         metricsModal: document.getElementById('metricsModal'),
         metricsCanvas: document.getElementById('metricsCanvas'),
         metricsCloseBtn: document.getElementById('metricsCloseBtn'),
@@ -344,7 +346,7 @@
     // Version of the trainer that produced a saved model. Models saved by earlier versions (random 3-class head:
     // saccades proposed as blinks, test F1 0) are dropped when a session is restored, with the proposals they made.
     const MODEL_VERSION = 2;
-    const APP_BUILD = '2026-10-24b';
+    const APP_BUILD = '2026-10-25';
 
     function computeRobustSigma(arr, valid) {
         const vals = [];
@@ -549,11 +551,7 @@
             ok.push([ev.onset, ev.offset]);
         }
         state.reviewedRanges[t] = mergeRangeList(ok, trialLenOf(t));
-        if (notify) {
-            saveToIndexedDB();
-            const totRev = totalReviewedSeconds();
-            if (!state.isTraining && (totRev - state.reviewedAtLastTraining >= 20.0)) runTrainingRound();
-        }
+        if (notify) saveToIndexedDB();          // no automatic training here: it starts when a pass 2 is finished (maybeAutoTrain)
     }
 
     function scanCurrentWindow() {
@@ -576,6 +574,8 @@
 
     function loadDataset(trials, rateHz = 1000.0, degPerUnit = 1.0, prelabeler = 'hmm') {
         state.trials = trials;
+        state.prelabelerMode = prelabeler === 'none' ? 'none' : 'hmm';
+        if (elements.startModal) elements.startModal.classList.add('hidden');
         state.rateHz = rateHz;
         state.degPerUnit = degPerUnit;
         state.currentTrialIdx = 0;
@@ -603,10 +603,11 @@
         // 1. Preprocess all trials with Savitzky-Golay
         preprocessAllTrials();
 
-        // 2. Run Pre-labeler
+        // 2. Proposals: HMM (a network trained in this session replaces them only if the toggle is on and a model is loaded)
         for (let t = 0; t < n; t++) {
-            runPrelabeler(t, prelabeler);
+            runPrelabeler(t, state.prelabelerMode);
         }
+        if (state.netSuggestions && state.trainedModelBin) refreshSuggestions();
 
         state.convergenceHistory = [];
         state.convergenceState = 'SILENT';
@@ -622,7 +623,8 @@
         });
     }
 
-    // --- Adaptive High-Accuracy Pre-labeler (Savitzky-Golay + Engbert-Kliegl λ·σ) ---
+    // --- Pre-labeler: label-free universal HMM + acceleration-zero boundaries (hmm_prelabel.js = the C++ detector "hmm_accel"), blinks = NaN runs ---
+    // Proposals only: they never count as labels. A trained network replaces them only when the "Network suggestions" toggle is on.
     function runPrelabeler(trialIdx, mode) {
         if (mode === 'none') {
             state.prelabels[trialIdx] = [];
@@ -631,116 +633,58 @@
         const tr = state.trials[trialIdx];
         if (!tr) return;
         const n = tr.x.length;
-        const fs = state.rateHz;
-        const cfg = state.filterSettings;
         const pre = [];
 
-        // 1. Detect Blinks from invalid runs (>= 3 samples)
+        // 1. Blinks: invalid runs (>= 3 samples)
         let blinkStart = -1;
         for (let i = 0; i <= n; i++) {
             const isInvalid = i < n && (tr.valid[i] === 0 || isNaN(tr.x[i]) || isNaN(tr.y[i]));
             if (isInvalid && blinkStart === -1) {
                 blinkStart = i;
             } else if (!isInvalid && blinkStart !== -1) {
-                const len = i - blinkStart;
-                if (len >= 3) {
-                    pre.push({ onset: blinkStart, offset: i - 1, cls: CLS_BLINK });
-                }
+                if (i - blinkStart >= 3) pre.push({ onset: blinkStart, offset: i - 1, cls: CLS_BLINK });
                 blinkStart = -1;
             }
         }
 
-        // Ensure kinematics are computed
-        if (!tr.speed) preprocessTrial(trialIdx);
-
-        // 2. Robust Noise Estimation on Detrended/Smoothed Velocity (matching C++ dsp.hpp)
-        const sigmaX = computeRobustSigma(tr.vx, tr.valid);
-        const sigmaY = computeRobustSigma(tr.vy, tr.valid);
-        const noiseSigma = Math.max(0.5 * (sigmaX + sigmaY), 0.5);
-        tr.noiseSigma = noiseSigma;
-
-        // Adaptive threshold = lambda * sigma_v (e.g. 6.0 * sigma)
-        const threshold = Math.max(cfg.lambda * noiseSigma, 12.0);
-        tr.currentThreshold = threshold;
-
-        const minDurSamples = Math.max(4, Math.round(cfg.minDurationMs * fs / 1000.0));
-        const mergeGapSamples = Math.round(cfg.mergeGapMs * fs / 1000.0);
-
-        // Find candidate runs above threshold
-        const rawSaccades = [];
-        let sacStart = -1;
-        for (let i = 0; i <= n; i++) {
-            const isSac = i < n && tr.valid[i] && tr.speed[i] >= threshold;
-            if (isSac && sacStart === -1) {
-                sacStart = i;
-            } else if (!isSac && sacStart !== -1) {
-                const sacEnd = i - 1;
-                if (sacEnd - sacStart + 1 >= minDurSamples) {
-                    rawSaccades.push({ start: sacStart, end: sacEnd });
-                }
-                sacStart = -1;
-            }
-        }
-
-        // Merge adjacent sub-events separated by less than mergeGap (e.g. 20 ms)
-        const merged = [];
-        for (const ev of rawSaccades) {
-            if (merged.length > 0 && ev.start - merged[merged.length - 1].end <= mergeGapSamples) {
-                merged[merged.length - 1].end = ev.end;
-            } else {
-                merged.push({ start: ev.start, end: ev.end });
-            }
-        }
-
-        // Refine boundaries and apply high-precision acceptance criteria
-        const marginSamples = Math.round(25.0 * fs / 1000.0);
-        const floorSpeed = 2.5 * noiseSigma;
-
-        for (const ev of merged) {
-            const s = ev.start, e = ev.end;
-
-            // Find peak speed in candidate
-            let pk = s, maxSp = tr.speed[s];
-            for (let t = s; t <= e; t++) {
-                if (tr.speed[t] > maxSp) { maxSp = tr.speed[t]; pk = t; }
-            }
-
-            // CRITERION 1: High Accuracy filter — must reach minPeakVel (50 deg/s) & 1.5 * threshold
-            if (maxSp < Math.max(cfg.minPeakVel, 1.5 * threshold)) continue;
-
-            // Boundary refinement via tangential acceleration zero-crossing
-            const lo = Math.max(0, s - marginSamples);
-            const hi = Math.min(n - 1, e + marginSamples);
-
-            // Onset: walk backward while acceleration > 0
-            let j = pk - 1;
-            while (j >= lo && tr.tangentialAccel[j] > 0) j--;
-            const on = Math.min(Math.max(lo, j + 1), pk);
-
-            // Offset: walk forward until speed drops below floor, then zero crossing
-            let lastAbove = pk;
-            for (let t = pk; t <= hi; t++) {
-                if (tr.speed[t] >= floorSpeed) lastAbove = t;
-            }
-            j = lastAbove;
-            while (j <= hi && tr.tangentialAccel[j] < 0) j++;
-            const off = Math.min(hi, Math.max(pk, j));
-
-            // CRITERION 2: Minimum Amplitude (rejects tremor / drift jitters)
-            const dx = (tr.smoothX[off] - tr.smoothX[on]) * state.degPerUnit;
-            const dy = (tr.smoothY[off] - tr.smoothY[on]) * state.degPerUnit;
-            const amp = Math.sqrt(dx * dx + dy * dy);
-            if (amp < cfg.minAmplitude) continue;
-
-            // CRITERION 3: Do not overlap blinks
-            const overlapsBlink = pre.some(b => b.cls === CLS_BLINK && !(off < b.onset || on > b.offset));
-            if (!overlapsBlink) {
-                pre.push({ onset: on, offset: off, cls: CLS_SACCADE });
-            }
+        // 2. Saccades: HMM on the raw trace (unit-free score; the display filter is not used)
+        for (const e of UnEyeHMM.detect(tr.x, tr.y, tr.valid, state.rateHz)) {
+            const overlapsBlink = pre.some(b => b.cls === CLS_BLINK && !(e.offset < b.onset || e.onset > b.offset));
+            if (!overlapsBlink) pre.push({ onset: e.onset, offset: e.offset, cls: CLS_SACCADE });
         }
 
         pre.sort((a, b) => a.onset - b.onset);
         state.prelabels[trialIdx] = pre;
+    }
+
+    // proposals of every trial from the current source: the trained network if there is one and the toggle is on, otherwise the HMM
+    async function refreshSuggestions() {
+        if (!state.trials.length) return;
+        if (state.netSuggestions && state.trainedModelBin) {
+            await applyModelAsPrelabeler();
+        } else {
+            for (let t = 0; t < state.trials.length; t++) { runPrelabeler(t, state.prelabelerMode); syncRenderedLabels(t); }
+        }
+        if (state.pass === PASS_TWO) { buildRefineQueue(); state.refineIdx = Math.min(state.refineIdx, Math.max(0, state.refineQueue.length - 1)); focusCurrentMark(); }
+        updateStatus();
+        render();
+    }
+
+    function setNetSuggestions(on) {
+        state.netSuggestions = Boolean(on);
+        try { localStorage.setItem('uneye_netSuggestions', on ? '1' : '0'); } catch (e) { }
+        if (elements.netSuggestBtn) {
+            elements.netSuggestBtn.textContent = 'Network suggestions: ' + (on ? 'On' : 'Off');
+            elements.netSuggestBtn.classList.toggle('btn-accent', Boolean(on));
+            elements.netSuggestBtn.title = on ? 'Proposals come from the network trained on your labels (HMM until a network has been trained). Tap for HMM proposals.'
+                : 'Proposals come from the label-free HMM. Tap to show the proposals of the network trained on your labels.';
+        }
+    }
+
+    // automatic training: only when a pass 2 is finished (the durations are refined then), never during pass 1
+    function maybeAutoTrain() {
+        if (state.isTraining || !state.trials.length) return;
+        if (totalReviewedSeconds() - state.reviewedAtLastTraining >= state.minNewSecondsForAutoTrain) runTrainingRound();
     }
 
     // --- State Operations: Point Marks & Refinement ---
@@ -920,6 +864,7 @@
     // --- Pass Switching & Navigation ---
     function setPass(newPass) {
         resetGesture();
+        const leavingPassTwo = state.pass === PASS_TWO && newPass === PASS_ONE;
         if (state.pass === PASS_ONE && newPass === PASS_TWO) scanCurrentWindow();     // the window on screen has been seen
         state.pass = newPass;
         state.zoomMultiplier = 1.0;
@@ -956,6 +901,7 @@
             syncCanvasDimensions();
             render();
         });
+        if (leavingPassTwo) maybeAutoTrain();
     }
 
     // Pass 2 shows all events (both pending point marks and refined/accepted expert events) that lie in windows displayed in pass 1
@@ -2012,8 +1958,8 @@
                 evaluateConvergenceFlag();
                 finishTraining(`Trained (${round.epochs} ep — Test F1: ${round.testF1Saccade.toFixed(2)})`);
 
-                // Update prelabeler on unreviewed portions
-                await applyModelAsPrelabeler();
+                // proposals from the new network only if the toggle is on (otherwise the HMM's stay)
+                if (state.netSuggestions) await refreshSuggestions();
                 saveToIndexedDB();
             }
         };
@@ -2136,6 +2082,7 @@
                 expertEvents: state.expertEvents,
                 pointMarks: state.pointMarks,
                 prelabels: state.prelabels,
+                prelabelerMode: state.prelabelerMode,
                 rateHz: state.rateHz,
                 scale: state.scale,
                 convergenceHistory: state.convergenceHistory,
@@ -2152,13 +2099,16 @@
     async function restoreFromIndexedDB() {
         try {
             const db = await openDB();
-            if (!db) return;
+            if (!db) return false;
             const tx = db.transaction(STORE_NAME, 'readonly');
             const store = tx.objectStore(STORE_NAME);
             const req = store.get('autosave');
+            return await new Promise((resolve) => {
+            req.onerror = () => resolve(false);
             req.onsuccess = () => {
                 const data = req.result;
-                if (!data || !data.trials || data.trials.length === 0) return;
+                if (!data || !data.trials || data.trials.length === 0) { resolve(false); return; }
+                if (elements.startModal) elements.startModal.classList.add('hidden');
                 state.trials = data.trials.map(tr => ({
                     x: new Float32Array(tr.x),
                     y: new Float32Array(tr.y),
@@ -2176,6 +2126,7 @@
                 state.prelabels = data.prelabels || Array.from({ length: n }, () => []);
                 state.rateHz = data.rateHz || 1000.0;
                 state.scale = data.scale || 1.0;
+                state.prelabelerMode = data.prelabelerMode === 'none' ? 'none' : 'hmm';
                 state.convergenceHistory = data.convergenceHistory || [];
                 state.trainedModelBin = data.trainedModelBin || null;
                 state.trainedModelJson = data.trainedModelJson || null;
@@ -2192,19 +2143,20 @@
 
                 for (let t = 0; t < n; t++) recomputeReviewed(t, false);
                 preprocessAllTrials();
-                if (staleModel) {          // its proposals go too: the rule-based pre-labeler proposes again
-                    for (let t = 0; t < n; t++) { runPrelabeler(t, 'hmm'); syncRenderedLabels(t); }
-                    saveToIndexedDB();
-                }
-                updateStatus();
-                render();
                 if (state.trainedModelBin) {
                     const worker = getTrainWorker();
                     worker.postMessage({ type: 'LOAD_MODEL', data: state.trainedModelBin });
                 }
+                // proposals are recomputed from the current source (the saved ones may come from an older detector or from the network)
+                refreshSuggestions().then(() => { if (staleModel) saveToIndexedDB(); });
+                updateStatus();
+                render();
+                resolve(true);
             };
+            });
         } catch (e) {
             console.log("IndexedDB restore:", e);
+            return false;
         }
     }
 
@@ -2890,7 +2842,8 @@
         elements.winMsInput.addEventListener('change', e => setWinMs(parseFloat(e.target.value)));
         elements.prevEpochBtn.addEventListener('click', prevEpoch);
 
-        elements.demoBtn.addEventListener('click', () => generateDemoDataset());
+        if (elements.startOpenBtn) elements.startOpenBtn.addEventListener('click', () => elements.fileInput.click());
+        if (elements.netSuggestBtn) elements.netSuggestBtn.addEventListener('click', () => { setNetSuggestions(!state.netSuggestions); refreshSuggestions(); });
 
         elements.openBtn.addEventListener('click', () => elements.fileInput.click());
 
@@ -2947,16 +2900,12 @@
         if (elements.modalChangeTraceBtn) {
             elements.modalChangeTraceBtn.addEventListener('click', () => elements.fileInput.click());
         }
-        restoreFromIndexedDB();
         elements.exportBtn.addEventListener('click', exportDataset);
 
         // Filter Settings Dialog
         elements.filterBtn.addEventListener('click', () => {
             elements.enableSg.checked = state.filterSettings.enabled;
             elements.sgWindowMs.value = String(state.filterSettings.windowMs);
-            elements.lambdaThreshold.value = String(state.filterSettings.lambda);
-            elements.minPeakVel.value = String(state.filterSettings.minPeakVel);
-            elements.minAmplitude.value = String(state.filterSettings.minAmplitude);
             elements.filterModal.classList.remove('hidden');
         });
 
@@ -2966,23 +2915,8 @@
         elements.filterApplyBtn.addEventListener('click', () => {
             state.filterSettings.enabled = elements.enableSg.checked;
             state.filterSettings.windowMs = parseInt(elements.sgWindowMs.value, 10) || 21;
-            state.filterSettings.lambda = parseFloat(elements.lambdaThreshold.value) || 6.0;
-            state.filterSettings.minPeakVel = parseFloat(elements.minPeakVel.value) || 50.0;
-            state.filterSettings.minAmplitude = parseFloat(elements.minAmplitude.value) || 0.20;
-
-            // Re-preprocess all trials and re-run prelabeling without wiping reviewed ranges or expert events
+            // the smoothing is for the display; the proposals (HMM or network) do not depend on it
             preprocessAllTrials();
-            for (let t = 0; t < state.trials.length; t++) {
-                runPrelabeler(t, 'hmm');
-                syncRenderedLabels(t);
-            }
-
-            if (state.pass === PASS_TWO) {
-                buildRefineQueue();
-                state.refineIdx = 0;
-                focusCurrentMark();
-            }
-
             elements.filterModal.classList.add('hidden');
             updateStatus();
             render();
@@ -3054,7 +2988,7 @@
                 state.refineIdx++;
             } else {
                 const nt = findTrialWithEvents(state.currentTrialIdx, 1);
-                if (nt < 0) return;                       // last event of the last trial
+                if (nt < 0) { maybeAutoTrain(); return; }   // last event of the last trial: pass 2 is finished
                 enterTrialForRefine(nt, false);
             }
             state.zoomMultiplier = 1.0;
@@ -3106,8 +3040,12 @@
         setupPointerEvents();
         resizeCanvas();
 
-        // Automatically load synthetic demo on initial launch so iPad user can test immediately!
-        generateDemoDataset();
+        try { const v = localStorage.getItem('uneye_netSuggestions'); setNetSuggestions(v === null ? true : v === '1'); } catch (e) { setNetSuggestions(true); }
+
+        // No simulated data: resume the autosaved session, otherwise only a window to choose a file
+        restoreFromIndexedDB().then(restored => {
+            if (!restored && !state.trials.length && elements.startModal) elements.startModal.classList.remove('hidden');
+        });
     }
 
     if (document.readyState === 'loading') {
@@ -3118,6 +3056,11 @@
 
     { const b = document.getElementById('appBuild'); if (b) b.textContent = 'Build ' + APP_BUILD; }
     window.state = state;
+    window.generateDemoDataset = generateDemoDataset;      // simulated traces for the automated tests only (no button, never loaded at start)
+    window.refreshSuggestions = refreshSuggestions;
+    window.setNetSuggestions = setNetSuggestions;
+    window.maybeAutoTrain = maybeAutoTrain;
+    window.setPass = setPass;
     window.nextEpoch = nextEpoch;
     window.applyGridWindow = applyGridWindow;
     window.humanLabels = humanLabels;

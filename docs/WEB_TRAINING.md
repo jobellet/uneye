@@ -114,13 +114,13 @@ When verifying on a physical iPad M1 (Safari) or Android phone (Chrome):
    - Enable Airplane Mode / disconnect Wi-Fi and refresh: confirm the page loads completely offline.
 
 2. **Touch Gestures & Labeling Flow**:
-   - Tap "⚡ Demo" to load 8 trials of synthetic gaze data.
+   - Open an eye-trace file in the start window (no simulated data is loaded; the automated test calls `generateDemoDataset()` itself).
    - **Pass 1 (Mark)**: Tap to place point marks on saccade candidates.
    - **Pass 2 (Refine)**: Press and drag boundaries to precisely refine saccade onset and offset.
    - Mark epoch as reviewed. Notice that unrefined point marks never enter training.
 
 3. **On-Device Training**:
-   - Tap **Train** (or review $\ge 20$ s to trigger auto-train).
+   - Tap **Train**, or finish a pass 2 (leave it, or reach its last event): training then starts by itself if at least 2 s were newly reviewed. It never starts during pass 1.
    - Confirm status changes to `Epoch 1/60 · Loss: ... · Val F1: ... · ETA: ...`.
    - Verify screen stays awake during training (`navigator.wakeLock`).
    - Verify canvas panning and zooming remain smooth at 60 fps while training runs in the worker.
@@ -132,7 +132,7 @@ When verifying on a physical iPad M1 (Safari) or Android phone (Chrome):
 5. **Post-Training Inference & Metrics**:
    - On training completion, verify `testF1Saccade` and `testKappaSaccade` update with real numbers calculated on the held-out `testTrials`.
    - Open **Metrics**: verify learning curve canvas plots the real test metrics.
-   - Navigate to unreviewed trials: verify putative pre-labels now reflect the trained U'n'Eye network rather than the initial HMM.
+   - Navigate to unreviewed trials: with *Network suggestions: On* (menu) the proposals are the trained network's; switch it Off and they are the HMM's again.
 
 6. **Export & Persistence**:
    - Tap **Model**: confirm browser downloads `uneye_model.bin` (75,708 bytes for 2 classes) and `uneye_model.json` sidecar.
