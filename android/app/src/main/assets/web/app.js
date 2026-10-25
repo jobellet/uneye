@@ -1,6 +1,6 @@
 /**
  * U'n'Eye — Offline Saccade Labeler (Web / iPad / Touch)
- * Client-side high-performance canvas engine with touch, pinch-zoom, loupe,
+ * Client-side high-performance canvas engine with touch, pinch-zoom, boundary handles,
  * file IO (CSV & MAT v5), and convergence tracking.
  */
 
@@ -60,7 +60,7 @@
         dragCurrentSample: -1,
         dragPointerPos: { x: 0, y: 0 },
         isDraggingSpan: false,
-        showLoupe: false,
+        handleDrag: null,       // {ev, side, onset, offset}: a boundary handle being dragged (ev null = the pass-2 proposal on screen)
         lastTapTime: 0,
         lastTapSample: -1,
         autoSlide: false,           // auto-slide window 50ms before event after manual selection (disabled by default)
@@ -185,7 +185,6 @@
         alertModal: document.getElementById('alertModal'),
         alertMessage: document.getElementById('alertMessage'),
         alertOkBtn: document.getElementById('alertOkBtn'),
-        loupeLabel: document.getElementById('loupeLabel'),
     };
 
     const ctx = elements.canvas.getContext('2d');
@@ -346,7 +345,7 @@
     // Version of the trainer that produced a saved model. Models saved by earlier versions (random 3-class head:
     // saccades proposed as blinks, test F1 0) are dropped when a session is restored, with the proposals they made.
     const MODEL_VERSION = 2;
-    const APP_BUILD = '2026-10-25';
+    const APP_BUILD = '2026-10-25b';
 
     function computeRobustSigma(arr, valid) {
         const vals = [];
@@ -474,6 +473,9 @@
     function curLen() { return trialLenOf(state.currentTrialIdx); }
 
     const TOUCH_REFRACTORY_MS = 600;   // after a pinch zoom, touches within this time are not marks
+    const HANDLE_R_PX = 7;             // boundary handles of an event (dots at mid-height on its onset / offset lines)
+    const HANDLE_HIT_X_PX = 22;        // a touch this close to a handle grabs it
+    const HANDLE_HIT_Y_PX = 70;
     const WIN_OVERLAP = 0.10;
 
     function winSamples() { return Math.max(20, Math.round(state.winMs * state.rateHz / 1000)); }
@@ -689,6 +691,7 @@
 
     // --- State Operations: Point Marks & Refinement ---
     function saveUndo(trialIdx) {
+        if (!state.undoStack[trialIdx]) state.undoStack[trialIdx] = [];      // e.g. a session restored from the autosave
         state.undoStack[trialIdx].push({
             pointMarks: JSON.parse(JSON.stringify(state.pointMarks[trialIdx])),
             expertEvents: JSON.parse(JSON.stringify(state.expertEvents[trialIdx])),
@@ -856,7 +859,7 @@
         state.pointers.clear();
         state.pointerDown = false;
         state.isDraggingSpan = false;
-        state.showLoupe = false;
+        state.handleDrag = null;
         state.dragStartSample = -1;
         state.dragCurrentSample = -1;
     }
@@ -1168,10 +1171,6 @@
         // 5. Draw Prelabels & Annotations
         drawAnnotations(width, height);
 
-        // 6. Draw Magnifier Loupe if active
-        if (state.showLoupe && state.dragCurrentSample >= 0) {
-            drawLoupe(width, height);
-        }
     }
 
     function drawEmptyState(w, h) {
@@ -1381,9 +1380,10 @@
 
         // 3. Expert events (Pass 2 - Solid brackets with handles)
         for (const e of state.expertEvents[trialIdx]) {
-            if (e.offset < state.fromSample || e.onset > state.toSample) continue;
-            const x1 = sampleToPx(e.onset, w);
-            const x2 = sampleToPx(e.offset, w);
+            const hd = state.handleDrag && state.handleDrag.ev === e ? state.handleDrag : e;     // live bounds while a handle is dragged
+            if (hd.offset < state.fromSample || hd.onset > state.toSample) continue;
+            const x1 = sampleToPx(hd.onset, w);
+            const x2 = sampleToPx(hd.offset, w);
             const color = e.cls === CLS_SACCADE ? '#1565C0' : '#C62828';
             ctx.strokeStyle = color;
             ctx.lineWidth = 3.5;
@@ -1391,8 +1391,8 @@
 
             // Circular handles on boundaries
             ctx.fillStyle = color;
-            ctx.beginPath(); ctx.arc(x1, h / 2, 6, 0, 2 * Math.PI); ctx.fill();
-            ctx.beginPath(); ctx.arc(x2, h / 2, 6, 0, 2 * Math.PI); ctx.fill();
+            ctx.beginPath(); ctx.arc(x1, h / 2, HANDLE_R_PX, 0, 2 * Math.PI); ctx.fill();
+            ctx.beginPath(); ctx.arc(x2, h / 2, HANDLE_R_PX, 0, 2 * Math.PI); ctx.fill();
         }
 
         // 4. Live Drag Preview
@@ -1445,80 +1445,12 @@
             ctx.moveTo(x2, 24); ctx.lineTo(x2, h);
             ctx.stroke();
             ctx.setLineDash([]);
+
+            // its boundary handles (draggable)
+            ctx.fillStyle = color;
+            ctx.beginPath(); ctx.arc(x1, h / 2, HANDLE_R_PX, 0, 2 * Math.PI); ctx.fill();
+            ctx.beginPath(); ctx.arc(x2, h / 2, HANDLE_R_PX, 0, 2 * Math.PI); ctx.fill();
         }
-    }
-
-    // --- Floating Magnifier Loupe (Above finger/stylus) ---
-    function drawLoupe(w, h) {
-        const tr = state.trials[state.currentTrialIdx];
-        if (!tr) return;
-
-        const radius = 68;
-        const zoom = 3.5;
-        const fingerX = state.dragPointerPos.x;
-        const fingerY = state.dragPointerPos.y;
-
-        // Position loupe ~95px above touch point
-        const loupeX = Math.max(radius + 10, Math.min(w - radius - 10, fingerX));
-        const loupeY = Math.max(radius + 10, fingerY - 95);
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(loupeX, loupeY, radius, 0, 2 * Math.PI);
-        ctx.clip();
-
-        // White background inside loupe
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(loupeX - radius, loupeY - radius, radius * 2, radius * 2);
-
-        // Center on the sample under finger
-        const centerSample = state.dragCurrentSample;
-        const sampleSpan = Math.round((radius * 2) / zoom);
-        const subFrom = centerSample - Math.floor(sampleSpan / 2);
-        const subTo = centerSample + Math.floor(sampleSpan / 2);
-
-        // Draw zoomed Position X and Y
-        function drawSubTrace(arr, color, offsetY) {
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 2.5;
-            ctx.beginPath();
-            let started = false;
-            for (let s = subFrom; s <= subTo; s++) {
-                if (s >= 0 && s < arr.length && !isNaN(arr[s])) {
-                    const lx = loupeX + (s - centerSample) * zoom;
-                    const ly = loupeY + offsetY - arr[s] * 20;
-                    if (!started) { ctx.moveTo(lx, ly); started = true; }
-                    else { ctx.lineTo(lx, ly); }
-                }
-            }
-            ctx.stroke();
-        }
-
-        drawSubTrace(tr.x, '#1E88E5', -16);
-        drawSubTrace(tr.y, '#43A047', 16);
-
-        // Reticle Crosshairs
-        ctx.strokeStyle = '#D32F2F';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
-        ctx.moveTo(loupeX, loupeY - radius); ctx.lineTo(loupeX, loupeY + radius);
-        ctx.moveTo(loupeX - radius, loupeY); ctx.lineTo(loupeX + radius, loupeY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        ctx.restore();
-
-        // Loupe border & shadow
-        ctx.save();
-        ctx.strokeStyle = '#1565C0';
-        ctx.lineWidth = 3.5;
-        ctx.shadowColor = 'rgba(0,0,0,0.3)';
-        ctx.shadowBlur = 12;
-        ctx.beginPath();
-        ctx.arc(loupeX, loupeY, radius, 0, 2 * Math.PI);
-        ctx.stroke();
-        ctx.restore();
     }
 
     // --- Touch & Pointer Event Handlers (iPad & Desktop) ---
@@ -1526,6 +1458,29 @@
         const canvas = elements.canvas;
         // position in the canvas from clientX/Y (the offset of synthetic events is wrong in the Android WebView)
         const local = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+
+        // boundary handle under the finger: the dots at mid-height on the onset / offset lines of the refined events,
+        // and in pass 2 of the event under refinement. Dragging one moves that boundary only.
+        const handleAt = (pos) => {
+            const w = canvas.clientWidth, h = canvas.clientHeight;
+            if (state.eraser || Math.abs(pos.y - h / 2) > HANDLE_HIT_Y_PX) return null;
+            let best = null, bestD = HANDLE_HIT_X_PX;
+            const consider = (ev, onset, offset, strict) => {
+                for (const side of ['on', 'off']) {
+                    const d = Math.abs(sampleToPx(side === 'on' ? onset : offset, w) - pos.x);
+                    if (strict ? d < bestD : d <= bestD) { bestD = d; best = { ev, side, onset, offset }; }
+                }
+            };
+            const cur = state.pass === PASS_TWO && state.currentMarkAt >= 0 && state.currentPutativeOnset >= 0;
+            if (cur) consider(null, state.currentPutativeOnset, state.currentPutativeOffset, true);
+            for (const e of state.expertEvents[state.currentTrialIdx] || []) {      // a refined event wins over the proposal drawn on it
+                if (e.offset >= state.fromSample && e.onset <= state.toSample) consider(e, e.onset, e.offset, false);
+            }
+            if (!best) return null;
+            best.on0 = best.onset; best.off0 = best.offset;
+            best.current = cur && best.onset === state.currentPutativeOnset && best.offset === state.currentPutativeOffset;
+            return best;
+        };
 
         canvas.addEventListener('pointerdown', (e) => {
             try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
@@ -1545,7 +1500,7 @@
                 state.dragCurrentSample = sample;
                 state.dragPointerPos = local(e);
                 state.isDraggingSpan = false;
-                state.showLoupe = false;
+                state.handleDrag = state.gestureIgnored ? null : handleAt(local(e));
             } else if (state.pointers.size === 2) {
                 // Start 2-Finger Pinch Zoom
                 const pts = Array.from(state.pointers.values());
@@ -1553,12 +1508,13 @@
                 state.initialPinchFrom = state.fromSample;
                 state.initialPinchTo = state.toSample;
                 state.isDraggingSpan = false;
-                state.showLoupe = false;
+                state.handleDrag = null;
             }
             render();
         });
 
-        canvas.addEventListener('pointermove', (e) => {
+        // move / up / cancel are listened to on the window: they still arrive when the pointer capture is lost
+        window.addEventListener('pointermove', (e) => {
             if (!state.pointers.has(e.pointerId)) return;
             state.pointers.set(e.pointerId, local(e));
 
@@ -1567,10 +1523,14 @@
                 const sample = pxToSample(local(e).x, canvas.clientWidth);
                 state.dragCurrentSample = sample;
 
-                // Threshold to enter drag mode vs tap
-                if (!state.isDraggingSpan && Math.abs(sample - state.dragStartSample) > 8) {
+                const hd = state.handleDrag;
+                if (hd) {
+                    if (hd.side === 'on') hd.onset = Math.max(0, Math.min(sample, hd.offset - 1));
+                    else hd.offset = Math.min(curLen() - 1, Math.max(sample, hd.onset + 1));
+                    if (hd.current) { state.currentPutativeOnset = hd.onset; state.currentPutativeOffset = hd.offset; }
+                } else if (!state.isDraggingSpan && Math.abs(sample - state.dragStartSample) > 8) {
+                    // Threshold to enter drag mode vs tap
                     state.isDraggingSpan = true;
-                    state.showLoupe = true;
                 }
                 render();
             } else if (state.pointers.size === 2) {
@@ -1590,59 +1550,64 @@
             }
         });
 
-        canvas.addEventListener('pointerup', (e) => {
+        window.addEventListener('pointerup', (e) => {
+            if (!state.pointers.has(e.pointerId)) return;
             try { canvas.releasePointerCapture(e.pointerId); } catch (err) { }
             state.pointers.delete(e.pointerId);
             if (state.gestureMulti) state.lastMultiTouchEnd = performance.now();
 
             if (state.pointers.size === 0 && state.pointerDown) {
                 state.pointerDown = false;
-                state.showLoupe = false;
-
-                if (state.gestureMulti || state.gestureIgnored) {
-                    // end of a pinch zoom (or a touch right after one): never a mark
-                    state.isDraggingSpan = false;
-                } else if (state.eraser) {
-                    const a = state.isDraggingSpan ? Math.min(state.dragStartSample, state.dragCurrentSample) : state.dragStartSample - 8;
-                    const b = state.isDraggingSpan ? Math.max(state.dragStartSample, state.dragCurrentSample) : state.dragStartSample + 8;
-                    eraseRange(state.currentTrialIdx, a, b);
-                } else if (!state.isDraggingSpan) {
-                    // Tap Event
-                    handleTap(state.dragStartSample);
-                } else {
-                    // Completed Span Drag
-                    const onset = Math.min(state.dragStartSample, state.dragCurrentSample);
-                    const offset = Math.max(state.dragStartSample, state.dragCurrentSample);
-                    if (offset - onset >= 5) {
-                        const markAt = state.currentMarkAt >= 0 ? state.currentMarkAt : state.dragStartSample;
-                        const prevLen = state.refineQueue.length;
-                        refineMark(state.currentTrialIdx, markAt, onset, offset, state.activeClass);
-                        if (state.pass === PASS_TWO) {
-                            buildRefineQueue();
-                            const newLen = state.refineQueue.length;
-                            state.refineIdx = newLen < prevLen ? Math.min(state.refineIdx + 1, newLen) : state.refineIdx + 1;
-                            state.zoomMultiplier = 1.0;
-                            focusCurrentMark();
-                        } else if (state.pass === PASS_ONE) {
-                            slideWindowAfterEvent(onset);
+                try {
+                    if (state.gestureMulti || state.gestureIgnored) {
+                        // end of a pinch zoom (or a touch right after one): never a mark
+                        state.isDraggingSpan = false;
+                    } else if (state.handleDrag) {
+                        commitHandleDrag(state.handleDrag);
+                    } else if (state.eraser) {
+                        const a = state.isDraggingSpan ? Math.min(state.dragStartSample, state.dragCurrentSample) : state.dragStartSample - 8;
+                        const b = state.isDraggingSpan ? Math.max(state.dragStartSample, state.dragCurrentSample) : state.dragStartSample + 8;
+                        eraseRange(state.currentTrialIdx, a, b);
+                    } else if (!state.isDraggingSpan) {
+                        // Tap Event
+                        handleTap(state.dragStartSample);
+                    } else {
+                        // Completed Span Drag
+                        const onset = Math.min(state.dragStartSample, state.dragCurrentSample);
+                        const offset = Math.max(state.dragStartSample, state.dragCurrentSample);
+                        if (offset - onset >= 5) {
+                            const markAt = state.currentMarkAt >= 0 ? state.currentMarkAt : state.dragStartSample;
+                            const prevLen = state.refineQueue.length;
+                            refineMark(state.currentTrialIdx, markAt, onset, offset, state.activeClass);
+                            if (state.pass === PASS_TWO) {
+                                buildRefineQueue();
+                                const newLen = state.refineQueue.length;
+                                state.refineIdx = newLen < prevLen ? Math.min(state.refineIdx + 1, newLen) : state.refineIdx + 1;
+                                state.zoomMultiplier = 1.0;
+                                focusCurrentMark();
+                            } else if (state.pass === PASS_ONE) {
+                                slideWindowAfterEvent(onset);
+                            }
                         }
                     }
+                } finally {          // the selection never stays on screen, even if storing the event failed
+                    state.isDraggingSpan = false;
+                    state.handleDrag = null;
+                    state.dragStartSample = -1;
+                    state.dragCurrentSample = -1;
+                    updateStatus();
+                    render();
                 }
-                state.isDraggingSpan = false;
-                state.dragStartSample = -1;
-                state.dragCurrentSample = -1;
-                updateStatus();
-                render();
             }
         });
 
-        canvas.addEventListener('pointercancel', (e) => {
+        window.addEventListener('pointercancel', (e) => {
+            if (!state.pointers.has(e.pointerId)) return;
             try { canvas.releasePointerCapture(e.pointerId); } catch (err) { }
             if (state.gestureMulti) state.lastMultiTouchEnd = performance.now();
-            state.pointers.clear();
-            state.pointerDown = false;
-            state.isDraggingSpan = false;
-            state.showLoupe = false;
+            const hd = state.handleDrag;
+            if (hd && hd.current) { state.currentPutativeOnset = hd.on0; state.currentPutativeOffset = hd.off0; }
+            resetGesture();
             render();
         });
 
@@ -1659,6 +1624,34 @@
             state.toSample = Math.min(curLen() - 1, state.fromSample + newSpan);
             render();
         }, { passive: false });
+    }
+
+    // end of a boundary-handle drag: the event keeps its other boundary; in pass 2 the view stays on the same event (no skip, no re-zoom)
+    function commitHandleDrag(hd) {
+        const t = state.currentTrialIdx;
+        if (hd.onset === hd.on0 && hd.offset === hd.off0) return;
+        if (hd.ev) {
+            saveUndo(t);
+            const i = state.expertEvents[t].indexOf(hd.ev);
+            if (i >= 0) state.expertEvents[t][i] = { onset: hd.onset, offset: hd.offset, cls: hd.ev.cls, fromPrelabel: false };
+            mergeOverlappingEvents(t);
+            syncRenderedLabels(t);
+            recomputeReviewed(t, true);
+        } else {
+            refineMark(t, state.currentMarkAt, hd.onset, hd.offset, state.activeClass);      // the proposal under refinement becomes a refined event
+        }
+        if (state.pass !== PASS_TWO) return;
+        const at = hd.current ? Math.round((hd.onset + hd.offset) / 2) : state.currentMarkAt;
+        buildRefineQueue();
+        const i = state.refineQueue.findIndex(q => q.isExpert ? q.onset <= at && at <= q.offset : q.at === at);
+        if (i < 0) return;
+        const q = state.refineQueue[i];
+        state.refineIdx = i;
+        state.currentMarkAt = q.at;
+        if (q.isExpert) { state.currentPutativeOnset = q.onset; state.currentPutativeOffset = q.offset; }
+        if (elements.eventCounterBadge) {
+            elements.eventCounterBadge.textContent = `Event ${i + 1}/${state.refineQueue.length} (${state.activeClass === CLS_SACCADE ? "Saccade" : "Blink"})`;
+        }
     }
 
     function slideWindowAfterEvent(eventOnset) {
@@ -2067,15 +2060,29 @@
         });
     }
 
-    async function saveToIndexedDB() {
+    // Autosave, debounced: one write per burst of edits. The traces go to their own key, written only when a new dataset is loaded,
+    // as typed arrays (copying every trial as plain arrays on each label blocked the screen for > 1 s on a phone).
+    let saveTimer = null, savedTrials = null;
+    function saveToIndexedDB() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(flushSave, 800);
+    }
+
+    async function flushSave() {
+        clearTimeout(saveTimer);
+        saveTimer = null;
         try {
             const db = await openDB();
             if (!db) return;
             const tx = db.transaction(STORE_NAME, 'readwrite');
             const store = tx.objectStore(STORE_NAME);
+            if (savedTrials !== state.trials) {
+                store.put(state.trials.map(tr => ({ x: tr.x, y: tr.y, valid: tr.valid, name: tr.name })), 'autosave_trials');
+                savedTrials = state.trials;
+            }
             const payload = {
-                trials: state.trials.map(tr => ({ x: Array.from(tr.x), y: Array.from(tr.y), name: tr.name })),
-                labels: state.labels.map(l => Array.from(l)),
+                nTrials: state.trials.length,
+                labels: state.labels,
                 reviewedRanges: state.reviewedRanges,
                 scanWins: state.scanWins,
                 winMs: state.winMs,
@@ -2095,6 +2102,9 @@
             console.log("IndexedDB save:", e);
         }
     }
+    // a pending save is written before the page goes away (app switched, tab closed)
+    document.addEventListener('visibilitychange', () => { if (document.hidden && saveTimer) flushSave(); });
+    window.addEventListener('pagehide', () => { if (saveTimer) flushSave(); });
 
     async function restoreFromIndexedDB() {
         try {
@@ -2103,19 +2113,23 @@
             const tx = db.transaction(STORE_NAME, 'readonly');
             const store = tx.objectStore(STORE_NAME);
             const req = store.get('autosave');
+            const reqTrials = store.get('autosave_trials');
             return await new Promise((resolve) => {
-            req.onerror = () => resolve(false);
-            req.onsuccess = () => {
+            req.onerror = reqTrials.onerror = () => resolve(false);
+            reqTrials.onsuccess = () => {        // requests of one transaction complete in order: 'autosave' is ready too
                 const data = req.result;
-                if (!data || !data.trials || data.trials.length === 0) { resolve(false); return; }
+                const savedTr = (data && data.trials) || reqTrials.result;      // sessions saved before the split keep the traces in 'autosave'
+                if (!data || !savedTr || savedTr.length === 0 || (data.nTrials && data.nTrials !== savedTr.length)) { resolve(false); return; }
                 if (elements.startModal) elements.startModal.classList.add('hidden');
-                state.trials = data.trials.map(tr => ({
+                state.trials = savedTr.map(tr => ({
                     x: new Float32Array(tr.x),
                     y: new Float32Array(tr.y),
                     name: tr.name || '',
-                    valid: new Uint8Array(tr.x.length).fill(1)
+                    valid: tr.valid ? new Uint8Array(tr.valid) : new Uint8Array(tr.x.length).fill(1)
                 }));
+                savedTrials = data.trials ? null : state.trials;     // an old-format session is rewritten in the new layout at the next save
                 const n = state.trials.length;
+                state.undoStack = Array.from({ length: n }, () => []);
                 state.labels = data.labels.map(l => new Uint8Array(l));
                 state.reviewedRanges = data.reviewedRanges || Array.from({ length: n }, () => []);
                 state.expertEvents = data.expertEvents || Array.from({ length: n }, () => []);
@@ -3056,6 +3070,7 @@
 
     { const b = document.getElementById('appBuild'); if (b) b.textContent = 'Build ' + APP_BUILD; }
     window.state = state;
+    window.flushSave = flushSave;
     window.generateDemoDataset = generateDemoDataset;      // simulated traces for the automated tests only (no button, never loaded at start)
     window.refreshSuggestions = refreshSuggestions;
     window.setNetSuggestions = setNetSuggestions;

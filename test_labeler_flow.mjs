@@ -418,6 +418,28 @@ check(JSON.stringify(tapCls) === '[[300,330,1]]', `a red (blink) proposal tapped
 const p1back = await ev(() => { document.getElementById('switchPassBtn').click(); const a = state.currentMarkAt; document.getElementById('switchPassBtn').click(); return [a >= 0, state.pass, state.currentMarkAt, state.currentPutativeOnset]; });
 check(p1back[0] && p1back[1] === 1 && p1back[2] === -1 && p1back[3] === -1, `back in pass 1 there is no event under refinement: ${JSON.stringify(p1back)}`);
 
+// --- boundary handles: the dot at mid-height on an onset / offset line moves that boundary only; in pass 2 the view stays on the event
+const hx = (smp) => page.evaluate(smp => { const c = document.getElementById('traceCanvas'); return [c.clientWidth * (smp - state.fromSample) / (state.toSample - state.fromSample), c.clientHeight / 2]; }, smp);
+await sleep(700);
+await ev(() => { state.currentTrialIdx = 3; state.winIdx = 0; applyGridWindow(); state.eraser = false; state.scanWins[3] = [[0, 499]];
+  state.expertEvents[3] = [{ onset: 300, offset: 330, cls: 1 }, { onset: 400, offset: 430, cls: 1 }]; state.pointMarks[3] = []; render(); });
+let [x0, y0] = await hx(300), [x1] = await hx(290);
+await ptr('pointerdown', 51, x0 + 3, y0 + 20); await ptr('pointermove', 51, (x0 + x1) / 2, y0); await ptr('pointermove', 51, x1, y0); await ptr('pointerup', 51, x1, y0);
+const h1 = await ev(() => ({ evs: state.expertEvents[3].map(e => [e.onset, e.offset]), win: [state.fromSample, state.toSample], drag: state.isDraggingSpan, hd: state.handleDrag }));
+check(JSON.stringify(h1.evs) === '[[290,330],[400,430]]' && h1.win.join() === '0,499' && !h1.drag && h1.hd === null,
+  `pass 1: dragging the onset handle moves the onset only, no new event, no slide: ${JSON.stringify(h1)}`);
+await ev(() => setPass(2));
+const p2a = await ev(() => [state.currentTrialIdx, state.refineIdx, state.currentPutativeOnset, state.currentPutativeOffset, state.fromSample, state.toSample]);
+[x0, y0] = await hx(330); [x1] = await hx(345);
+await ptr('pointerdown', 52, x0, y0); await ptr('pointermove', 52, x1, y0); await ptr('pointerup', 52, x1, y0);
+const p2b = await ev(() => [state.currentTrialIdx, state.refineIdx, state.currentPutativeOnset, state.currentPutativeOffset, state.fromSample, state.toSample]);
+const p2e = await ev(() => state.expertEvents[3].map(e => [e.onset, e.offset]));
+check(p2a[0] === 3 && p2a[2] === 290 && JSON.stringify(p2e) === '[[290,345],[400,430]]' && p2b[0] === 3 && p2b[1] === p2a[1] && p2b[2] === 290 && p2b[3] === 345 && p2b[4] === p2a[4] && p2b[5] === p2a[5],
+  `pass 2: dragging the offset handle adjusts the offset and stays on the same event, same view: ${JSON.stringify({ p2a, p2b, p2e })}`);
+await page.click('#undoBtn');
+const p2u = await ev(() => state.expertEvents[3].map(e => [e.onset, e.offset]));
+check(JSON.stringify(p2u) === '[[290,330],[400,430]]', `Undo restores the boundary moved with a handle: ${JSON.stringify(p2u)}`);
+await ev(() => setPass(1));
 // --- no automatic training during pass 1, whatever the amount reviewed; it starts when a pass 2 is left
 // (the pass-2 navigation above reached the last event, which ends a pass 2 and may have started a training: stop it first)
 await ev(() => { const b = document.getElementById('cancelTrainBtn'); if (state.isTraining && b) b.click(); });
@@ -434,6 +456,21 @@ const tog = await ev(async () => { setNetSuggestions(false); await refreshSugges
   return [document.getElementById('netSuggestBtn').textContent, state.prelabels[1].filter(p => p.cls === 1).map(p => p.onset).join() === UnEyeHMM.detect(tr.x, tr.y, tr.valid, state.rateHz).map(e => e.onset).join()]; });
 check(tog[0].endsWith('Off') && tog[1], `toggle off -> HMM proposals: ${JSON.stringify(tog)}`);
 await ev(() => setNetSuggestions(true));
+
+// --- the session is saved (debounced) and restored on reload; the traces sit in their own key, the labels are saved without them
+await ev(() => { setPass(1); state.expertEvents[3] = [{ onset: 290, offset: 345, cls: 1 }]; recomputeReviewed(3, true); });
+await sleep(1500);
+const idb = await page.evaluate(() => new Promise(res => { const q = indexedDB.open('uneye_db', 1); q.onsuccess = () => { const st = q.result.transaction('uneye_store').objectStore('uneye_store');
+  const a = st.get('autosave'), b = st.get('autosave_trials'); b.onsuccess = () => res({ trialsInAutosave: 'trials' in a.result, n: b.result.length, typed: b.result[0].x instanceof Float32Array }); }; }));
+check(!idb.trialsInAutosave && idb.n === (await ev(() => state.trials.length)) && idb.typed, `autosave: labels without the traces, traces as typed arrays in their own key: ${JSON.stringify(idb)}`);
+await page.reload({ waitUntil: ANDROID_WS ? 'load' : 'networkidle0' }); await sleep(ANDROID_WS ? 5000 : 1500);
+const rest = await ev(() => ({ n: state.trials.length, ev3: state.expertEvents[3].map(e => [e.onset, e.offset]) }));
+check(rest.n > 0 && JSON.stringify(rest.ev3) === '[[290,345]]', `the session comes back after a reload: ${JSON.stringify(rest)}`);
+// labeling in a restored session: the release used to throw (no undo history) and leave the selection on screen without the event
+await ev(() => { state.currentTrialIdx = 6; state.winIdx = 0; applyGridWindow(); state.expertEvents[6] = []; state.prelabels[6] = []; state.pointMarks[6] = []; render(); });
+await ptr('pointerdown', 61, 100, 150); await ptr('pointermove', 61, 160, 150); await ptr('pointermove', 61, 220, 150); await ptr('pointerup', 61, 220, 150);
+const rl = await ev(() => ({ n: state.expertEvents[6].length, drag: state.isDraggingSpan }));
+check(rl.n === 1 && !rl.drag, `a drag in a session restored after a reload stores the event and ends the selection: ${JSON.stringify(rl)}`);
 
 // --- a session saved by an earlier version (model without modelVersion, every proposal a blink) comes back without that model
 await page.evaluate(() => new Promise(res => {

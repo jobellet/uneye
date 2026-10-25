@@ -244,18 +244,6 @@ html, body {
     display: block;
 }
 
-.loupe-info {
-    position: absolute;
-    pointer-events: none;
-    background: rgba(33, 33, 33, 0.85);
-    color: #FFF;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
-    z-index: 5;
-}
-
 /* --- Bottom Status & Control Bar --- */
 #bottom-bar {
     background-color: var(--bg-card);
