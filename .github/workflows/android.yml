@@ -72,10 +72,13 @@ jobs:
           sha256sum uneye-android.apk uneye-android.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # master builds are published to the single android-latest release below; only pull requests need a temporary artifact
       - name: Upload Build Artifacts
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: uneye-android-build
+          retention-days: 3
           path: |
             uneye-android.apk
             uneye-android.zip
