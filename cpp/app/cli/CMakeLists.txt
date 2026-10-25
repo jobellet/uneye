@@ -31,3 +31,7 @@ add_executable(eyelive_cli_test_tool_e2e ${CMAKE_CURRENT_SOURCE_DIR}/tests_tool/
 target_link_libraries(eyelive_cli_test_tool_e2e PRIVATE eyelive_contracts Threads::Threads)
 add_test(NAME eyelive_cli_test_tool_e2e COMMAND eyelive_cli_test_tool_e2e $<TARGET_FILE:eyelive_cli> $<TARGET_FILE:eyelive_tool> ${CMAKE_SOURCE_DIR})
 set_tests_properties(eyelive_cli_test_tool_e2e PROPERTIES LABELS "eyelive;cli" TIMEOUT 1500)
+
+# command-line training / cross-validation / prediction with the native trainer (the labelers' recipe), one process per training: folds run in parallel
+add_executable(uneye_train ${CMAKE_CURRENT_SOURCE_DIR}/tools/uneye_train.cpp)
+target_link_libraries(uneye_train PRIVATE eyelive_train)

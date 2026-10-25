@@ -27,3 +27,27 @@ name=micro;cls=1;anchor=final;amp_max=1.0;sink=log:/tmp/micro.log;payload=MICRO 
 ```
 
 Output: one line per final event (`event <onset s> <offset s> class=<c> amp=<deg> peak=<deg/s>`), then a summary line (samples, rate, dropped packets, gaps, events, latency, scale). Exit code 0 on success, 1 when the session cannot start or no data was recorded, 2 for a bad command line. The session file can be reopened with `Recorder::open_readonly` and read live from MATLAB / Python (see `cpp/app/readers/README.md`).
+
+## uneye_train: training, cross-validation and prediction from the command line
+
+`tools/uneye_train.cpp` trains a U'n'Eye network with the native C++ trainer (`eyelive::make_trainer`, the recipe of the web / Android labelers), without
+Python or PyTorch. Data are the labelers' CSV export (U'n'Eye convention): `X.csv`, `Y.csv` = one trial per row (trials may have different lengths,
+empty / `nan` = invalid sample), `L.csv` = labels per trial (0 fixation, 1 saccade, 2 blink; -1 / empty / `nan` = not reviewed, never trained on or scored;
+labels >= `--classes` are ignored). One process is one training, so the folds of a cross-validation run in parallel, one CPU each.
+
+```sh
+# train on everything, starting from the shipped network, with the labelers' 11-ms Savitzky-Golay display filter applied to the input
+uneye_train train --x X.csv --y Y.csv --labels L.csv --init models/combined.bin --savgol 11 --out mine.bin
+# 5-fold cross-validation grouped by session (G.csv: one group per trial), fold i in its own process (e.g. a SLURM array task)
+uneye_train cv --x X.csv --y Y.csv --labels L.csv --groups G.csv --folds 5 --fold $i --init models/combined.bin --savgol 11 --threads 1 \
+               --metrics fold$i.json --out fold$i.bin
+# apply a model: one row of per-sample classes per trial (--probs: p(saccade))
+uneye_train predict --model mine.bin --x X.csv --y Y.csv --savgol 11 --out pred.csv
+```
+
+`cv` writes the held-out scores of its fold as JSON: event F1 of the saccades (a predicted run of >= 3 samples overlapping a labelled saccade), event
+precision and recall, Cohen's kappa sample by sample (saccade vs rest), on the reviewed samples of the held-out trials only, plus the confusion counts
+(`tp fp fn tn`, `n_true`, `n_pred`, matched events) so the folds can be pooled exactly. Prediction: argmax of the softmax (2 classes: p > 0.5), no
+post-processing. `--savgol W` must be the same at training and prediction (the web labeler itself trains on the raw trace; its exported model
+sidecar records the display filter but the network did not see it). Build: `cmake --build build --target uneye_train` (or, without CMake:
+`g++ -O3 -std=c++17 -I cpp/app/include -I cpp/app/train/include cpp/app/cli/tools/uneye_train.cpp cpp/app/train/src/{trainer,dataset,model_io}.cpp -lpthread`).
