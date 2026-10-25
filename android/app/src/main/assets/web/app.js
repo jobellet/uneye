@@ -2590,14 +2590,14 @@
         console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples at ${r.fs} Hz (${r.source}, ${r.degPerUnit} deg/unit)` + (r.notes.length ? ' · ' + r.notes.join(' ') : ''));
     }
 
-    // --- HDF5 needs h5wasm (5 MB, loaded the first time an .h5 file is read or written; needs a connection once) ---
+    // --- HDF5 needs h5wasm (5.7 MB, web/h5wasm.js, shipped with the app; loaded the first time an .h5 / v7.3 .mat file is read or written) ---
     async function loadH5Lib() {
         if (!window.h5wasm) {
             await new Promise((resolve, reject) => {
                 const sc = document.createElement('script');
-                sc.src = 'https://cdn.jsdelivr.net/npm/h5wasm@0.10.3/dist/iife/h5wasm.js';
+                sc.src = 'web/h5wasm.js?v=10';
                 sc.onload = resolve;
-                sc.onerror = () => reject(new Error('Cannot load the HDF5 library (h5wasm from cdn.jsdelivr.net): connect to the internet once, or use .npz / .mat.'));
+                sc.onerror = () => reject(new Error('Cannot load the HDF5 library (web/h5wasm.js): reload the page, or use .npz / .mat (v5).'));
                 document.head.appendChild(sc);
             });
         }

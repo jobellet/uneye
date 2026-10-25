@@ -131,6 +131,23 @@ check(st.n === 2 && st.explorerHidden, `the page's own .npz export loads directl
 fs.unlinkSync(own);
 
 
+
+// --- HDF5 files (MATLAB v7.3 and plain .h5) go through the h5wasm copy shipped with the app, not a CDN
+await open('v73_matlab.mat');
+await waitExplorer();
+check(await optText('impX') === 'gx' && await optText('impY') === 'gy' && await optText('impT') === 'TIME' && await val('impRate') === '500', `MATLAB v7.3: X=${await optText('impX')}, Y=${await optText('impY')}, time=${await optText('impT')}, ${await val('impRate')} Hz`);
+const res = await ev(() => performance.getEntriesByType('resource').map(r => r.name));
+check(res.some(n => n.includes('/web/h5wasm.js')) && !res.some(n => n.includes('jsdelivr')), 'the HDF5 library came from web/h5wasm.js of the app, not from a CDN');
+await page.click('#impLoadBtn');
+await page.waitForFunction(() => document.getElementById('importModal').classList.contains('hidden'), { timeout: 20000 });
+await sleep(300);
+st = await ev(() => ({ n: state.trials.length, len: state.trials[0].x.length, rate: state.rateHz }));
+check(st.n === 1 && st.len === 4000 && st.rate === 500, `MATLAB v7.3 loaded: ${JSON.stringify(st)}`);
+await open('groups.h5');
+await waitExplorer();
+check((await optText('impT')).endsWith('time_us') && await val('impUnit') === 'us' && await val('impRate') === '120', `HDF5 with groups: time=${await optText('impT')}, ${await val('impUnit')}, ${await val('impRate')} Hz`);
+await page.click('#impCancelBtn'); await sleep(200); await page.click('#modalCancelBtn');
+
 // --- the real file from the ZuCo 2.0 download, when it is on this machine (whole 250 000-sample recording)
 const zucoReal = path.join(process.env.UNEYE_DATASETS || path.join(os.homedir(), 'Desktop', 'Desktop', 'eye_tracking_datasets', 'datasets'), 'ZuCo_2.0', 'osfstorage', 'task1 - NR', 'Raw data', 'YLS', 'YLS_NR2_ET.mat');
 if (fs.existsSync(zucoReal)) {

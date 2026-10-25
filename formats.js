@@ -2,7 +2,7 @@
 //
 // Read:  .mat (MATLAB v5, uncompressed or compressed; v7.3 = HDF5), .npz (numpy), .h5 / .hdf5 (HDF5). CSV stays in app.js.
 // Write: .mat (v5), .npz, .h5 (the labels, with the positions, in the same layout).
-// No dependency, except HDF5 which needs h5wasm (loaded on demand from a CDN in the page; pass the module in Node).
+// No dependency, except HDF5 which needs h5wasm (web/h5wasm.js, loaded on demand by the page; pass the module in Node).
 // Works in the browser (global UnEyeFormats) and in Node >= 18 (module.exports), the same code for both.
 //
 // Layouts understood when reading (the first that matches wins; names are not case sensitive):

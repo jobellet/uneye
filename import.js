@@ -583,7 +583,8 @@
   }
 
   // ---------------------------------------------------------------- suggestions
-  const normName = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const baseName = (s) => s.slice(s.lastIndexOf('/') + 1);              // HDF5 group path: only the last part names the variable
+  const normName = (s) => baseName(s).toLowerCase().replace(/[^a-z0-9]/g, '');
   function scoreXY(name, axis) {
     const n = normName(name);
     const o = axis === 'x' ? 'y' : 'x';
@@ -612,7 +613,7 @@
     return 0;
   }
   function unitHintFromName(name) {
-    const l = name.toLowerCase();
+    const l = baseName(name).toLowerCase();
     if (/(^|[^a-z])(us|usec|µs|micro)/.test(l)) return 'us';
     if (/(^|[^a-z])ms($|[^a-z])|msec|milli/.test(l)) return 'ms';
     if (/\(s\)|(^|[_\s])sec($|[^a-z])|_s$/.test(l)) return 's';

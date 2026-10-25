@@ -24,6 +24,10 @@ function mapping(t, s, extra) {
 const count = (a, f) => { let n = 0; for (let i = 0; i < a.length; i++) if (f(a[i])) n++; return n; };
 
 (async () => {
+  // HDF5 (.h5 and MATLAB v7.3 .mat) needs h5wasm (devDependency: npm install); without it those checks are skipped
+  let h5 = null;
+  try { const hm = await import('h5wasm/node'); h5 = hm.default && hm.default.ready ? hm.default : hm; } catch (e) { console.log('skip HDF5 checks: h5wasm is not installed (npm install)'); }
+
   // ------------------------------------------------------------ real files, trimmed
   {
     const r = await load('gazebase_hss.csv');
@@ -94,7 +98,7 @@ const count = (a, f) => { let n = 0; for (let i = 0; i < a.length; i++) if (f(a[
 
 
   // ------------------------------------------------------------ MATLAB / NumPy files: any variables, structs, header arrays
-  const tablesOf = async (f) => { const b = fs.readFileSync(path.isAbsolute(f) ? f : path.join(FIX, f)); return I.tablesFromVars(await F.readVarsFile(f, b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)), path.basename(f)); };
+  const tablesOf = async (f) => { const b = fs.readFileSync(path.isAbsolute(f) ? f : path.join(FIX, f)); return I.tablesFromVars(await F.readVarsFile(f, b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength), h5), path.basename(f)); };
   const suggestOf = (t) => { const st = I.describeColumns(t); return I.suggest(t, st); };
   {
     const ts = await tablesOf('zuco_et.mat'), t = ts[0], s = suggestOf(t);
@@ -127,6 +131,30 @@ const count = (a, f) => { let n = 0; for (let i = 0; i < a.length; i++) if (f(a[
   {
     const t = (await tablesOf('plain.npz'))[0], s = suggestOf(t);
     ok(t.nRows === 500 && t.cols[s.x].name === 'gaze_x' && t.cols[s.y].name === 'gaze_y' && t.cols[s.t].name === 'time_us' && s.time.unit === 'us' && s.time.rate === 120, '.npz: gaze_x / gaze_y / time_us (120 Hz) found');
+  }
+
+
+  if (h5) {
+    {
+      const ts = await tablesOf('v73_matlab.mat'), t = ts[0], s = suggestOf(t);
+      ok(ts.length === 1 && t.nRows === 4000 && t.cols.length === 7, 'MATLAB v7.3 .mat (HDF5): 4 vectors + a 3 x N matrix -> one table of 4000 rows, 7 columns (the scalar fs is the rate)');
+      ok(t.cols[s.x].name === 'gx' && t.cols[s.y].name === 'gy' && t.cols[s.t].name === 'TIME' && s.time.unit === 'ms' && s.time.rate === 500, 'MATLAB v7.3: gx, gy, TIME (ms, 500 Hz) found; a (1 x N) vector is a column, a (3 x N) matrix is 3 columns');
+      ok(t.info.rate === 500 && t.cols.some(c => c.name === 'mat(:,3)'), 'MATLAB v7.3: scalar "fs" read as the sampling rate; matrix columns named mat(:,k)');
+    }
+    {
+      const ts = await tablesOf('groups.h5'), t = ts[0], s = suggestOf(t);
+      ok(ts.length === 1 && t.nRows === 1500 && t.cols.length === 6, 'HDF5 with groups: datasets session1/*, session2/* of the same length share one table');
+      ok(/\/x$/.test(t.cols[s.x].name) && /\/y$/.test(t.cols[s.y].name) && /time_us$/.test(t.cols[s.t].name) && s.time.unit === 'us' && s.time.rate === 120, 'HDF5: x, y and time_us found through the group paths (120 Hz)');
+    }
+    // the page's own HDF5 export layout is still read by the old reader (xy + trial_offset)
+    {
+      const tr = [0, 1].map(k => ({ x: Float32Array.from({ length: 300 }, (_, i) => i + k), y: Float32Array.from({ length: 300 }, (_, i) => -i) }));
+      const bytes = await F.writeH5File(tr, null, null, 1000, h5);
+      const r = await F.readTrialsFile('e.h5', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), h5);
+      ok(r.trials.length === 2 && r.trials[1].x[5] === 6, 'HDF5 written by the page: read back by the page (2 trials)');
+      const v = await F.readVarsFile('e.h5', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), h5);
+      ok(I.tablesFromVars(v, 'e.h5').length >= 1, 'HDF5 written by the page: also readable as plain variables for the explorer');
+    }
   }
 
   // ------------------------------------------------------------ plain files keep the old fast path
@@ -232,6 +260,12 @@ const count = (a, f) => { let n = 0; for (let i = 0; i < a.length; i++) if (f(a[
         const files = pick(walk(ju, '.mat', [], 4000).filter(f => !/Calibration|shuff/.test(f)), 8); let good = 0;
         for (const f of files) { const t = (await tablesOf(f))[0]; if (t && t.cols.length === 2 && suggestOf(t).x === 0) good++; }
         ok(files.length > 0 && good === files.length, 'Judd2009 .mat (whole files): ' + good + '/' + files.length + ' read as X, Y');
+      }
+      const le = path.join(D, 'LEDOV');
+      if (h5 && fs.existsSync(le)) {
+        const files = pick(walk(le, 'Data.mat', [], 600), 8); let good = 0;
+        for (const f of files) { const ts = await tablesOf(f); if (ts.length >= 1 && ts[0].cols.length === 5 && ts[0].nRows > 20) good++; }
+        ok(files.length > 0 && good === files.length, 'LEDOV Data.mat (MATLAB v7.3, whole files): ' + good + '/' + files.length + ' read through h5wasm (fixation lists, 5 columns)');
       }
       const em = path.join(D, 'EMTeC', 'data', 'subject_level_data', 'ET_111');
       if (fs.existsSync(path.join(em, 'ET_111.asc'))) {

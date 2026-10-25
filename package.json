@@ -1,0 +1,9 @@
+{
+  "name": "uneye-web-tests",
+  "private": true,
+  "description": "Dev dependencies of the browser and Node tests of the web labeler (the app itself has no build step).",
+  "devDependencies": {
+    "h5wasm": "0.10.3",
+    "puppeteer-core": "25.16.0"
+  }
+}
