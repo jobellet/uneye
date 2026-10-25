@@ -132,7 +132,7 @@
                 <div class="modal-header">
                     <h3>Open eye traces</h3>
                 </div>
-                <p class="form-help">Choose a file of eye traces (.csv, .txt, .mat, .npz or .h5), or a saved labels .json file after its traces.</p>
+                <p class="form-help">Choose a file of eye traces (.csv, .tsv, .txt, .arff, .asc, .mat, .npz or .h5), or a saved labels .json file after its traces.</p>
                 <div class="modal-buttons">
                     <button id="startOpenBtn" class="btn btn-primary">Choose a file…</button>
                 </div>
@@ -197,6 +197,9 @@
                     <input type="file" id="modalLabelsFile" accept=".json,.mat,.csv,.bin" style="display: none;">
                 </div>
                 <div class="form-row">
+                    <label><input type="checkbox" id="alwaysExplorer"> Show the column explorer (choose X, Y and time)</label>
+                </div>
+                <div class="form-row">
                     <label for="prelabelerSelect">Automatic pre-labeler:</label>
                     <select id="prelabelerSelect">
                         <option value="hmm" selected>Label-free HMM (no threshold to set)</option>
@@ -206,6 +209,63 @@
                 <div class="modal-buttons">
                     <button id="modalCancelBtn" class="btn btn-secondary">Cancel</button>
                     <button id="modalConfirmBtn" class="btn btn-primary">Load Trace</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Column explorer: choose X, Y and time of a text export (import.js, import_ui.js) -->
+        <div id="importModal" class="modal hidden">
+            <div class="modal-card import-card">
+                <div class="modal-header">
+                    <h3>Choose the eye signal</h3>
+                    <button id="impCloseBtn" class="btn-close" type="button" aria-label="Cancel">×</button>
+                </div>
+                <p id="impSummary" class="form-help"></p>
+                <div id="impWarn" class="import-warn hidden"></div>
+                <div id="impBody" class="import-grid">
+                    <div class="import-left">
+                        <div class="import-title">Variables <span class="form-help">(tap X, Y or T to use one)</span></div>
+                        <div id="impColList" class="import-collist"></div>
+                    </div>
+                    <div class="import-right">
+                        <canvas id="impPreview" class="import-preview"></canvas>
+                        <div class="import-nav">
+                            <button id="impPrevBtn" class="btn btn-secondary" type="button">◀</button>
+                            <span id="impPreviewInfo" class="form-help"></span>
+                            <button id="impNextBtn" class="btn btn-secondary" type="button">▶</button>
+                        </div>
+                        <div class="import-form">
+                            <div class="import-field"><label for="impX">X</label><select id="impX"></select></div>
+                            <div class="import-field"><label for="impY">Y</label><select id="impY"></select></div>
+                            <div class="import-field"><label for="impT">Time</label><select id="impT"></select></div>
+                            <div class="import-field"><label for="impUnit">Time unit</label>
+                                <select id="impUnit"><option value="s">seconds</option><option value="ms">milliseconds</option><option value="us">microseconds</option><option value="samples">sample index</option></select></div>
+                            <div class="import-field"><label for="impRate">Sampling rate (Hz)</label><input type="number" id="impRate" min="1" max="20000" step="any"></div>
+                            <div class="import-field"><label for="impDeg">Degrees per unit</label><input type="number" id="impDeg" min="0.00001" max="1000" step="any"></div>
+                            <div class="import-field import-wide"><span id="impTimeHint" class="form-help"></span></div>
+                            <div class="import-field import-wide" id="impResampleRow"><label class="import-check"><input type="checkbox" id="impResample"> Resample to a uniform grid (time stamps are not regular)</label></div>
+                            <div class="import-field"><label for="impVCol">Valid samples only if</label><select id="impVCol"></select></div>
+                            <div class="import-field import-inline"><select id="impVOp"><option value="=">=</option><option value="!=">≠</option><option value="&gt;">&gt;</option><option value="&gt;=">≥</option><option value="&lt;">&lt;</option><option value="&lt;=">≤</option></select><input type="number" id="impVVal" step="any" value="0"></div>
+                            <div class="import-field"><label for="impSplit">Trials</label>
+                                <select id="impSplit"><option value="none">One trial per file</option><option value="column">New trial when a variable changes</option><option value="gap">New trial after a gap in time</option></select></div>
+                            <div class="import-field"><label for="impSplitCol" id="impSplitColLabel">Variable</label><select id="impSplitCol"></select><input type="number" id="impGapSec" min="0.01" step="any" value="1" class="hidden"></div>
+                            <div class="import-field"><label for="impChunk">Cut trials into parts of (s)</label><input type="number" id="impChunk" min="0" step="any" value="0" placeholder="0 = off"></div>
+                            <details class="import-field import-wide">
+                                <summary>Pixels to degrees…</summary>
+                                <div class="import-inline">
+                                    <input type="number" id="impScrPx" placeholder="screen width (px)" step="any">
+                                    <input type="number" id="impScrCm" placeholder="screen width (cm)" step="any">
+                                    <input type="number" id="impScrDist" placeholder="distance (cm)" step="any">
+                                    <button id="impScrApply" class="btn btn-secondary" type="button">Set</button>
+                                </div>
+                            </details>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-buttons">
+                    <p id="impResult" class="import-result"></p>
+                    <button id="impCancelBtn" class="btn btn-secondary" type="button">Cancel</button>
+                    <button id="impLoadBtn" class="btn btn-primary" type="button">Load</button>
                 </div>
             </div>
         </div>
@@ -270,9 +330,11 @@
         </div>
     </div>
 
-    <script src="formats.js?v=7"></script>
-    <script src="hmm_prelabel.js?v=7"></script>
-    <script src="app.js?v=7"></script>
+    <script src="formats.js?v=8"></script>
+    <script src="import.js?v=8"></script>
+    <script src="import_ui.js?v=8"></script>
+    <script src="hmm_prelabel.js?v=8"></script>
+    <script src="app.js?v=8"></script>
 <script>
     if ("serviceWorker" in navigator && !window.AndroidBridge) {
         window.addEventListener("load", () => {

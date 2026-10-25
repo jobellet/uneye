@@ -171,6 +171,7 @@
         modalPickLabelsBtn: document.getElementById('modalPickLabelsBtn'),
         modalLabelsFile: document.getElementById('modalLabelsFile'),
         prelabelerSelect: document.getElementById('prelabelerSelect'),
+        alwaysExplorer: document.getElementById('alwaysExplorer'),
         modalConfirmBtn: document.getElementById('modalConfirmBtn'),
         modalCancelBtn: document.getElementById('modalCancelBtn'),
         filterModal: document.getElementById('filterModal'),
@@ -2453,8 +2454,8 @@
     function handleFile(file) {
         const ext = (file.name.split('.').pop() || '').toLowerCase();
         if (ext === 'json') { loadLabelsFile(file); return; }
-        if (!['csv', 'txt', 'dat', 'mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {
-            alert('Unsupported file type ".' + ext + '". Open a .csv, .txt, .mat, .npz or .h5 file (or a saved labels .json file).');
+        if (!['csv', 'tsv', 'txt', 'dat', 'arff', 'asc', 'mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {
+            alert('Unsupported file type ".' + ext + '". Open a .csv, .tsv, .txt, .arff, .asc, .mat, .npz or .h5 file (or a saved labels .json file).');
             return;
         }
         const modalAlreadyOpen = elements.loadModal && !elements.loadModal.classList.contains('hidden');
@@ -2523,6 +2524,14 @@
             return;
         }
 
+        // text files: plain numbers (no header, 1-2 columns, or trials x time) keep the old reader; anything else (a header, many
+        // columns, ARFF, EyeLink .asc) goes through the column explorer, which also handles the time stamps
+        const forceExplorer = elements.alwaysExplorer && elements.alwaysExplorer.checked;
+        if (forceExplorer || ext === 'arff' || ext === 'asc' || !(await isPlainTextFile(file))) {
+            await loadWithExplorer(file, rate, scale, prelabeler);
+            return;
+        }
+
         const reader = new FileReader();
         reader.onload = async (e) => {
             const text = e.target.result;
@@ -2561,6 +2570,21 @@
             }
         };
         reader.readAsText(file);
+    }
+
+    async function isPlainTextFile(file) {
+        try { return UnEyeImport.sniffHead(await file.slice(0, 65536).text(), file.name).plain; }
+        catch (err) { return true; }
+    }
+
+    async function loadWithExplorer(file, rate, scale, prelabeler) {
+        elements.loadModal.classList.add('hidden');
+        const r = await UnEyeImportUI.run(file, { rate, scale });
+        if (!r) { elements.loadModal.classList.remove('hidden'); return; }      // cancelled: back to the load dialog
+        loadDataset(r.trials, r.fs, r.degPerUnit, prelabeler);
+        if (pendingLabelsFile) await loadPreviousLabels(pendingLabelsFile);
+        const lens = r.trials.map(t => t.x.length);
+        console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples at ${r.fs} Hz (${r.source}, ${r.degPerUnit} deg/unit)` + (r.notes.length ? ' · ' + r.notes.join(' ') : ''));
     }
 
     // --- HDF5 needs h5wasm (5 MB, loaded the first time an .h5 file is read or written; needs a connection once) ---

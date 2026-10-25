@@ -2,13 +2,15 @@
 // 1. Full offline caching for all assets (.html, .js, .wasm, .bin, .json, .css)
 // 2. coi-serviceworker functionality: adds COOP/COEP headers to enable Cross-Origin Isolation (SharedArrayBuffer)
 
-const CACHE_NAME = 'uneye-cache-v7';
+const CACHE_NAME = 'uneye-cache-v8';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
     './style.css',
     './app.js',
     './formats.js',
+    './import.js',
+    './import_ui.js',
     './hmm_prelabel.js',
     './train_worker.js',
     './web/uneye_train.js',
