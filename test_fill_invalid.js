@@ -22,7 +22,12 @@ const start = src.indexOf('function noiseStdOf(v)');
 const end = src.indexOf('function preprocessTrial(');
 if (start < 0 || end < 0 || end <= start) { console.error('FAIL: helper block not found in app.js'); process.exit(1); }
 const block = src.slice(start, end);
-const helpers = new Function(block + '\nreturn { noiseStdOf, fillInvalidCopy, trainingCopyOf };')();
+// the Savitzky-Golay helpers of the display filter (networkInputOf smooths the network input with them when the filter is on)
+const sgStart = src.indexOf('function makeSavitzkyGolay(w)'), sgEnd = src.indexOf('// Speed limit of the velocities used by the pre-labeler');
+if (sgStart < 0 || sgEnd <= sgStart) { console.error('FAIL: Savitzky-Golay helpers not found in app.js'); process.exit(1); }
+const sgBlock = src.slice(sgStart, sgEnd);
+const make = (state) => new Function('state', sgBlock + block + '\nreturn { noiseStdOf, fillInvalidCopy, trainingCopyOf, networkInputOf, makeSavitzkyGolay, applySavitzkyGolay, postprocessSaccades };')(state);
+const helpers = make({ filterSettings: { enabled: false }, rateHz: 1000 });
 
 let failed = 0;
 const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) failed++; };
@@ -91,5 +96,38 @@ const ok = (c, msg) => { console.log((c ? 'ok   ' : 'FAIL ') + msg); if (!c) fai
     ok(a[1] === b[1] && a[2] === b[2], 'same seed gives the same fill');
 }
 
+
+// network input with the display filter on: the smoothed trace (identical to the display's Savitzky-Golay), NaN where invalid, then filled
+{
+    const hf = make({ filterSettings: { enabled: true, windowMs: 11 }, rateHz: 1000 });
+    const n = 600, x = new Float32Array(n), y = new Float32Array(n), valid = new Uint8Array(n).fill(1);
+    for (let i = 0; i < n; i++) { x[i] = Math.sin(i / 40) + (i > 300 ? 0.5 : 0); y[i] = Math.cos(i / 55); }
+    for (let i = 200; i < 230; i++) { x[i] = NaN; y[i] = NaN; valid[i] = 0; }
+    const tr = { x, y, valid };
+    const inp = hf.networkInputOf(tr);
+    const ref = hf.applySavitzkyGolay(x, valid, 1000, hf.makeSavitzkyGolay(11)).smooth;
+    let same = true, nanOk = true;
+    for (let i = 0; i < n; i++) {
+        if (valid[i]) { if (Math.abs(inp.x[i] - ref[i]) > 1e-6) same = false; }
+        else if (!isNaN(inp.x[i])) nanOk = false;
+    }
+    ok(same, 'filter on: the network input is the display\'s Savitzky-Golay trace');
+    ok(nanOk, 'filter on: invalid samples stay invalid before the noise fill');
+    const tc = hf.trainingCopyOf(tr, 7);
+    ok(Array.from(tc.x).every(Number.isFinite), 'filter on: the training copy has no non-finite sample');
+    const raw = make({ filterSettings: { enabled: false }, rateHz: 1000 }).networkInputOf(tr);
+    ok(raw.x === x, 'filter off: the network input is the raw trace');
+}
+// post-processing of the saccade class: gaps < 5 ms merged, saccades < 5 ms removed, blinks untouched
+{
+    const p = new Uint8Array(60);
+    for (let i = 5; i < 15; i++) p[i] = 1; for (let i = 18; i < 25; i++) p[i] = 1;     // gap of 3 samples -> merged
+    for (let i = 35; i < 38; i++) p[i] = 1;                                             // 3-sample saccade -> removed
+    for (let i = 45; i < 48; i++) p[i] = 2;                                             // short blink -> kept
+    const q = helpers.postprocessSaccades(p, 1000);
+    ok(q.slice(5, 25).every(v => v === 1), 'post-processing merges saccades separated by less than 5 ms');
+    ok(q.slice(35, 38).every(v => v === 0), 'post-processing removes saccades shorter than 5 ms');
+    ok(q.slice(45, 48).every(v => v === 2), 'post-processing leaves blinks untouched');
+}
 console.log(failed ? failed + ' check(s) FAILED' : 'all checks passed');
 process.exit(failed ? 1 : 0);

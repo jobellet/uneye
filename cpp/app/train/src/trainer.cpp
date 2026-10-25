@@ -64,8 +64,14 @@ class Trainer : public ITrainer {
         const int K = cfg.n_classes, W = ds.train.W, nthr = cfg.n_threads > 0 ? cfg.n_threads : std::max(1u, std::thread::hardware_concurrency() > 1 ? std::thread::hardware_concurrency() - 1 : 1u);
         UNet<float> net(K, 5, 5, nthr); net.init_random(cfg.seed);
         if (!cfg.init_model.empty()) { std::string err; if (!load_bin(cfg.init_model, net, &err)) return fail("init_model: " + err); }
-        const int ntr = ds.train.n, nval = ds.val.n; const int iters = std::min(10, ntr), batch = std::max(1, ntr / iters);
-        std::mt19937_64 rng(cfg.seed + 17); std::vector<int> order(ntr); std::iota(order.begin(), order.end(), 0);
+        int ntr = ds.train.n, iters = 1, batch = 1; const int nval = ds.val.n;
+        auto plan = [&] {                                                 // minibatches: cfg.batch_size windows, or the original 10 per epoch
+            ntr = ds.train.n;
+            if (cfg.batch_size > 0) { batch = cfg.batch_size; iters = std::max(1, (ntr + batch - 1) / batch); }
+            else { iters = std::min(10, ntr); batch = std::max(1, ntr / iters); }
+        };
+        plan();
+        std::mt19937_64 rng(cfg.seed + 17), rrng(cfg.seed + 101); std::vector<int> order(ntr); std::iota(order.begin(), order.end(), 0);
         Adam adam; adam.lr = cfg.learning_rate; auto params = net.params();
         const double l2 = 0.001;
         auto make_batch = [&](const Windows& w, const int* idx, int B, std::vector<float>& x, std::vector<float>& tg) {
@@ -86,7 +92,9 @@ class Trainer : public ITrainer {
         std::vector<double> Lv; double best_loss = 1e30; std::vector<float> snapshot = net.param_snapshot(); int worse = 0; Scores best_sc; double best_sc_loss = 0;
         int epoch = 0;
         while (epoch < cfg.max_epochs && !cancel_) {
-            ++epoch; std::shuffle(order.begin(), order.end(), rng); double ltr = 0; int cnt = 0;
+            ++epoch;
+            if (cfg.resample_each_epoch && epoch > 1) { resample_train(ds, cfg, rrng); plan(); order.resize(size_t(ntr)); std::iota(order.begin(), order.end(), 0); }
+            std::shuffle(order.begin(), order.end(), rng); double ltr = 0; int cnt = 0;
             for (int it = 0; it < iters && !cancel_; ++it) {
                 const int s = it * batch, B = (it == iters - 1) ? ntr - s : batch; if (B <= 0) continue;
                 make_batch(ds.train, &order[s], B, xb, tb); net.zero_grad(); auto& z = net.forward(xb.data(), B, W, true); gz.resize(z.size());

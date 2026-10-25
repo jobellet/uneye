@@ -74,6 +74,10 @@ self.onmessage = async function(e) {
                 config.deg_per_unit || 1.0
             );
 
+            if (trainer.setRecipe) {                       // whole traces held out for validation, windows re-cut every epoch, minibatches of batch_size
+                trainer.setRecipe(config.resample_each_epoch === true, config.batch_size || 0);
+            }
+
             if (config.init_model_bytes) {
                 trainer.setInitModelBytes(config.init_model_bytes);
             }
@@ -122,7 +126,8 @@ self.onmessage = async function(e) {
                 let allPred = [];
                 let allTruth = [];
                 for (const tt of testTrials) {
-                    const p = trainer.predictTrial(tt.x, tt.y, tt.rateHz || 1000.0, config.max_speed_deg_s || 1300.0);
+                    const raw = trainer.predictTrial(tt.x, tt.y, tt.rateHz || 1000.0, config.max_speed_deg_s || 1300.0);
+                    const p = config.postprocess === false ? raw : postprocessSaccades(raw, tt.rateHz || 1000.0);
                     for (let i = 0; i < tt.labels.length; i++) {
                         if (tt.labels[i] < 250) {
                             allPred.push(p[i]);
@@ -155,3 +160,29 @@ self.onmessage = async function(e) {
         self.postMessage({ type: 'ERROR', id, message: err.message || String(err) });
     }
 };
+
+// U'n'Eye post-processing of the saccade class (as app.js::postprocessSaccades and uneye/functions.py::binary_prediction): saccades separated by less
+// than mergeMs are merged, saccades shorter than minMs are removed; the test-set scores are computed on the post-processed predictions
+function postprocessSaccades(pred, fs, mergeMs = 5, minMs = 5) {
+    const n = pred.length, merge = Math.round(mergeMs * fs / 1000), minLen = Math.round(minMs * fs / 1000);
+    const p = Uint8Array.from(pred);
+    let lastEnd = -1;
+    for (let i = 0; i < n; i++) {
+        if (p[i] !== 1) continue;
+        const gap = i - lastEnd - 1;
+        if (lastEnd >= 0 && gap > 0 && gap < merge) {
+            let fixation = true;
+            for (let k = lastEnd + 1; k < i; k++) if (p[k] !== 0) { fixation = false; break; }
+            if (fixation) for (let k = lastEnd + 1; k < i; k++) p[k] = 1;
+        }
+        let j = i; while (j < n && p[j] === 1) j++;
+        lastEnd = j - 1; i = j - 1;
+    }
+    for (let i = 0; i < n;) {
+        if (p[i] !== 1) { i++; continue; }
+        let j = i; while (j < n && p[j] === 1) j++;
+        if (j - i < minLen) for (let k = i; k < j; k++) p[k] = 0;
+        i = j;
+    }
+    return p;
+}

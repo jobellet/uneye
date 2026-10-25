@@ -345,7 +345,7 @@
     // Version of the trainer that produced a saved model. Models saved by earlier versions (random 3-class head:
     // saccades proposed as blinks, test F1 0) are dropped when a session is restored, with the proposals they made.
     const MODEL_VERSION = 2;
-    const APP_BUILD = '2026-10-25b';
+    const APP_BUILD = '2026-10-25c';
 
     function computeRobustSigma(arr, valid) {
         const vals = [];
@@ -398,11 +398,53 @@
 
     // Returns a training copy of the trial: NaN stretches filled with noise at
     // 3x the local fixation noise. The trial itself is not modified.
+    // What the network sees, in training, in the test-set scoring and for its proposals alike: the positions after the display filter (the
+    // Savitzky-Golay smoothing of the Filter dialog, when it is on: the labels are set on the smoothed trace, so the network must see it too),
+    // invalid samples NaN again, then filled with noise (see fillInvalidCopy). The raw trace kept for the display is not modified.
+    function networkInputOf(tr) {
+        const cfg = state.filterSettings, n = tr.x.length, fs = state.rateHz;
+        if (!cfg.enabled || n < 5) return { x: tr.x, y: tr.y };
+        let w = Math.round(cfg.windowMs * fs / 1000.0);
+        if (w % 2 === 0) w += 1;
+        w = Math.max(5, Math.min(w, Math.floor((n / 2) * 2 - 1)));
+        const sg = makeSavitzkyGolay(w);
+        const sx = applySavitzkyGolay(tr.x, tr.valid, fs, sg).smooth, sy = applySavitzkyGolay(tr.y, tr.valid, fs, sg).smooth;
+        for (let i = 0; i < n; i++) if (!tr.valid[i] || isNaN(tr.x[i]) || isNaN(tr.y[i])) { sx[i] = NaN; sy[i] = NaN; }
+        return { x: sx, y: sy };
+    }
+
     function trainingCopyOf(tr, seed) {
         const rngState = { s: (seed >>> 0) || 1 };
-        const sx = Math.max(3.0 * noiseStdOf(tr.x), 1e-3);
-        const sy = Math.max(3.0 * noiseStdOf(tr.y), 1e-3);
-        return { x: fillInvalidCopy(tr.x, sx, rngState), y: fillInvalidCopy(tr.y, sy, rngState) };
+        const inp = networkInputOf(tr);
+        const sx = Math.max(3.0 * noiseStdOf(inp.x), 1e-3);
+        const sy = Math.max(3.0 * noiseStdOf(inp.y), 1e-3);
+        return { x: fillInvalidCopy(inp.x, sx, rngState), y: fillInvalidCopy(inp.y, sy, rngState) };
+    }
+
+    // U'n'Eye post-processing of the saccade class (uneye/functions.py::binary_prediction, as in the cross-validated Python and C++ pipelines):
+    // saccades separated by less than mergeMs are merged, saccades shorter than minMs are removed
+    function postprocessSaccades(pred, fs, mergeMs = 5, minMs = 5) {
+        const n = pred.length, merge = Math.round(mergeMs * fs / 1000), minLen = Math.round(minMs * fs / 1000);
+        const p = Uint8Array.from(pred);
+        let lastEnd = -1;
+        for (let i = 0; i < n; i++) {
+            if (p[i] !== 1) continue;
+            const gap = i - lastEnd - 1;
+            if (lastEnd >= 0 && gap > 0 && gap < merge) {
+                let fixation = true;
+                for (let k = lastEnd + 1; k < i; k++) if (p[k] !== 0) { fixation = false; break; }
+                if (fixation) for (let k = lastEnd + 1; k < i; k++) p[k] = 1;
+            }
+            let j = i; while (j < n && p[j] === 1) j++;
+            lastEnd = j - 1; i = j - 1;
+        }
+        for (let i = 0; i < n;) {
+            if (p[i] !== 1) { i++; continue; }
+            let j = i; while (j < n && p[j] === 1) j++;
+            if (j - i < minLen) for (let k = i; k < j; k++) p[k] = 0;
+            i = j;
+        }
+        return p;
     }
 
     function preprocessTrial(trialIdx) {
@@ -1991,7 +2033,7 @@
                 lastEpoch = p.epoch;
                 const etaStr = p.eta_s > 0 ? ` · ETA ${p.eta_s.toFixed(0)}s` : '';
                 elements.trainStatus.className = 'train-active';
-                elements.trainStatus.textContent = `Epoch ${p.epoch}/60 · Loss: ${p.train_loss.toFixed(3)} · Val F1: ${p.val_event_f1.toFixed(2)}${etaStr}`;
+                elements.trainStatus.textContent = `Epoch ${p.epoch} · Loss: ${p.train_loss.toFixed(3)} · Val F1: ${p.val_event_f1.toFixed(2)}${etaStr}`;
             } else if (msg.type === 'CANCELLED') {
                 finishTraining("Training cancelled");
             } else if (msg.type === 'ERROR') {
@@ -2048,11 +2090,13 @@
                     max_seconds_of_data: 3600.0,        // all the reviewed labels (the budget is a total over the traces)
                     rotation_aug: true,
                     rotations: 4,
-                    val_fraction: 0.2,
+                    val_fraction: 0.2,                  // of the non-test traces, held out as WHOLE traces (resample_each_epoch)
                     max_speed_deg_s: 1300.0,
-                    max_epochs: 60,
+                    max_epochs: 300,                    // early stopping on the validation loss normally ends training long before
                     patience: 4,
                     learning_rate: 1e-3,
+                    resample_each_epoch: true,          // windows re-cut every epoch (random offset, rotation, mirror), minibatches of 32:
+                    batch_size: 32,                     // cross-validated on 71 mocol trials: event F1 0.943, kappa 0.851 (PyTorch 0.930-0.934 / 0.840-0.844)
                     seed: 1,
                     init_model_bytes: initBytes
                 },
@@ -2086,8 +2130,9 @@
                 });
             });
 
-            const pred = await predPromise;
-            if (!pred) continue;
+            const raw = await predPromise;
+            if (!raw) continue;
+            const pred = postprocessSaccades(raw, state.rateHz);
 
             const newPre = [];
             const n = pred.length;
