@@ -31,6 +31,12 @@ struct TrainConfig {
     uint64_t seed = 1;
     std::string init_model;            // path of a model to start from (transfer learning); empty = random initialisation
     double deg_per_unit = 1.0;         // stored in the saved model (the scale the training data was brought to)
+    // Recipe of the PyTorch cross-validation (MS_CD_repo exploratory_analysis/mocol_uneye_crossval.py), off by default (the original recipe):
+    // validation = whole traces held out (val_fraction of the traces), so that early stopping sees data the network was not trained on; the training
+    // windows are cut again at every epoch around the labelled samples with a random offset, and each window gets `rotations` extra copies rotated by a
+    // random angle and mirrored with probability 0.5; minibatches of batch_size windows.
+    bool resample_each_epoch = false;
+    int batch_size = 0;                // > 0: minibatches of this many windows (all windows every epoch); 0 = the original 10 minibatches per epoch
 };
 
 struct TrainProgress {

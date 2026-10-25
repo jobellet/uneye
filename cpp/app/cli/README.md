@@ -47,7 +47,14 @@ uneye_train predict --model mine.bin --x X.csv --y Y.csv --savgol 11 --out pred.
 
 `cv` writes the held-out scores of its fold as JSON: event F1 of the saccades (a predicted run of >= 3 samples overlapping a labelled saccade), event
 precision and recall, Cohen's kappa sample by sample (saccade vs rest), on the reviewed samples of the held-out trials only, plus the confusion counts
-(`tp fp fn tn`, `n_true`, `n_pred`, matched events) so the folds can be pooled exactly. Prediction: argmax of the softmax (2 classes: p > 0.5), no
-post-processing. `--savgol W` must be the same at training and prediction (the web labeler itself trains on the raw trace; its exported model
-sidecar records the display filter but the network did not see it). Build: `cmake --build build --target uneye_train` (or, without CMake:
+(`tp fp fn tn`, `n_true`, `n_pred`, matched events) so the folds can be pooled exactly. Prediction: argmax of the softmax (2 classes: p > 0.5),
+then U'n'Eye's post-processing (saccades closer than `--merge-ms` 5 merged, shorter than `--min-dur-ms` 5 removed). `--savgol W` must
+be the same at training and prediction (the web labeler does the same with its display filter since 2026-10-25).
+
+Recipe: by default the labelers' recipe (`TrainConfig::resample_each_epoch`, `--batch 32`): whole traces held out for validation, training windows cut
+again every epoch around the labelled samples with random offsets, random rotations and mirrors; early stopping on the validation loss of the held-out
+traces (learning rate halved and best weights restored when it does not improve, stop after `--patience` such epochs, best weights returned).
+`--classic` restores the original U'n'Eye recipe. Cross-validation on 71 mocol trials (345 saccades, 5 session folds, from `combined.bin`,
+`--savgol 11`, scored with the same scorer and post-processing as the PyTorch pipeline): event F1 0.943, kappa 0.851 (classic 0.912 / 0.833; PyTorch
+0.930-0.934 / 0.840-0.844); 40-100 epochs, about 10 min per fold on one CPU. Build: `cmake --build build --target uneye_train` (or, without CMake:
 `g++ -O3 -std=c++17 -I cpp/app/include -I cpp/app/train/include cpp/app/cli/tools/uneye_train.cpp cpp/app/train/src/{trainer,dataset,model_io}.cpp -lpthread`).

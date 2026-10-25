@@ -157,6 +157,13 @@ public:
         cfg_.n_threads = 1;
     }
 
+    // recipe of the PyTorch cross-validation (TrainConfig::resample_each_epoch / batch_size): whole traces held out for validation, windows cut again
+    // every epoch with random offsets, rotations and mirrors, minibatches of batch_size windows (capped at kMaxBatch)
+    void set_recipe(bool resample_each_epoch, int batch_size) {
+        cfg_.resample_each_epoch = resample_each_epoch;
+        cfg_.batch_size = batch_size;
+    }
+
     void add_trace(val x_val, val y_val, val labels_val, double rate_hz) {
         TrainTrace tr;
         tr.rate_hz = rate_hz;
@@ -200,15 +207,9 @@ public:
         // 10 iterations per epoch as in the Python / native trainer, but never more than kMaxBatch windows per
         // batch: a batch of ntr/10 windows grew with the amount of labels and ran the 512 MB wasm heap out of
         // memory (RuntimeError: Aborted) from about 1600 training windows on.
-        constexpr int kMaxBatch = 32;
-        if (ntr_ <= 10 * kMaxBatch) {
-            iters_ = std::min(10, ntr_);
-            batch_ = std::max(1, ntr_ / iters_);
-        } else {
-            iters_ = (ntr_ + kMaxBatch - 1) / kMaxBatch;
-            batch_ = (ntr_ + iters_ - 1) / iters_;
-        }
+        plan_batches();
         rng_.seed(cfg_.seed + 17);
+        rrng_.seed(cfg_.seed + 101);
         order_.resize(ntr_);
         std::iota(order_.begin(), order_.end(), 0);
 
@@ -234,6 +235,13 @@ public:
         }
 
         ++epoch_;
+        if (cfg_.resample_each_epoch && epoch_ > 1) {                    // new training windows every epoch
+            resample_train(ds_, cfg_, rrng_);
+            ntr_ = ds_.train.n;
+            plan_batches();
+            order_.resize(size_t(ntr_));
+            std::iota(order_.begin(), order_.end(), 0);
+        }
         std::shuffle(order_.begin(), order_.end(), rng_);
         double ltr = 0;
         int cnt = 0;
@@ -346,6 +354,22 @@ public:
 
     void cancel() {
         cancel_ = true;
+    }
+
+    // minibatches: cfg_.batch_size windows (capped at kMaxBatch), or 10 per epoch as in the Python / native trainer; never more than kMaxBatch windows
+    // per batch: a batch of ntr/10 windows grew with the amount of labels and ran the 512 MB wasm heap out of memory from about 1600 windows on
+    void plan_batches() {
+        constexpr int kMaxBatch = 32;
+        if (cfg_.batch_size > 0) {
+            batch_ = std::min(cfg_.batch_size, kMaxBatch);
+            iters_ = std::max(1, (ntr_ + batch_ - 1) / batch_);
+        } else if (ntr_ <= 10 * kMaxBatch) {
+            iters_ = std::min(10, ntr_);
+            batch_ = std::max(1, ntr_ / iters_);
+        } else {
+            iters_ = (ntr_ + kMaxBatch - 1) / kMaxBatch;
+            batch_ = (ntr_ + iters_ - 1) / iters_;
+        }
     }
 
     bool is_finished() const { return finished_; }
@@ -592,7 +616,7 @@ private:
     std::unique_ptr<UNet<float>> net_;
     int K_ = 3, W_ = 1000;
     int ntr_ = 0, nval_ = 0, iters_ = 0, batch_ = 0;
-    std::mt19937_64 rng_;
+    std::mt19937_64 rng_, rrng_;
     std::vector<int> order_;
     AdamOpt adam_;
     double l2_ = 0.001;
@@ -611,6 +635,7 @@ EMSCRIPTEN_BINDINGS(uneye_web_module) {
         .constructor<>()
         .function("reset", &WebTrainer::reset)
         .function("setConfig", &WebTrainer::set_config)
+        .function("setRecipe", &WebTrainer::set_recipe)
         .function("addTrace", &WebTrainer::add_trace)
         .function("setInitModelBytes", &WebTrainer::set_init_model_bytes)
         .function("initTraining", &WebTrainer::init_training)

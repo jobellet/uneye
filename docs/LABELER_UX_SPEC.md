@@ -34,3 +34,13 @@ Implemented in `app.js` / `index.html` (web) and checked by `test_labeler_flow.m
 14. **Automatic training only after a pass 2.** Training starts by itself when pass 2 is left (or its last event is reached) and at least
     `minNewSecondsForAutoTrain` (2 s) were reviewed since the last training; never during pass 1 (point marks are refined in pass 2, so only then are
     the labels complete). *Train* in the menu still starts it at any time.
+15. **What the network sees, and how it is trained.** Training, test-set scoring and the network's proposals all use the same input: the positions after
+    the display filter of the Filter dialog (cubic Savitzky-Golay, when it is on; labels are set on the smoothed trace), invalid samples filled with
+    noise (`app.js::networkInputOf`, `trainingCopyOf`). Recipe (`TrainConfig::resample_each_epoch`, `batch_size`, set by `train_worker.js::setRecipe`):
+    whole traces held out for validation (`val_fraction` of the non-test traces), training windows cut again at every epoch around the labelled samples
+    with a random offset, each with 4 copies rotated by a random angle and mirrored half of the time, minibatches of 32 windows. Early stopping on the
+    validation loss of the held-out traces: when it does not improve on the mean of the 3 previous epochs the learning rate is halved and the best
+    weights are restored; after `patience` such epochs training stops, and the best weights (lowest validation loss) are kept, so over-fitting of the
+    training traces cannot degrade the returned network. Predictions are post-processed as in U'n'Eye (saccades closer than 5 ms merged, shorter than
+    5 ms removed) for the proposals and the test-set scores. The same recipe is available from the command line (`cpp/app/cli/tools/uneye_train.cpp`)
+    and was cross-validated against the PyTorch pipeline.

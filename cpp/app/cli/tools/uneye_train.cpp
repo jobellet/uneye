@@ -10,11 +10,17 @@
 //                       [--max-epochs 500] [--patience 4] [--lr 0.001] [--rotations 4] [--no-rotation] [--val 0.2] [--threads 0] [--seed 1]
 //   uneye_train cv      (same options) --folds 5 --fold 0 [--groups G.csv] [--cv-seed 0] --metrics fold0.json [--pred-out fold0_pred.csv]
 //                       trains on the other folds, predicts the trials of fold --fold and scores them on their reviewed samples
+//                       --reuse-model: score an existing --out model of that fold instead of training it again
 //   uneye_train predict --model model.bin --x X.csv --y Y.csv --out pred.csv [--classes 2] [--rate 1000] [--savgol 0] [--probs]
 //
+// Recipe (default): TrainConfig::resample_each_epoch with --batch 32 (whole traces held out for validation, windows re-cut every epoch with random
+// offsets, rotations and mirrors), the original early stopping on the validation loss (best weights kept); --classic: the original U'n'Eye recipe
+// (fixed windows, fixed rotations, random validation windows, 10 minibatches per epoch). Cross-validated on 71 mocol trials (5 session folds, from
+// combined.bin, --savgol 11): event F1 0.943, kappa 0.851 (classic recipe 0.912 / 0.833; PyTorch pipeline 0.930-0.934 / 0.840-0.844).
+// Post-processing (cv and predict): saccades closer than --merge-ms (5) merged, shorter than --min-dur-ms (5) removed (0 = off), as U'n'Eye.
 // Scores (cv): event F1 of the saccade class (a predicted run of >= 3 samples overlapping a labelled saccade, one match per event), precision and
 // recall, Cohen's kappa sample by sample (saccade vs rest), on the reviewed samples of the held-out trials only: the metric of the labelers
-// (cpp/web/uneye_web.cpp) and of foundation/compare.py. Prediction: argmax of the softmax (2 classes: p(saccade) > 0.5), no post-processing.
+// (cpp/web/uneye_web.cpp) and of foundation/compare.py. Prediction: argmax of the softmax (2 classes: p(saccade) > 0.5), then the post-processing.
 // --savgol W: cubic Savitzky-Golay smoothing of the positions over W samples (odd; polynomial at the edges, invalid samples held at the last valid value
 // and invalid again afterwards), the labelers' display filter, applied before training AND before prediction (0 = off). Use the same W everywhere.
 // Exit code 0 on success, 1 on a failure (data, training), 2 for a bad command line.
@@ -116,7 +122,8 @@ struct Args {
     int classes = 2, savgol = 0, max_epochs = 500, patience = 4, rotations = 4, threads = 0, folds = 0, fold = -1;
     double rate = 1000, lr = 1e-3, val = 0.2;
     uint64_t seed = 1, cv_seed = 0;
-    bool rotation = true, probs = false;
+    bool rotation = true, probs = false, reuse = false, classic = false;
+    int batch = 32, merge_ms = 5, min_dur_ms = 5;
 };
 
 int usage(const std::string& msg) {
@@ -146,6 +153,8 @@ bool parse(int argc, char** argv, Args& a, std::string* err) {
         else if (k == "--pred-out") { if (!val(a.pred_out)) return false; }
         else if (k == "--no-rotation") a.rotation = false;
         else if (k == "--probs") a.probs = true;
+        else if (k == "--reuse-model") a.reuse = true;
+        else if (k == "--classic") a.classic = true;
         else if (val(s)) {
             if (k == "--classes") a.classes = std::atoi(s.c_str());
             else if (k == "--rate") a.rate = std::atof(s.c_str());
@@ -160,6 +169,9 @@ bool parse(int argc, char** argv, Args& a, std::string* err) {
             else if (k == "--cv-seed") a.cv_seed = std::strtoull(s.c_str(), nullptr, 10);
             else if (k == "--folds") a.folds = std::atoi(s.c_str());
             else if (k == "--fold") a.fold = std::atoi(s.c_str());
+            else if (k == "--batch") a.batch = std::atoi(s.c_str());
+            else if (k == "--merge-ms") a.merge_ms = std::atoi(s.c_str());
+            else if (k == "--min-dur-ms") a.min_dur_ms = std::atoi(s.c_str());
             else { *err = "unknown option " + k; return false; }
         } else { *err = "option " + k + " needs a value"; return false; }
     }
@@ -216,6 +228,7 @@ bool train(const Args& a, const std::vector<Trial>& trials, const std::vector<in
     TrainConfig cfg;
     cfg.n_classes = a.classes; cfg.max_seconds_of_data = 1e9; cfg.rotation_aug = a.rotation; cfg.rotations = a.rotations; cfg.val_fraction = a.val;
     cfg.max_epochs = a.max_epochs; cfg.patience = a.patience; cfg.learning_rate = a.lr; cfg.n_threads = a.threads; cfg.seed = a.seed; cfg.init_model = a.init;
+    if (!a.classic) { cfg.resample_each_epoch = true; cfg.batch_size = a.batch; }
     auto tr = make_trainer();
     TrainProgress last;
     tr->start(std::move(traces), cfg, [&](const TrainProgress& p) {
@@ -279,6 +292,32 @@ std::vector<int> classify(const std::vector<float>& probs, int K, size_t n) {
     return c;
 }
 
+// U'n'Eye post-processing of the saccade class (uneye/functions.py::binary_prediction): saccades closer than merge samples are merged, saccades shorter
+// than min_dur samples are removed (the samples go back to class 0)
+void postprocess(std::vector<int>& c, int merge, int min_dur) {
+    const size_t n = c.size();
+    if (merge > 0) {
+        long last_end = -1;
+        for (size_t i = 0; i < n; ++i) {
+            if (c[i] != 1) continue;
+            if (last_end >= 0 && long(i) - last_end - 1 > 0 && long(i) - last_end - 1 < merge) {
+                bool gap_fix = true; for (long k = last_end + 1; k < long(i); ++k) if (c[size_t(k)] != 0) { gap_fix = false; break; }
+                if (gap_fix) for (long k = last_end + 1; k < long(i); ++k) c[size_t(k)] = 1;
+            }
+            size_t j = i; while (j < n && c[j] == 1) ++j;
+            last_end = long(j) - 1; i = j - 1;
+        }
+    }
+    if (min_dur > 1) {
+        for (size_t i = 0; i < n;) {
+            if (c[i] != 1) { ++i; continue; }
+            size_t j = i; while (j < n && c[j] == 1) ++j;
+            if (long(j - i) < min_dur) for (size_t k = i; k < j; ++k) c[k] = 0;
+            i = j;
+        }
+    }
+}
+
 std::vector<std::pair<size_t, size_t>> runs(const std::vector<int>& v, int cls, size_t minlen) {
     std::vector<std::pair<size_t, size_t>> r;
     for (size_t i = 0; i < v.size();) {
@@ -326,7 +365,8 @@ int cmd_cv(const Args& a) {
     for (size_t k = 0; k < T.size(); ++k) (fold_of[T[k].group] == a.fold ? te_idx : tr_idx).push_back(int(k));
     const std::string model = a.out.empty() ? a.metrics + ".bin" : a.out;
     int ep = 0;
-    if (!train(a, T, tr_idx, model, &ep, &err)) { std::cerr << "uneye_train: " << err << "\n"; return 1; }
+    if (a.reuse && std::ifstream(model).good()) std::cerr << "reusing " << model << " (no training)\n";
+    else if (!train(a, T, tr_idx, model, &ep, &err)) { std::cerr << "uneye_train: " << err << "\n"; return 1; }
     train::UNet<float> net(a.classes, 5, 5, 1);
     if (!load_model(model, a.classes, net, &err)) { std::cerr << "uneye_train: " << err << "\n"; return 1; }
     long tp = 0, fp = 0, fn = 0, tn = 0, n_true = 0, n_pred = 0, hit_true = 0, hit_pred = 0;
@@ -336,6 +376,7 @@ int cmd_cv(const Args& a) {
         const Trial& t = T[size_t(k)];
         const size_t n = t.x.size();
         auto c = classify(predict_probs(net, t, a.rate), a.classes, n);
+        postprocess(c, int(std::lround(a.merge_ms * a.rate / 1000.0)), int(std::lround(a.min_dur_ms * a.rate / 1000.0)));
         if (pred_out) { pred_out << k; for (size_t s = 0; s < n; ++s) pred_out << "," << c[s]; pred_out << "\n"; }
         std::vector<int> P(n, 0), L(n, 0);                              // scored on the reviewed samples only
         for (size_t s = 0; s < n; ++s) {
@@ -379,7 +420,11 @@ int cmd_predict(const Args& a) {
         const auto p = predict_probs(net, t, a.rate);
         const size_t n = t.x.size();
         if (a.probs) { for (size_t s = 0; s < n; ++s) o << (s ? "," : "") << p[n + s]; }          // p(saccade)
-        else { const auto c = classify(p, a.classes, n); for (size_t s = 0; s < n; ++s) o << (s ? "," : "") << c[s]; }
+        else {
+            auto c = classify(p, a.classes, n);
+            postprocess(c, int(std::lround(a.merge_ms * a.rate / 1000.0)), int(std::lround(a.min_dur_ms * a.rate / 1000.0)));
+            for (size_t s = 0; s < n; ++s) o << (s ? "," : "") << c[s];
+        }
         o << "\n";
     }
     std::cout << "wrote " << a.out << " (" << T.size() << " trials)\n";
