@@ -15,6 +15,7 @@
       x: $('impX'), y: $('impY'), t: $('impT'), unit: $('impUnit'), rate: $('impRate'), deg: $('impDeg'), hint: $('impTimeHint'),
       resRow: $('impResampleRow'), resample: $('impResample'), vcol: $('impVCol'), vop: $('impVOp'), vval: $('impVVal'),
       split: $('impSplit'), splitCol: $('impSplitCol'), splitLbl: $('impSplitColLabel'), gap: $('impGapSec'), chunk: $('impChunk'),
+      tableRow: $('impTableRow'), table: $('impTable'),
       result: $('impResult'), load: $('impLoadBtn'), cancel: $('impCancelBtn'), close: $('impCloseBtn'),
       scrPx: $('impScrPx'), scrCm: $('impScrCm'), scrDist: $('impScrDist'), scrApply: $('impScrApply'),
     };
@@ -42,13 +43,27 @@
       const finish = (val) => { E.modal.classList.add('hidden'); unbind(); S = null; resolve(val); };
       S.finish = finish;
       bind();
-      window.UnEyeImport.parseFile(file).then((table) => {
+      readTables(file, opts).then((tables) => {
         if (!S) return;
-        if (table.nRows < 2 || table.cols.length < 2) throw new Error('The file has fewer than 2 columns or 2 rows of numbers.');
-        S.table = table; S.stats = window.UnEyeImport.describeColumns(table);
-        init();
+        tables = tables.filter(t => t.nRows >= 2 && t.cols.length >= 2);
+        if (!tables.length) throw new Error('No table with at least 2 numeric columns and 2 rows was found.');
+        S.tables = tables;
+        E.table.innerHTML = tables.map((t, i) => '<option value="' + i + '">' + (t.title ? t.title.replace(/&/g, '&amp;').replace(/</g, '&lt;') : 'table ' + (i + 1)) + ' · ' + t.nRows.toLocaleString() + ' rows × ' + t.cols.length + '</option>').join('');
+        E.tableRow.classList.toggle('hidden', tables.length < 2);
+        useTable(0);
       }).catch((err) => { alert('Cannot read ' + file.name + ': ' + err.message); finish(null); });
     });
+  }
+
+  // text exports: one table; MATLAB / numpy / HDF5 files: every group of arrays with the same length is a table
+  async function readTables(file, opts) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (['mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {
+      const buf = await file.arrayBuffer();
+      const vars = await window.UnEyeFormats.readVarsFile(file.name, buf, opts.h5);
+      return window.UnEyeImport.tablesFromVars(vars, file.name, ext === 'mat' ? 'mat' : ext === 'npz' ? 'npz' : 'h5');
+    }
+    return [await window.UnEyeImport.parseFile(file)];
   }
 
   function setBusy(msg) {
@@ -60,10 +75,16 @@
   }
 
   // ------------------------------------------------------------ session setup
+  function useTable(i) {
+    S.tableIdx = i; S.table = S.tables[i]; S.stats = window.UnEyeImport.describeColumns(S.table);
+    S.E.table.value = String(i);
+    init();
+  }
+
   function init() {
     const I = window.UnEyeImport, E = S.E, T = S.table, st = S.stats;
     const sug = I.suggest(T, st);
-    const rate0 = sug.time && sug.time.rate ? sug.time.rate : (S.opts.rate || 1000);
+    const rate0 = sug.time && sug.time.rate ? sug.time.rate : ((T.info && T.info.rate) || S.opts.rate || 1000);
     S.m = {
       x: sug.x, y: sug.y, t: sug.t, unit: sug.time ? sug.time.unit : 'samples', fs: rate0,
       valid: sug.valid ? { col: sug.valid.col, op: sug.valid.op, val: sug.valid.val } : null,
@@ -85,6 +106,7 @@
 
     const info = T.kind === 'asc' ? 'EyeLink ASCII, ' + T.info.blocks + ' recording block' + (T.info.blocks === 1 ? '' : 's') + (T.info.rate ? ', ' + T.info.rate + ' Hz' : '')
       : T.kind === 'arff' ? 'ARFF' + (T.info.relation ? ' "' + T.info.relation + '"' : '')
+      : T.kind === 'mat' || T.kind === 'npz' || T.kind === 'h5' ? { mat: 'MATLAB', npz: 'NumPy', h5: 'HDF5' }[T.kind] + ' variables' + (T.info.rate ? ', ' + T.info.rate + ' Hz in the file' : '')
       : (T.info.delimiter === '\t' ? 'tab' : T.info.delimiter === 'ws' ? 'space' : T.info.delimiter === null ? 'single column' : '"' + T.info.delimiter + '"') + ' separated' + (T.info.header ? ', with a header' : ', no header');
     E.summary.textContent = S.file.name + ' · ' + info + ' · ' + T.nRows.toLocaleString() + ' rows × ' + T.cols.length + ' variables';
     E.body.classList.remove('hidden');
@@ -325,6 +347,7 @@
     const E = S.E;
     const changed = () => { if (!S || S.busy) return; S.notes = []; readForm(); syncForm(); refresh(); };
     for (const id of ['x', 'y', 't', 'unit', 'vcol', 'vop', 'split', 'splitCol', 'resample']) on(E[id], 'change', changed);
+    on(E.table, 'change', () => { if (S && !S.busy) { S.prevStart = 0; useTable(parseInt(E.table.value, 10)); } });
     for (const id of ['rate', 'deg', 'vval', 'gap', 'chunk']) on(E[id], 'input', () => { if (!S || S.busy) return; S.notes = []; readForm(); refresh(); });
     on(E.prev, 'click', () => { S.prevStart = Math.max(0, S.prevStart - windowRows().span); refresh(); });
     on(E.next, 'click', () => { const w = windowRows(); if (S.prevStart + w.span < S.table.nRows - 2) S.prevStart += w.span; refresh(); });

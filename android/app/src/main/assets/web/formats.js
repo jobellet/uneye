@@ -200,7 +200,7 @@
   }
 
   // reads the data elements of buf[start, end): top level (vars) or inside a cell (list)
-  async function parseElements(u8, start, end, vars, list) {
+  async function parseElements(u8, start, end, vars, list, keepNulls) {
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
     let pos = start;
     while (pos + 8 <= end) {
@@ -209,10 +209,11 @@
       const next = type === MI.COMPRESSED ? body + size : body + ((size + 7) & ~7);       // compressed elements are not padded to 8 bytes
       if (type === MI.COMPRESSED) {
         const inner = await inflate(u8.subarray(body, body + size), 'deflate');
-        await parseElements(inner, 0, inner.length, vars, list);
+        await parseElements(inner, 0, inner.length, vars, list, keepNulls);
       } else if (type === MI.MATRIX) {
         const m = await parseMatrix(u8, body, body + size);
         if (m) { if (list) list.push(m); else vars[m.name] = m; }
+        else if (list && keepNulls) list.push({ cls: 'skip', dims: [0, 0] });
       }
       pos = next > pos ? next : end;
     }
@@ -259,7 +260,16 @@
       const shape = dims.length === 2 ? dims : dims;
       return { name, cls: 'numeric', dims: shape, data, order: 'F' };
     }
-    return null;                                                                             // struct, object, sparse: ignored
+    if (cls === MX.STRUCT) {                                                                 // fields -> {cls: 'struct', dims, fields, elems: [{field: matrix}]}
+      const tl = readTag(u8, t3.next), fl = dv.getInt32(tl.body, true);
+      const tn = readTag(u8, tl.next), fields = [];
+      for (let i = 0; fl > 0 && i < tn.size / fl; i++) fields.push(dec.decode(u8.subarray(tn.body + i * fl, tn.body + (i + 1) * fl)).replace(/\0[\s\S]*$/, ''));
+      const mats = []; await parseElements(u8, tn.next, end, null, mats, true);
+      const elems = [];
+      for (let e = 0; e < count && e < 200; e++) { const o = {}; fields.forEach((f, k) => { o[f] = mats[e * fields.length + k]; }); elems.push(o); }
+      return { name, cls: 'struct', dims, fields, elems };
+    }
+    return null;                                                                             // object, sparse: ignored
   }
 
   // MATLAB v5, uncompressed. vars: [{name, type: 'f8', dims: [r, c], data: column-major numbers} | {name, cell: [{dims, data}, ...] (column of matrices)} | {name, strings: [...]}]
@@ -306,7 +316,9 @@
 
   const H5_WANTED = /^(xy|eye|x|y|trial_offset|trial_lengths|lengths|names|fs|labels|trials?.*|x_\d+|y_\d+)$/i;
 
-  async function readH5(buf, h5) {
+  // opts.all: every numeric dataset (up to 40 M values each), not only the layouts of this page - for the column explorer
+  async function readH5(buf, h5, opts) {
+    const all = !!(opts && opts.all);
     const Module = await h5.ready, FS = Module.FS, path = memDir(FS) + 'in_' + Math.random().toString(36).slice(2) + '.h5';
     FS.writeFile(path, new Uint8Array(buf));
     const vars = {};
@@ -316,8 +328,11 @@
         for (const k of group.keys()) {
           const item = group.get(k);
           if (item && item.type === 'Group') { walk(item, prefix + k + '/'); continue; }
-          if (!H5_WANTED.test(k) && !H5_WANTED.test(prefix.split('/')[0] || '')) continue;
-          const shape = item.shape || [], v = item.value;
+          if (!all && !H5_WANTED.test(k) && !H5_WANTED.test(prefix.split('/')[0] || '')) continue;
+          const shape = item.shape || [];
+          if (all && shape.reduce((a, b) => a * b, 1) > 4e7) continue;
+          let v; try { v = item.value; } catch (e) { continue; }
+          if (all && !ArrayBuffer.isView(v) && typeof v !== 'number') continue;
           vars[(prefix + k).replace(/^(trials?[^/]*)\//i, '$1/')] = { shape, data: (v && v.constructor && v.constructor.name === 'BigInt64Array') ? Float64Array.from(v, Number) : v };
         }
       };
@@ -443,6 +458,18 @@
     return trialsFromVars(vars);
   }
 
+  // the variables of a .mat / .npz / .h5 file as they are (no layout expected): input of the column explorer (import.js tablesFromVars)
+  async function readVarsFile(name, buf, h5) {
+    const ext = extOf(name), getH5 = async () => (typeof h5 === 'function' ? await h5() : h5);
+    if (ext === 'npz') return readNpz(buf);
+    if (ext === 'mat') {
+      try { return await readMat5(buf); }
+      catch (e) { if (!e.hdf5) throw e; return readH5(buf, await getH5(), { all: true }); }
+    }
+    if (ext === 'h5' || ext === 'hdf5' || ext === 'hdf') return readH5(buf, await getH5(), { all: true });
+    throw new Error('Unknown file type: ' + name);
+  }
+
   // ---------------------------------------------------------------- writers
   // trials: [{x, y}] (raw or smoothed positions), labels: [Int8Array] (-1 = not reviewed), names: [string]|null, fs
   function layoutOf(trials, labels) {
@@ -493,5 +520,5 @@
     return buildH5(vars, { fs }, typeof h5 === 'function' ? await h5() : h5);
   }
 
-  return { readTrialsFile, readNpz, readMat5, readH5, readZip, parseNpy, trialsFromVars, writeNpzFile, writeMatFile, writeH5File, buildNpz, buildMat5, buildZip, crc32, extOf };
+  return { readTrialsFile, readVarsFile, readNpz, readMat5, readH5, readZip, parseNpy, trialsFromVars, writeNpzFile, writeMatFile, writeH5File, buildNpz, buildMat5, buildZip, crc32, extOf };
 }));

@@ -2504,7 +2504,10 @@
             binReader.onload = async (e) => {
                 try {
                     elements.modalFileName.textContent = 'Reading ' + file.name + '…';
-                    const r = await UnEyeFormats.readTrialsFile(file.name, e.target.result, loadH5Lib);
+                    // a layout this page knows (its own exports) loads directly; any other file, or "Show the column explorer", opens the explorer
+                    let r = null;
+                    if (!(elements.alwaysExplorer && elements.alwaysExplorer.checked)) { try { r = await UnEyeFormats.readTrialsFile(file.name, e.target.result, loadH5Lib); } catch (err) { r = null; } }
+                    if (!r) { await loadWithExplorer(file, rate, scale, prelabeler); return; }
                     elements.loadModal.classList.add('hidden');
                     loadDataset(r.trials, r.fs || rate, scale, prelabeler);
                     if (r.labels) {
@@ -2579,8 +2582,8 @@
 
     async function loadWithExplorer(file, rate, scale, prelabeler) {
         elements.loadModal.classList.add('hidden');
-        const r = await UnEyeImportUI.run(file, { rate, scale });
-        if (!r) { elements.loadModal.classList.remove('hidden'); return; }      // cancelled: back to the load dialog
+        const r = await UnEyeImportUI.run(file, { rate, scale, h5: loadH5Lib });
+        if (!r) { elements.modalFileName.textContent = file.name; elements.loadModal.classList.remove('hidden'); return; }      // cancelled: back to the load dialog
         loadDataset(r.trials, r.fs, r.degPerUnit, prelabeler);
         if (pendingLabelsFile) await loadPreviousLabels(pendingLabelsFile);
         const lens = r.trials.map(t => t.x.length);

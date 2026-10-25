@@ -392,6 +392,92 @@
     for (const c of add) table.cols.push(c);
   }
 
+  // ---------------------------------------------------------------- MAT / NPZ / HDF5 variables -> tables
+  // vars: what UnEyeFormats.readVarsFile returns. Every numeric array becomes columns; arrays with the same number of rows form one table
+  // (a matrix: its long side is time; names come from a text array of the right length, e.g. ZuCo "colheader"; structs are flattened as
+  // ETdata.pos; a cell array of matrices becomes one table with an extra column holding the cell number).
+  const RATE_NAME = /(^|[._\/])(fs|srate|samp\w*(freq|rate)|sampling\w*|rate|hz)$/i;
+
+  function leavesOf(vars) {
+    const leaves = [], strings = [];
+    const walk = (v, name, depth) => {
+      if (!v || depth > 6) return;
+      if (v.cls === 'struct') {
+        const many = v.elems.length > 1;
+        v.elems.slice(0, 50).forEach((e, i) => { for (const f of v.fields) walk(e[f], name + (many ? '(' + (i + 1) + ')' : '') + '.' + f, depth + 1); });
+      } else if (v.cls === 'cell') {
+        const cs = v.cells || [];
+        if (cs.length && cs.every(c => c && c.cls === 'char')) strings.push({ name, list: cs.map(c => c.strings.join('')) });
+        else if (cs.length && cs.every(c => c && c.cls === 'numeric' && c.dims.length === 2)) leaves.push({ name, cells: cs.slice(0, 20000) });
+      } else if (v.cls === 'char') strings.push({ name, list: v.strings });
+      else if (v.cls === 'numeric') { if (v.dims.length === 2) leaves.push({ name, dims: v.dims, data: v.data, order: 'F' }); }
+      else if (v.strings) strings.push({ name, list: v.strings });
+      else if (v.data !== undefined && v.shape) {                           // npz / h5: C order
+        if (typeof v.data === 'number') leaves.push({ name, dims: [1, 1], data: Float64Array.of(v.data), order: 'C' });
+        else if (ArrayBuffer.isView(v.data) && v.shape.length <= 2) leaves.push({ name, dims: v.shape.length === 2 ? v.shape : [v.shape[0] === undefined ? 1 : v.shape[0], 1], data: v.data, order: 'C' });
+        else if (Array.isArray(v.data) && typeof v.data[0] === 'string') strings.push({ name, list: v.data });
+      }
+    };
+    for (const k of Object.keys(vars)) walk(vars[k], k, 0);
+    return { leaves, strings };
+  }
+
+  // a numeric leaf as {n rows, columns: [Float64Array]}
+  function columnsOfMatrix(dims, data, order) {
+    const r = dims[0], c = dims[1], at = order === 'F' ? (i, j) => data[j * r + i] : (i, j) => data[i * c + j];
+    if (r === 1 || c === 1) return { n: r * c, cols: [Float64Array.from(data)] };
+    const out = [];
+    if (r >= c) { for (let j = 0; j < c; j++) { const a = new Float64Array(r); for (let i = 0; i < r; i++) a[i] = at(i, j); out.push(a); } return { n: r, cols: out }; }
+    for (let j = 0; j < r; j++) { const a = new Float64Array(c); for (let i = 0; i < c; i++) a[i] = at(j, i); out.push(a); }
+    return { n: c, cols: out };
+  }
+
+  function tablesFromVars(vars, fileName, kind) {
+    const { leaves, strings } = leavesOf(vars);
+    let rate = null;
+    const groups = new Map();
+    const add = (n, name, data) => { if (!groups.has(n)) groups.set(n, []); groups.get(n).push({ name, data }); };
+    const headerFor = (leafName, k) => {
+      const ok = strings.filter(s => s.list.length === k);
+      if (!ok.length) return null;
+      const stem = leafName.split(/[.(]/)[0].toLowerCase();
+      const pref = ok.find(s => /head|colname|columns|labels|names|channels/i.test(s.name)) || ok.find(s => s.name.toLowerCase().indexOf(stem) >= 0) || ok[0];
+      return uniqueNames(pref.list);
+    };
+    for (const lf of leaves) {
+      if (lf.cells) {                                                 // cell array of matrices: one table, the cell number as a column
+        const parts = lf.cells.map(cl => columnsOfMatrix(cl.dims, cl.data, 'F')).filter(p => p.n >= 2);
+        if (!parts.length) continue;
+        const k = parts[0].cols.length;
+        if (!parts.every(p => p.cols.length === k)) continue;
+        const total = parts.reduce((a, p) => a + p.n, 0), names = headerFor(lf.name, k);
+        const idx = new Float64Array(total);
+        for (let j = 0; j < k; j++) {
+          const col = new Float64Array(total); let o = 0;
+          parts.forEach((p, ci) => { col.set(p.cols[j], o); if (j === 0) idx.fill(ci + 1, o, o + p.n); o += p.n; });
+          add(total, names ? names[j] : lf.name + '{}(:,' + (j + 1) + ')', col);
+        }
+        add(total, lf.name + ' (cell number)', idx);
+        continue;
+      }
+      const m = columnsOfMatrix(lf.dims, lf.data, lf.order);
+      if (m.n === 1) { if (RATE_NAME.test(lf.name) && m.cols[0][0] >= 10 && m.cols[0][0] <= 5000) rate = m.cols[0][0]; continue; }
+      const names = m.cols.length > 1 ? headerFor(lf.name, m.cols.length) : null;
+      m.cols.forEach((col, j) => add(m.n, names ? names[j] : (m.cols.length === 1 ? lf.name : lf.name + '(:,' + (j + 1) + ')'), col));
+    }
+    const tables = [];
+    for (const [n, cols] of groups) {
+      if (n < 20) continue;
+      const seen = new Set();
+      const named = uniqueNames(cols.map(c => c.name));
+      const table = { kind: kind || 'mat', name: fileName, title: named.slice(0, 3).join(', ') + (named.length > 3 ? ', …' : ''), nRows: n, cols: named.map((nm, i) => ({ name: nm, data: cols[i].data })), info: { rate, delimiter: null, header: true } };
+      addDerived(table);
+      tables.push(table);
+    }
+    tables.sort((a, b) => Math.min(b.cols.length, 8) * b.nRows - Math.min(a.cols.length, 8) * a.nRows);
+    return tables.filter(t => t.cols.length >= 2).concat(tables.filter(t => t.cols.length < 2)).slice(0, 12);
+  }
+
   // ---------------------------------------------------------------- statistics per column
   function describeColumns(table) {
     const n = table.nRows;
@@ -521,7 +607,7 @@
     const n = normName(name);
     if (n === 'time' || n === 'timestamp' || n === 'timerel' || n === 'tim' || n === 'timems' || n === 'timeus' || n === 'times' || n === 'timestampms') return 95;
     if (/timestamp|^time|time$|^ts$|^tim|^zeit|^temps|^tiempo|^tempo/.test(n)) return 80;
-    if (n === 't') return 70;
+    if (n === 't' || n === 'tms' || n === 'tus' || n === 'tsec') return 70;
     if (n === 'n' || n === 'sample' || n === 'samples' || n === 'index' || n === 'idx' || n === 'frame') return 40;
     return 0;
   }
@@ -601,7 +687,7 @@
       if (/^(confidence|conf)$/.test(n) && stats[i].max <= 1.0001) { sug.valid = { col: i, op: '>=', val: 0.5 }; break; }
     }
     // trials
-    const trialName = /trial|item|block|segment|session|recording|epoch|run/i;
+    const trialName = /trial|item|block|segment|session|recording|epoch|run|cell number/i;
     let tr = -1, trScore = 0;
     for (let i = 0; i < table.cols.length; i++) {
       if (i === sug.x || i === sug.y || i === sug.t) continue;
@@ -763,6 +849,6 @@
 
   return {
     parseString, parseFile, parseSource, parseDelimited, parseArff, parseAsc, chunksOfFile, sniffHead, sniffLines,
-    describeColumns, analyzeTime, analyzeTimeColumn, rateFor, suggest, validArray, countTrials, buildTrials, peakSpeed, degPerPixel, UNIT_SCALE, TYPICAL_RATES,
+    tablesFromVars, describeColumns, analyzeTime, analyzeTimeColumn, rateFor, suggest, validArray, countTrials, buildTrials, peakSpeed, degPerPixel, UNIT_SCALE, TYPICAL_RATES,
   };
 }));

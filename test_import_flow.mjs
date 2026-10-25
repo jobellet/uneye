@@ -5,6 +5,9 @@
 import puppeteer from 'puppeteer-core';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+import fs from 'fs';
+import os from 'os';
 const URL = process.argv[2] || 'http://127.0.0.1:8765/index.html';
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -91,6 +94,59 @@ await page.click('#impCancelBtn');
 await sleep(200);
 check(await hidden('importModal') && !(await hidden('loadModal')), 'Cancel in the explorer goes back to the load dialog');
 await page.click('#modalCancelBtn');
+
+
+// --- MATLAB file in a layout the page does not know (ZuCo raw ET.mat): no error, the explorer opens by itself
+await open('zuco_et.mat');
+await waitExplorer();
+check(await optText('impX') === 'L_GAZE_X' && await optText('impY') === 'L_GAZE_Y' && await optText('impT') === 'TIME', `ZuCo .mat: X=${await optText('impX')}, Y=${await optText('impY')}, time=${await optText('impT')}`);
+check(await val('impUnit') === 'ms' && await val('impRate') === '500' && (await ev(() => document.getElementById('impSummary').textContent)).includes('MATLAB'), 'ZuCo .mat: ' + await ev(() => document.getElementById('impSummary').textContent));
+check(!(await hidden('importModal')) && (await ev(() => !document.getElementById('impTableRow').classList.contains('hidden'))), 'ZuCo .mat: a table picker is shown because the file holds several tables');
+await page.select('#impTable', '1'); await sleep(300);
+check((await ev(() => document.getElementById('impColList').children.length)) === 2, 'picking the other table lists its own variables');
+await page.select('#impTable', '0'); await sleep(300);
+await page.click('#impLoadBtn');
+await page.waitForFunction(() => document.getElementById('importModal').classList.contains('hidden'), { timeout: 20000 });
+await sleep(300);
+st = await ev(() => ({ n: state.trials.length, len: state.trials[0].x.length, rate: state.rateHz }));
+check(st.n === 1 && st.len === 6000 && st.rate === 500, `ZuCo .mat loaded: ${JSON.stringify(st)}`);
+
+// --- struct in a MATLAB file (Lund2013): ETdata.pos columns, rate from ETdata.sampFreq
+await open('lund_pos.mat');
+await waitExplorer();
+check(await optText('impX') === 'ETdata.pos(:,2)' && await optText('impT') === '(none: use the sampling rate)' && await val('impRate') === '500', `Lund .mat: X=${await optText('impX')}, no time column, rate ${await val('impRate')} Hz from the file`);
+await page.click('#impCancelBtn'); await sleep(200); await page.click('#modalCancelBtn');
+
+// --- a file written by this page (npz export layout) still loads directly
+const F = createRequire(import.meta.url)('./formats.js');
+const own = path.join(os.tmpdir(), 'uneye_own_export.npz');
+const trials = [0, 1].map(k => ({ x: Float32Array.from({ length: 400 }, (_, i) => Math.sin(i / 30 + k)), y: Float32Array.from({ length: 400 }, (_, i) => Math.cos(i / 40)) }));
+fs.writeFileSync(own, F.writeNpzFile(trials, null, null, 1000));
+await page.evaluate(() => { document.getElementById('loadModal').classList.add('hidden'); });
+await (await page.$('#fileInput')).uploadFile(own);
+await page.waitForFunction(() => !document.getElementById('loadModal').classList.contains('hidden'), { timeout: 10000 });
+await page.click('#modalConfirmBtn'); await sleep(1200);
+st = await ev(() => ({ n: state.trials.length, explorerHidden: document.getElementById('importModal').classList.contains('hidden') }));
+check(st.n === 2 && st.explorerHidden, `the page's own .npz export loads directly, no explorer: ${JSON.stringify(st)}`);
+fs.unlinkSync(own);
+
+
+// --- the real file from the ZuCo 2.0 download, when it is on this machine (whole 250 000-sample recording)
+const zucoReal = path.join(process.env.UNEYE_DATASETS || path.join(os.homedir(), 'Desktop', 'Desktop', 'eye_tracking_datasets', 'datasets'), 'ZuCo_2.0', 'osfstorage', 'task1 - NR', 'Raw data', 'YLS', 'YLS_NR2_ET.mat');
+if (fs.existsSync(zucoReal)) {
+  await page.evaluate(() => { document.getElementById('loadModal').classList.add('hidden'); document.getElementById('alwaysExplorer').checked = true; });
+  await (await page.$('#fileInput')).uploadFile(zucoReal);
+  await page.waitForFunction(() => !document.getElementById('loadModal').classList.contains('hidden'), { timeout: 10000 });
+  await page.click('#modalConfirmBtn');
+  await waitExplorer();
+  check(await optText('impX') === 'L_GAZE_X' && await optText('impT') === 'TIME' && await val('impRate') === '500', `YLS_NR2_ET.mat (real, whole file): ${await ev(() => document.getElementById('impSummary').textContent)}`);
+  await page.click('#impLoadBtn');
+  await page.waitForFunction(() => document.getElementById('importModal').classList.contains('hidden'), { timeout: 60000 });
+  await sleep(500);
+  st = await ev(() => ({ n: state.trials.length, len: state.trials[0].x.length, rate: state.rateHz }));
+  check(st.n === 5 && st.len === 30000 && st.rate === 500, `YLS_NR2_ET.mat loaded: a 5-minute recording is proposed as 60 s parts: ${JSON.stringify(st)}`);
+  await page.evaluate(() => { document.getElementById('alwaysExplorer').checked = false; });
+} else console.log('skip real ZuCo file: not found');
 
 // --- plain two-column file: old reader, no explorer
 await open('../sample_two_column_data.txt');

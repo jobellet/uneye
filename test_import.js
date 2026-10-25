@@ -4,6 +4,7 @@
 // Usage: node test_import.js
 const fs = require('fs'), path = require('path'), os = require('os'), cp = require('child_process');
 const I = require('./import.js');
+const F = require('./formats.js');
 
 let failed = 0;
 const ok = (c, msg) => { if (c) console.log('ok   ' + msg); else { failed++; console.log('FAIL ' + msg); } };
@@ -91,6 +92,43 @@ const count = (a, f) => { let n = 0; for (let i = 0; i < a.length; i++) if (f(a[
     ok(r.t.info.messages.length > 0 && r.t.info.events.fixations >= 0, 'EyeLink asc: messages listed');
   }
 
+
+  // ------------------------------------------------------------ MATLAB / NumPy files: any variables, structs, header arrays
+  const tablesOf = async (f) => { const b = fs.readFileSync(path.isAbsolute(f) ? f : path.join(FIX, f)); return I.tablesFromVars(await F.readVarsFile(f, b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)), path.basename(f)); };
+  const suggestOf = (t) => { const st = I.describeColumns(t); return I.suggest(t, st); };
+  {
+    const ts = await tablesOf('zuco_et.mat'), t = ts[0], s = suggestOf(t);
+    ok(t.nRows === 6000 && t.cols.length === 7 && t.cols[1].name === 'L_GAZE_X', 'ZuCo ET.mat: 6000 x 7 table, column names taken from "colheader"');
+    ok(t.cols[s.x].name === 'L_GAZE_X' && t.cols[s.y].name === 'L_GAZE_Y' && !/target/i.test(t.cols[s.x].name), 'ZuCo ET.mat: X = L_GAZE_X, Y = L_GAZE_Y (not the target position)');
+    ok(t.cols[s.t].name === 'TIME' && s.time.unit === 'ms' && s.time.rate === 500 && s.time.regular, 'ZuCo ET.mat: TIME in ms, 500 Hz, regular');
+    const b = I.buildTrials(t, mapping(t, s));
+    ok(b.trials.length === 1 && b.trials[0].x.length === 6000, 'ZuCo ET.mat: one trial of 6000 samples');
+    ok(ts.length >= 2, 'ZuCo ET.mat: the other arrays (event table) are offered as separate tables (' + ts.length + ')');
+  }
+  {
+    const ts = await tablesOf('lund_pos.mat'), t = ts[0], s = suggestOf(t);
+    ok(ts.length === 1 && t.nRows === 1658 && t.cols.length === 6 && t.cols[0].name === 'ETdata.pos(:,1)', 'Lund .mat: struct field ETdata.pos read as 6 columns');
+    ok(t.info.rate === 500, 'Lund .mat: sampling rate 500 Hz found in ETdata.sampFreq');
+    ok(s.x >= 0 && s.y >= 0 && s.t < 0 && !/\(:,1\)/.test(t.cols[s.x].name), 'Lund .mat: time column is all NaN and is not used; X, Y = ' + t.cols[s.x].name + ', ' + t.cols[s.y].name);
+    const b = I.buildTrials(t, mapping(t, s, { fs: t.info.rate }));
+    ok(b.trials.length === 1 && b.trials[0].x.length === 1658, 'Lund .mat: one trial of 1658 samples at 500 Hz');
+  }
+  {
+    const t = (await tablesOf('judd_eye.mat'))[0], s = suggestOf(t);
+    ok(t.nRows === 725 && t.cols.length === 2 && s.x === 0 && s.y === 1, 'Judd .mat: DATA.eyeData (725 x 2), nested two levels, read as X and Y');
+  }
+  {
+    const t = (await tablesOf('cell_trials.mat'))[0], s = suggestOf(t);
+    ok(t.nRows === 900 && t.cols.map(c => c.name).join() === 't_ms,gx,gy,rec (cell number)', 'cell array of 3 matrices: one table of 900 rows with the cell number as a column');
+    ok(t.cols[s.t].name === 't_ms' && s.time.rate === 250 && t.cols[s.trial].name === 'rec (cell number)', 'cell array: time t_ms (250 Hz) and the cell number proposed as the trial variable');
+    const b = I.buildTrials(t, mapping(t, s, { split: { mode: 'column', col: s.trial } }));
+    ok(b.trials.length === 3 && b.trials.every(x => x.x.length === 300), 'cell array: 3 trials of 300 samples');
+  }
+  {
+    const t = (await tablesOf('plain.npz'))[0], s = suggestOf(t);
+    ok(t.nRows === 500 && t.cols[s.x].name === 'gaze_x' && t.cols[s.y].name === 'gaze_y' && t.cols[s.t].name === 'time_us' && s.time.unit === 'us' && s.time.rate === 120, '.npz: gaze_x / gaze_y / time_us (120 Hz) found');
+  }
+
   // ------------------------------------------------------------ plain files keep the old fast path
   {
     const two = fs.readFileSync(path.join(__dirname, 'test_data', 'sample_two_column_data.txt'), 'utf8');
@@ -148,7 +186,7 @@ const count = (a, f) => { let n = 0; for (let i = 0; i < a.length; i++) if (f(a[
   const D = process.env.UNEYE_DATASETS || path.join(os.homedir(), 'Desktop', 'Desktop', 'eye_tracking_datasets', 'datasets');
   if (fs.existsSync(D)) {
     const fromPath = (p) => fs.createReadStream(p, { encoding: 'utf8', highWaterMark: 1 << 20 });
-    const walk = (dir, ext, out, lim) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { if (out.length >= lim) return; const p = path.join(dir, e.name); if (e.isDirectory()) walk(p, ext, out, lim); else if (p.endsWith(ext)) out.push(p); } return out; };
+    const walk = (dir, ext, out, lim) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { if (out.length >= lim) return out; const p = path.join(dir, e.name); if (e.isDirectory()) walk(p, ext, out, lim); else if (p.endsWith(ext)) out.push(p); } return out; };
     const sweep = async (label, files, check) => {
       let good = 0, bad = [];
       for (const f of files) {
@@ -176,6 +214,24 @@ const count = (a, f) => { let n = 0; for (let i = 0; i < a.length; i++) if (f(a[
           }
         }
         ok(n > 0 && good === n, 'GazeBase (whole files from zips): ' + good + '/' + n + ' tasks read, X, Y and validity found');
+      }
+      const zu = path.join(D, 'ZuCo_2.0', 'osfstorage', 'task1 - NR', 'Raw data');
+      if (fs.existsSync(zu)) {
+        const files = pick(walk(zu, '_ET.mat', [], 200), 6); let good = 0;
+        for (const f of files) { const t = (await tablesOf(f))[0], s = suggestOf(t); if (t.cols[s.x].name === 'L_GAZE_X' && t.cols[s.y].name === 'L_GAZE_Y' && t.cols[s.t].name === 'TIME' && s.time.rate === 500) good++; }
+        ok(files.length > 0 && good === files.length, 'ZuCo raw ET.mat (whole files, ~250k samples): ' + good + '/' + files.length + ' read with X, Y, TIME at 500 Hz');
+      }
+      const lu = path.join(D, 'Lund2013', 'etdata', 'EyeMovementDetectorEvaluation', 'annotated_data');
+      if (fs.existsSync(lu)) {
+        const files = pick(walk(lu, '.mat', [], 300), 8); let good = 0;
+        for (const f of files) { const ts = await tablesOf(f); const t = ts[0]; if (!t) continue; const s = suggestOf(t); if (s.x >= 0 && s.y >= 0 && s.t < 0 && t.info.rate === 500 && t.nRows > 100) good++; }
+        ok(files.length > 0 && good === files.length, 'Lund2013 .mat (whole files): ' + good + '/' + files.length + ' read, X, Y and 500 Hz found');
+      }
+      const ju = path.join(D, 'Judd2009', 'DATA');
+      if (fs.existsSync(ju)) {
+        const files = pick(walk(ju, '.mat', [], 4000).filter(f => !/Calibration|shuff/.test(f)), 8); let good = 0;
+        for (const f of files) { const t = (await tablesOf(f))[0]; if (t && t.cols.length === 2 && suggestOf(t).x === 0) good++; }
+        ok(files.length > 0 && good === files.length, 'Judd2009 .mat (whole files): ' + good + '/' + files.length + ' read as X, Y');
       }
       const em = path.join(D, 'EMTeC', 'data', 'subject_level_data', 'ET_111');
       if (fs.existsSync(path.join(em, 'ET_111.asc'))) {
