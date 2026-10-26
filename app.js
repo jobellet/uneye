@@ -178,7 +178,13 @@
         exportFormat: document.getElementById('exportFormat'),
         loadModal: document.getElementById('loadModal'),
         modalFileName: document.getElementById('modalFileName'),
+        modalFileSummary: document.getElementById('modalFileSummary'),
         modalChangeTraceBtn: document.getElementById('modalChangeTraceBtn'),
+        modalLabelsVarRow: document.getElementById('modalLabelsVarRow'),
+        modalLabelsVar: document.getElementById('modalLabelsVar'),
+        modalLabelsRole: document.getElementById('modalLabelsRole'),
+        modalProbVarRow: document.getElementById('modalProbVarRow'),
+        modalProbVar: document.getElementById('modalProbVar'),
         rateInput: document.getElementById('rateInput'),
         scaleInput: document.getElementById('scaleInput'),
         modalSgWindow: document.getElementById('modalSgWindow'),
@@ -2860,6 +2866,130 @@
 
     let pendingModelFile = null;
     let pendingLabelsFile = null;
+    let pendingFileInspection = null;
+
+    function inferRoleForModalVar(varName, info) {
+        if (!varName) return 'prelabels';
+        const nm = String(varName).toLowerCase();
+        if (/pred|pre_?label|propos|auto|detect|hmm|model|unet|uneye/.test(nm)) return 'prelabels';
+        const v = info && info.vars ? info.vars.find(it => it.name === varName) : null;
+        if (v && v.hasNeg) return 'reviewed';
+        if (/^labels?$|human|expert|ground_?truth|gt|manual|annot/.test(nm)) return 'reviewed';
+        return 'prelabels';
+    }
+
+    function escapeOptionHtml(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function inspectFileForModal(file) {
+        if (!elements.modalLabelsVar || !elements.modalProbVar) return;
+        elements.modalLabelsVar.innerHTML = '<option value="__auto__">(auto-detecting…)</option><option value="">(none)</option>';
+        elements.modalProbVar.innerHTML = '<option value="__auto__">(auto-detecting…)</option><option value="">(none)</option>';
+        elements.modalLabelsVar.value = '__auto__';
+        elements.modalProbVar.value = '__auto__';
+        if (elements.modalLabelsRole) {
+            elements.modalLabelsRole.value = 'prelabels';
+            elements.modalLabelsRole.disabled = false;
+        }
+        if (elements.modalFileSummary) {
+            elements.modalFileSummary.textContent = 'Inspecting file variables…';
+            elements.modalFileSummary.classList.remove('hidden');
+        }
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        const promise = (async () => {
+            try {
+                if (['mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {
+                    const buf = await file.arrayBuffer();
+                    const vars = await UnEyeFormats.readVarsFile(file.name, buf, loadH5Lib);
+                    const info = UnEyeFormats.inspectVars ? UnEyeFormats.inspectVars(vars) : null;
+                    if (pendingFileToLoad === file && info) {
+                        if (info.fs > 0 && elements.rateInput) elements.rateInput.value = String(info.fs);
+                        if (info.savgolMs > 0 && elements.modalSgWindow) {
+                            const sgStr = String(Math.round(info.savgolMs));
+                            if (Array.from(elements.modalSgWindow.options).some(o => o.value === sgStr)) {
+                                elements.modalSgWindow.value = sgStr;
+                            }
+                        }
+                        let candidates = info.vars || [];
+                        if (!candidates.length && window.UnEyeImport) {
+                            const tables = UnEyeImport.tablesFromVars(vars, file.name, ext === 'mat' ? 'mat' : ext === 'npz' ? 'npz' : 'h5');
+                            if (tables && tables[0]) {
+                                const st = UnEyeImport.describeColumns(tables[0]);
+                                const sug = UnEyeImport.suggest(tables[0], st);
+                                candidates = tables[0].cols
+                                    .map((c, idx) => ({ name: c.name, summary: st[idx].nominal ? 'text' : `${st[idx].min.toFixed(2)}..${st[idx].max.toFixed(2)}`, hasNeg: st[idx].min < 0, nominal: st[idx].nominal }))
+                                    .filter(c => !c.nominal);
+                                if (!info.defaultLabelsVar && sug.labels >= 0 && tables[0].cols[sug.labels]) {
+                                    info.defaultLabelsVar = tables[0].cols[sug.labels].name;
+                                    info.defaultLabelsRole = sug.labelsRole || 'prelabels';
+                                }
+                                if (!info.defaultProbVar && sug.prob >= 0 && tables[0].cols[sug.prob]) {
+                                    info.defaultProbVar = tables[0].cols[sug.prob].name;
+                                }
+                            }
+                        }
+                        const optsHtml = '<option value="">(none)</option>' + candidates.map(v => `<option value="${escapeOptionHtml(v.name)}">${escapeOptionHtml(v.name)}${v.summary ? ' (' + escapeOptionHtml(v.summary) + ')' : ''}</option>`).join('');
+                        elements.modalLabelsVar.innerHTML = optsHtml;
+                        elements.modalProbVar.innerHTML = optsHtml;
+                        elements.modalLabelsVar.value = info.defaultLabelsVar || '';
+                        if (elements.modalLabelsRole) {
+                            elements.modalLabelsRole.value = info.defaultLabelsRole || inferRoleForModalVar(info.defaultLabelsVar, info);
+                            elements.modalLabelsRole.disabled = !elements.modalLabelsVar.value;
+                        }
+                        elements.modalProbVar.value = info.defaultProbVar || '';
+                        if (elements.modalFileSummary) {
+                            const parts = [];
+                            if (info.nTrials > 0) parts.push(`${info.nTrials} trial${info.nTrials === 1 ? '' : 's'}`);
+                            if (info.nSamples > 0) parts.push(`${info.nSamples.toLocaleString()} samples`);
+                            if (info.fs > 0) parts.push(`${info.fs} Hz`);
+                            if (candidates.length) parts.push(`variables: ${candidates.map(v => v.name).join(', ')}`);
+                            elements.modalFileSummary.textContent = parts.join(' · ');
+                            elements.modalFileSummary.classList.toggle('hidden', parts.length === 0);
+                        }
+                    }
+                    return { vars, info };
+                } else {
+                    const headText = await file.slice(0, 65536).text();
+                    const sniff = window.UnEyeImport ? UnEyeImport.sniffHead(headText, file.name) : { plain: true };
+                    let colNames = [];
+                    if (!sniff.plain && ext !== 'asc' && ext !== 'arff') {
+                        const firstLine = (headText.split(/\r?\n/).find(l => l.trim() && !l.trim().startsWith('#')) || '').trim();
+                        const delim = firstLine.includes('\t') ? '\t' : firstLine.includes(';') ? ';' : firstLine.includes(',') ? ',' : /\s+/;
+                        colNames = firstLine.split(delim).map(s => s.replace(/^["']|["']$/g, '').trim()).filter(Boolean);
+                    }
+                    if (pendingFileToLoad === file) {
+                        const optsHtml = '<option value="">(none)</option>' + colNames.map(nm => `<option value="${escapeOptionHtml(nm)}">${escapeOptionHtml(nm)}</option>`).join('');
+                        elements.modalLabelsVar.innerHTML = optsHtml;
+                        elements.modalProbVar.innerHTML = optsHtml;
+                        const defLbl = colNames.find(nm => /^(pred_?labels?|pre_?labels?|labels?|saccade_?labels?|event_?labels?)$/i.test(nm)) || '';
+                        const defProb = colNames.find(nm => /^(prob|probability|probabilities|pred_?prob|p_?saccade|saccade_?prob)$/i.test(nm)) || '';
+                        elements.modalLabelsVar.value = defLbl;
+                        if (elements.modalLabelsRole) {
+                            elements.modalLabelsRole.value = inferRoleForModalVar(defLbl, null);
+                            elements.modalLabelsRole.disabled = !defLbl;
+                        }
+                        elements.modalProbVar.value = defProb;
+                        if (elements.modalFileSummary) {
+                            elements.modalFileSummary.textContent = colNames.length ? `Columns: ${colNames.join(', ')}` : '';
+                            elements.modalFileSummary.classList.toggle('hidden', colNames.length === 0);
+                        }
+                    }
+                    return { sniff, colNames };
+                }
+            } catch (err) {
+                if (pendingFileToLoad === file) {
+                    elements.modalLabelsVar.innerHTML = '<option value="">(none)</option>';
+                    elements.modalProbVar.innerHTML = '<option value="">(none)</option>';
+                    if (elements.modalLabelsRole) elements.modalLabelsRole.disabled = true;
+                    if (elements.modalFileSummary) elements.modalFileSummary.classList.add('hidden');
+                }
+                return null;
+            }
+        })();
+        pendingFileInspection = { file, promise, info: null };
+        promise.then(res => { if (pendingFileInspection && pendingFileInspection.file === file && res) pendingFileInspection.info = res.info || null; });
+    }
 
     async function loadCustomModel(modelFile) {
         if (!modelFile) return;
@@ -2917,6 +3047,7 @@
         const modalAlreadyOpen = elements.loadModal && !elements.loadModal.classList.contains('hidden');
         pendingFileToLoad = file;
         elements.modalFileName.textContent = file.name;
+        inspectFileForModal(file);
         if (!modalAlreadyOpen) {
             pendingModelFile = null;
             pendingLabelsFile = null;
@@ -2940,6 +3071,14 @@
         state.filterSettings.enabled = sgVal > 0;
         if (sgVal > 0) state.filterSettings.windowMs = sgVal;
 
+        const rawLabelsVar = elements.modalLabelsVar ? elements.modalLabelsVar.value : '__auto__';
+        const rawProbVar = elements.modalProbVar ? elements.modalProbVar.value : '__auto__';
+        const varOpts = {
+            labelsVar: rawLabelsVar === '__auto__' ? undefined : rawLabelsVar,
+            labelsRole: elements.modalLabelsRole ? elements.modalLabelsRole.value : undefined,
+            probVar: rawProbVar === '__auto__' ? undefined : rawProbVar,
+        };
+
         if (elements.initialModelSelect) {
             const mVal = elements.initialModelSelect.value;
             if (mVal === 'local' && pendingModelFile) {
@@ -2956,30 +3095,30 @@
 
         const ext = (file.name.split('.').pop() || '').toLowerCase();
         if (['mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {      // binary formats: trials of different durations (formats.js)
-            const binReader = new FileReader();
-            binReader.onload = async (e) => {
-                try {
-                    elements.modalFileName.textContent = 'Reading ' + file.name + '…';
-                    // a layout this page knows (its own exports) loads directly; any other file, or "Show the column explorer", opens the explorer
-                    let r = null;
-                    if (!(elements.alwaysExplorer && elements.alwaysExplorer.checked)) { try { r = await UnEyeFormats.readTrialsFile(file.name, e.target.result, loadH5Lib); } catch (err) { r = null; } }
-                    if (!r) { await loadWithExplorer(file, rate, scale, prelabeler); return; }
-                    elements.loadModal.classList.add('hidden');
-                    loadDataset(r.trials, r.fs || rate, scale, prelabeler, { prob: r.prob, predLabels: r.predLabels, probParams: r.probParams });
-                    if (r.labels) {
-                        applyLoadedLabels(r.labels);
-                    }
-                    if (pendingLabelsFile) {
-                        await loadPreviousLabels(pendingLabelsFile);
-                    }
-                    const lens = r.trials.map(t => t.x.length);
-                    console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples${r.fs ? ', ' + r.fs + ' Hz' : ''}${r.labels ? ', with labels' : ''}${r.predLabels ? ', with pred_labels' : ''}${r.prob ? ', with prob' : ''}`);
-                } catch (err) {
-                    elements.loadModal.classList.add('hidden');
-                    alert('Cannot read ' + file.name + ': ' + err.message);
+            try {
+                elements.modalFileName.textContent = 'Reading ' + file.name + '…';
+                const insp = (pendingFileInspection && pendingFileInspection.file === file) ? await pendingFileInspection.promise : null;
+                const vars = (insp && insp.vars) ? insp.vars : await UnEyeFormats.readVarsFile(file.name, await file.arrayBuffer(), loadH5Lib);
+                // a layout this page knows (its own exports) loads directly; any other file, or "Show the column explorer", opens the explorer
+                let r = null;
+                if (!(elements.alwaysExplorer && elements.alwaysExplorer.checked)) {
+                    try { r = UnEyeFormats.trialsFromVars(vars, varOpts); } catch (err) { r = null; }
                 }
-            };
-            binReader.readAsArrayBuffer(file);
+                if (!r) { await loadWithExplorer(file, rate, scale, prelabeler, { ...varOpts, vars }); return; }
+                elements.loadModal.classList.add('hidden');
+                loadDataset(r.trials, r.fs || rate, scale, prelabeler, { prob: r.prob, predLabels: r.predLabels, probParams: r.probParams });
+                if (r.labels) {
+                    applyLoadedLabels(r.labels);
+                }
+                if (pendingLabelsFile) {
+                    await loadPreviousLabels(pendingLabelsFile);
+                }
+                const lens = r.trials.map(t => t.x.length);
+                console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples${r.fs ? ', ' + r.fs + ' Hz' : ''}${r.labels ? ', with labels' : ''}${r.predLabels ? ', with pred_labels' : ''}${r.prob ? ', with prob' : ''}`);
+            } catch (err) {
+                elements.loadModal.classList.add('hidden');
+                alert('Cannot read ' + file.name + ': ' + err.message);
+            }
             return;
         }
 
@@ -2987,7 +3126,7 @@
         // columns, ARFF, EyeLink .asc) goes through the column explorer, which also handles the time stamps
         const forceExplorer = elements.alwaysExplorer && elements.alwaysExplorer.checked;
         if (forceExplorer || ext === 'arff' || ext === 'asc' || !(await isPlainTextFile(file))) {
-            await loadWithExplorer(file, rate, scale, prelabeler);
+            await loadWithExplorer(file, rate, scale, prelabeler, varOpts);
             return;
         }
 
@@ -3036,11 +3175,12 @@
         catch (err) { return true; }
     }
 
-    async function loadWithExplorer(file, rate, scale, prelabeler) {
+    async function loadWithExplorer(file, rate, scale, prelabeler, extraOpts) {
         elements.loadModal.classList.add('hidden');
-        const r = await UnEyeImportUI.run(file, { rate, scale, h5: loadH5Lib });
+        const r = await UnEyeImportUI.run(file, { rate, scale, h5: loadH5Lib, ...(extraOpts || {}) });
         if (!r) { elements.modalFileName.textContent = file.name; elements.loadModal.classList.remove('hidden'); return; }      // cancelled: back to the load dialog
-        loadDataset(r.trials, r.fs, r.degPerUnit, prelabeler);
+        loadDataset(r.trials, r.fs, r.degPerUnit, prelabeler, { prob: r.prob, predLabels: r.predLabels, probParams: r.probParams });
+        if (r.labels) applyLoadedLabels(r.labels);
         if (pendingLabelsFile) await loadPreviousLabels(pendingLabelsFile);
         const lens = r.trials.map(t => t.x.length);
         console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples at ${r.fs} Hz (${r.source}, ${r.degPerUnit} deg/unit)` + (r.notes.length ? ' · ' + r.notes.join(' ') : ''));
@@ -3574,6 +3714,7 @@
         elements.fileInput.addEventListener('change', (e) => {
             if (e.target.files && e.target.files[0]) {
                 handleFile(e.target.files[0]);
+                e.target.value = '';
             }
         });
 
@@ -3623,6 +3764,18 @@
         }
         if (elements.modalChangeTraceBtn) {
             elements.modalChangeTraceBtn.addEventListener('click', () => elements.fileInput.click());
+        }
+        if (elements.modalLabelsVar) {
+            elements.modalLabelsVar.addEventListener('change', () => {
+                const val = elements.modalLabelsVar.value;
+                if (elements.modalLabelsRole) {
+                    const hasVal = Boolean(val && val !== '__auto__');
+                    elements.modalLabelsRole.disabled = !hasVal;
+                    if (hasVal) {
+                        elements.modalLabelsRole.value = inferRoleForModalVar(val, pendingFileInspection && pendingFileInspection.info);
+                    }
+                }
+            });
         }
         elements.exportBtn.addEventListener('click', exportDataset);
 

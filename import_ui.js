@@ -3,7 +3,11 @@
 (function () {
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const COLORS = { x: '#1E88E5', y: '#43A047', speed: '#7E57C2', bad: 'rgba(198, 40, 40, 0.28)', axis: '#90A4AE' };
+  const COLORS = {
+    x: '#1E88E5', y: '#43A047', speed: '#7E57C2', prob: '#FB8C00',
+    saccade: 'rgba(21, 101, 192, 0.20)', blink: 'rgba(198, 40, 40, 0.20)',
+    bad: 'rgba(198, 40, 40, 0.28)', axis: '#90A4AE',
+  };
   const OPS = ['=', '!=', '>', '>=', '<', '<='];
 
   let S = null;          // the session being edited
@@ -13,6 +17,7 @@
       modal: $('importModal'), summary: $('impSummary'), warn: $('impWarn'), body: $('impBody'), list: $('impColList'),
       canvas: $('impPreview'), info: $('impPreviewInfo'), prev: $('impPrevBtn'), next: $('impNextBtn'),
       x: $('impX'), y: $('impY'), t: $('impT'), unit: $('impUnit'), rate: $('impRate'), deg: $('impDeg'), hint: $('impTimeHint'),
+      labels: $('impLabels'), labelsRole: $('impLabelsRole'), prob: $('impProb'),
       resRow: $('impResampleRow'), resample: $('impResample'), vcol: $('impVCol'), vop: $('impVOp'), vval: $('impVVal'),
       split: $('impSplit'), splitCol: $('impSplitCol'), splitLbl: $('impSplitColLabel'), gap: $('impGapSec'), chunk: $('impChunk'),
       tableRow: $('impTableRow'), table: $('impTable'),
@@ -59,8 +64,7 @@
   async function readTables(file, opts) {
     const ext = (file.name.split('.').pop() || '').toLowerCase();
     if (['mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {
-      const buf = await file.arrayBuffer();
-      const vars = await window.UnEyeFormats.readVarsFile(file.name, buf, opts.h5);
+      const vars = (opts && opts.vars) ? opts.vars : await window.UnEyeFormats.readVarsFile(file.name, await file.arrayBuffer(), opts && opts.h5);
       return window.UnEyeImport.tablesFromVars(vars, file.name, ext === 'mat' ? 'mat' : ext === 'npz' ? 'npz' : 'h5');
     }
     return [await window.UnEyeImport.parseFile(file)];
@@ -81,16 +85,48 @@
     init();
   }
 
+  function inferLabelsRoleForCol(colIdx) {
+    if (!(colIdx >= 0) || !S || !S.table || !S.table.cols[colIdx]) return 'prelabels';
+    const c = S.table.cols[colIdx], s = S.stats && S.stats[colIdx];
+    const nm = c.name.toLowerCase();
+    if (/pred|pre_?label|propos|auto|detect|hmm|model|unet|uneye/.test(nm)) return 'prelabels';
+    if (s && s.min < 0) return 'reviewed';
+    if (/^labels?$|human|expert|ground_?truth|gt|manual|annot/.test(nm)) return 'reviewed';
+    return 'prelabels';
+  }
+
+  function matchColByName(T, varName) {
+    if (!varName) return -1;
+    const clean = String(varName).replace(/^\/+/, '');
+    for (let i = 0; i < T.cols.length; i++) {
+      const cn = T.cols[i].name.replace(/^\/+/, '');
+      if (cn === clean || cn.toLowerCase() === clean.toLowerCase()) return i;
+    }
+    return -1;
+  }
+
   function init() {
     const I = window.UnEyeImport, E = S.E, T = S.table, st = S.stats;
     const sug = I.suggest(T, st);
     const rate0 = sug.time && sug.time.rate ? sug.time.rate : ((T.info && T.info.rate) || S.opts.rate || 1000);
     S.m = {
       x: sug.x, y: sug.y, t: sug.t, unit: sug.time ? sug.time.unit : 'samples', fs: rate0,
+      labels: sug.labels !== undefined ? sug.labels : -1,
+      labelsRole: sug.labelsRole || 'prelabels',
+      prob: sug.prob !== undefined ? sug.prob : -1,
       valid: sug.valid ? { col: sug.valid.col, op: sug.valid.op, val: sug.valid.val } : null,
       split: sug.trial >= 0 ? { mode: 'column', col: sug.trial, gapSec: 1 } : { mode: 'none', col: -1, gapSec: 1 },
       chunkSec: 0, resample: sug.time ? !sug.time.regular : false, gapFactor: 3,
     };
+    if (S.opts && S.opts.labelsVar !== undefined) {
+      S.m.labels = (!S.opts.labelsVar || S.opts.labelsVar === 'none') ? -1 : matchColByName(T, S.opts.labelsVar);
+    }
+    if (S.opts && S.opts.labelsRole) {
+      S.m.labelsRole = S.opts.labelsRole;
+    }
+    if (S.opts && S.opts.probVar !== undefined) {
+      S.m.prob = (!S.opts.probVar || S.opts.probVar === 'none') ? -1 : matchColByName(T, S.opts.probVar);
+    }
     S.timeInfo = sug.time;
     S.deg = S.opts.scale || 1;
     S.prevStart = 0;
@@ -100,6 +136,8 @@
     E.x.innerHTML = optionsFor(T, st, numeric, '(choose)');
     E.y.innerHTML = optionsFor(T, st, numeric, '(choose)');
     E.t.innerHTML = optionsFor(T, st, numeric, '(none: use the sampling rate)');
+    if (E.labels) E.labels.innerHTML = optionsFor(T, st, numeric, '(none)');
+    if (E.prob) E.prob.innerHTML = optionsFor(T, st, numeric, '(none)');
     E.vcol.innerHTML = optionsFor(T, st, numeric, '(all samples)');
     E.splitCol.innerHTML = optionsFor(T, st, (c, s) => s.nominal || s.isInt, '');
     if (sug.trial < 0 && E.splitCol.options.length) S.m.split.col = parseInt(E.splitCol.options[0].value, 10);
@@ -131,10 +169,23 @@
       row.querySelector('.st').textContent = s.nominal ? 'text · ' + s.distinct + ' values' : 'range ' + fmt(s.min) + ' … ' + fmt(s.max) + (s.nanFrac > 0.005 ? ' · ' + Math.round(s.nanFrac * 100) + '% empty' : '');
       const roles = row.querySelector('.roles');
       if (!s.nominal) {
-        for (const [key, lbl] of [['x', 'X'], ['y', 'Y'], ['t', 'T']]) {
+        for (const [key, lbl, tip] of [
+          ['x', 'X', 'Horizontal eye position (X)'],
+          ['y', 'Y', 'Vertical eye position (Y)'],
+          ['t', 'T', 'Time column'],
+          ['labels', 'L', 'Labels / pre-labels column'],
+          ['prob', 'P', 'Predictive probability P(saccade) column'],
+        ]) {
           const b = document.createElement('button');
-          b.type = 'button'; b.className = 'import-role'; b.textContent = lbl; b.dataset.role = key; b.dataset.i = i;
-          b.addEventListener('click', () => { S.m[key] = (S.m[key] === i && key === 't') ? -1 : i; if (key === 't') onTimeChosen(); syncForm(); refresh(); });
+          b.type = 'button'; b.className = 'import-role'; b.textContent = lbl; b.title = tip; b.dataset.role = key; b.dataset.i = i;
+          b.addEventListener('click', () => {
+            const toggleable = (key === 't' || key === 'labels' || key === 'prob');
+            S.m[key] = (S.m[key] === i && toggleable) ? -1 : i;
+            if (key === 't') onTimeChosen();
+            if (key === 'labels' && S.m.labels >= 0) S.m.labelsRole = inferLabelsRoleForCol(S.m.labels);
+            syncForm();
+            refresh();
+          });
           roles.appendChild(b);
         }
         spark(row.querySelector('canvas'), c.data, T.nRows);
@@ -165,6 +216,12 @@
   function syncForm() {
     const E = S.E, m = S.m, I = window.UnEyeImport;
     E.x.value = String(m.x); E.y.value = String(m.y); E.t.value = String(m.t);
+    if (E.labels) E.labels.value = String(m.labels >= 0 ? m.labels : -1);
+    if (E.labelsRole) {
+      E.labelsRole.value = m.labelsRole || 'prelabels';
+      E.labelsRole.disabled = !(m.labels >= 0);
+    }
+    if (E.prob) E.prob.value = String(m.prob >= 0 ? m.prob : -1);
     E.unit.value = m.unit;
     E.unit.disabled = m.t < 0;
     E.rate.value = m.fs ? String(m.fs) : '';
@@ -206,8 +263,18 @@
 
   function readForm() {
     const E = S.E, m = S.m, I = window.UnEyeImport;
-    const prevT = m.t, prevUnit = m.unit;
+    const prevT = m.t, prevUnit = m.unit, prevLabels = m.labels;
     m.x = parseInt(E.x.value, 10); m.y = parseInt(E.y.value, 10); m.t = parseInt(E.t.value, 10);
+    if (E.labels) {
+      m.labels = parseInt(E.labels.value, 10);
+      if (isNaN(m.labels)) m.labels = -1;
+      if (m.labels !== prevLabels && m.labels >= 0) m.labelsRole = inferLabelsRoleForCol(m.labels);
+      else if (E.labelsRole) m.labelsRole = E.labelsRole.value || 'prelabels';
+    }
+    if (E.prob) {
+      m.prob = parseInt(E.prob.value, 10);
+      if (isNaN(m.prob)) m.prob = -1;
+    }
     if (m.t !== prevT) onTimeChosen();
     else if (m.t >= 0) {
       m.unit = E.unit.value;
@@ -281,10 +348,22 @@
       const bad = i < len && !ok[i];
       if (bad && s < 0) s = i; else if (!bad && s >= 0) { g.fillRect(px(s), 0, Math.max(2, px(i - 1) - px(s)), laneH); s = -1; }
     }
+    // labels stretches (1 = saccade, 2 = blink)
+    if (m.labels >= 0 && sub.cols[m.labels]) {
+      const L = sub.cols[m.labels].data;
+      for (const [clsVal, fillCol] of [[1, COLORS.saccade], [2, COLORS.blink]]) {
+        g.fillStyle = fillCol;
+        for (let i = 0, s = -1; i <= len; i++) {
+          const on = i < len && Math.round(L[i]) === clsVal;
+          if (on && s < 0) s = i;
+          else if (!on && s >= 0) { g.fillRect(px(s), 0, Math.max(2, px(i - 1) - px(s)), laneH); s = -1; }
+        }
+      }
+    }
     trace(X, COLORS.x, yPos); trace(Y, COLORS.y, yPos);
     g.fillStyle = COLORS.axis; g.font = '11px sans-serif';
     g.fillText(fmt(hi), left + 2, 12); g.fillText(fmt(lo), left + 2, laneH - 4);
-    // speed lane
+    // speed & probability lane
     const fs = m.fs || 1000, sp = new Float32Array(len);
     let big = [];
     for (let i = 1; i < len; i++) if (ok[i] && ok[i - 1]) { sp[i] = Math.hypot(X[i] - X[i - 1], Y[i] - Y[i - 1]) * S.deg * fs; big.push(sp[i]); }
@@ -301,6 +380,18 @@
       if (col >= 0) flush();
     } else for (let i = 1; i < len; i++) { if (i === 1) g.moveTo(px(i), ys(sp[i])); else g.lineTo(px(i), ys(sp[i])); }
     g.stroke();
+    if (m.prob >= 0 && sub.cols[m.prob]) {
+      const P = sub.cols[m.prob].data;
+      const yp = (v) => y1 - Math.max(0, Math.min(1, v)) * (y1 - y0);
+      g.strokeStyle = COLORS.prob; g.lineWidth = 1.3; g.beginPath();
+      if (len > 2 * w) {
+        let col = -1, b = 0, started = false;
+        const flush = () => { const x = left + col + 0.5; if (!started) { g.moveTo(x, yp(0)); started = true; } g.lineTo(x, yp(b)); };
+        for (let i = 0; i < len; i++) { const pv = isFinite(P[i]) ? P[i] : 0, c = Math.floor(px(i) - left); if (c !== col) { if (col >= 0) flush(); col = c; b = pv; } else if (pv > b) b = pv; }
+        if (col >= 0) flush();
+      } else for (let i = 0; i < len; i++) { const pv = isFinite(P[i]) ? P[i] : 0; if (i === 0) g.moveTo(px(i), yp(pv)); else g.lineTo(px(i), yp(pv)); }
+      g.stroke();
+    }
     g.fillStyle = COLORS.axis; g.fillText(Math.round(top) + ' °/s', left + 2, y0 + 10);
   }
 
@@ -331,8 +422,11 @@
       else if (peak > 1500) { verdict = 'peak speed ' + Math.round(peak).toLocaleString() + ' °/s is too high for eye movements: check "Degrees per unit" and the rate'; cls = 'bad'; }
       else if (peak < 30) { verdict = 'peak speed only ' + Math.round(peak) + ' °/s: check "Degrees per unit" and the rate'; cls = 'bad'; }
       else verdict = 'peak speed ≈ ' + Math.round(peak) + ' °/s, plausible';
+      let extra = '';
+      if (m.labels >= 0 && S.table.cols[m.labels]) extra += ' · labels: ' + S.table.cols[m.labels].name + ' (' + (m.labelsRole === 'reviewed' ? 'reviewed' : 'pre-labels') + ')';
+      if (m.prob >= 0 && S.table.cols[m.prob]) extra += ' · P(saccade): ' + S.table.cols[m.prob].name;
       E.result.className = 'import-result ' + cls;
-      E.result.textContent = '→ ' + c.trials + ' trial' + (c.trials === 1 ? '' : 's') + ', ' + (c.samples / m.fs).toFixed(0) + ' s at ' + m.fs + ' Hz · ' + verdict + '.';
+      E.result.textContent = '→ ' + c.trials + ' trial' + (c.trials === 1 ? '' : 's') + ', ' + (c.samples / m.fs).toFixed(0) + ' s at ' + m.fs + ' Hz · ' + verdict + extra + '.';
       if (c.trials > 5000) msgs.push('More than 5000 trials: is the trial variable the right one?');
     }
     E.warn.textContent = msgs.join(' ');
@@ -342,11 +436,11 @@
 
   // ------------------------------------------------------------ events
   let handlers = [];
-  function on(target, type, fn) { target.addEventListener(type, fn); handlers.push([target, type, fn]); }
+  function on(target, type, fn) { if (!target) return; target.addEventListener(type, fn); handlers.push([target, type, fn]); }
   function bind() {
     const E = S.E;
     const changed = () => { if (!S || S.busy) return; S.notes = []; readForm(); syncForm(); refresh(); };
-    for (const id of ['x', 'y', 't', 'unit', 'vcol', 'vop', 'split', 'splitCol', 'resample']) on(E[id], 'change', changed);
+    for (const id of ['x', 'y', 't', 'labels', 'labelsRole', 'prob', 'unit', 'vcol', 'vop', 'split', 'splitCol', 'resample']) on(E[id], 'change', changed);
     on(E.table, 'change', () => { if (S && !S.busy) { S.prevStart = 0; useTable(parseInt(E.table.value, 10)); } });
     for (const id of ['rate', 'deg', 'vval', 'gap', 'chunk']) on(E[id], 'input', () => { if (!S || S.busy) return; S.notes = []; readForm(); refresh(); });
     on(E.prev, 'click', () => { S.prevStart = Math.max(0, S.prevStart - windowRows().span); refresh(); });
@@ -377,7 +471,18 @@
           check();
           return;
         }
-        sess.finish({ trials: r.trials, fs: r.fs, degPerUnit: S.deg, notes: r.notes, mapping: JSON.parse(JSON.stringify(m)), source: sess.table.kind });
+        sess.finish({
+          trials: r.trials,
+          fs: r.fs,
+          degPerUnit: S.deg,
+          notes: r.notes,
+          labels: r.labels,
+          predLabels: r.predLabels,
+          prob: r.prob,
+          probParams: r.probParams,
+          mapping: JSON.parse(JSON.stringify(m)),
+          source: sess.table.kind,
+        });
       } catch (err) {
         sess.busy = false; sess.E.body.classList.remove('hidden');
         alert('Cannot build the trials: ' + err.message);

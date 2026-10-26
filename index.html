@@ -158,6 +158,27 @@
                         <span id="modalFileName" class="filename-display" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">-</span>
                         <button id="modalChangeTraceBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
                     </div>
+                    <span id="modalFileSummary" class="form-help" style="margin: 2px 0 0 0;"></span>
+                </div>
+                <div id="modalLabelsVarRow" class="form-row">
+                    <label for="modalLabelsVar">Labels variable (in file):</label>
+                    <div style="display: flex; gap: 6px; align-items: center; width: 100%;">
+                        <select id="modalLabelsVar" style="flex: 1; min-width: 0;" title="Choose a variable in the file for labels / machine pre-labels, or (none)">
+                            <option value="__auto__" selected>Auto-detect (pred_labels / labels)</option>
+                            <option value="">(none)</option>
+                        </select>
+                        <select id="modalLabelsRole" style="width: auto; max-width: 175px;" title="Use the selected labels variable as pre-labels (proposals to review) or as already-reviewed ground-truth labels">
+                            <option value="prelabels" selected>as pre-labels</option>
+                            <option value="reviewed">as reviewed labels</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="modalProbVarRow" class="form-row">
+                    <label for="modalProbVar">Predictive probability (in file):</label>
+                    <select id="modalProbVar" title="Choose a variable in the file for the network predictive probability P(saccade), or (none)">
+                        <option value="__auto__" selected>Auto-detect (prob)</option>
+                        <option value="">(none)</option>
+                    </select>
                 </div>
                 <div class="form-row">
                     <label for="rateInput">Sampling rate (Hz):</label>
@@ -234,7 +255,7 @@
                 <div id="impBody" class="import-grid">
                     <div class="import-left">
                         <div id="impTableRow" class="import-field hidden" style="margin-bottom: 8px;"><label for="impTable">Table in this file</label><select id="impTable"></select></div>
-                        <div class="import-title">Variables <span class="form-help">(tap X, Y or T to use one)</span></div>
+                        <div class="import-title">Variables <span class="form-help">(tap X, Y, T, L or P to use one)</span></div>
                         <div id="impColList" class="import-collist"></div>
                     </div>
                     <div class="import-right">
@@ -252,6 +273,10 @@
                                 <select id="impUnit"><option value="s">seconds</option><option value="ms">milliseconds</option><option value="us">microseconds</option><option value="samples">sample index</option></select></div>
                             <div class="import-field"><label for="impRate">Sampling rate (Hz)</label><input type="number" id="impRate" min="1" max="20000" step="any"></div>
                             <div class="import-field"><label for="impDeg">Degrees per unit</label><input type="number" id="impDeg" min="0.00001" max="1000" step="any"></div>
+                            <div class="import-field"><label for="impLabels">Labels (L)</label><select id="impLabels"></select></div>
+                            <div class="import-field"><label for="impLabelsRole">Use labels as</label>
+                                <select id="impLabelsRole"><option value="prelabels">Pre-labels (proposals)</option><option value="reviewed">Reviewed labels (ground truth)</option></select></div>
+                            <div class="import-field import-wide"><label for="impProb">Predictive probability (P)</label><select id="impProb"></select></div>
                             <div class="import-field import-wide"><span id="impTimeHint" class="form-help"></span></div>
                             <div class="import-field import-wide" id="impResampleRow"><label class="import-check"><input type="checkbox" id="impResample"> Resample to a uniform grid (time stamps are not regular)</label></div>
                             <div class="import-field"><label for="impVCol">Valid samples only if</label><select id="impVCol"></select></div>

@@ -619,10 +619,12 @@ html, body {
 .import-col .st { grid-column: 1; font-size: 0.72rem; color: var(--text-muted); }
 .import-col canvas { grid-column: 1; width: 100%; height: 22px; }
 .import-col .roles { grid-column: 2; grid-row: 1 / span 3; display: flex; gap: 4px; }
-.import-role { min-width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 6px; background: #FAFAFA; font-weight: 700; font-size: 0.8rem; cursor: pointer; color: var(--text-muted); }
+.import-role { min-width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; background: #FAFAFA; font-weight: 700; font-size: 0.78rem; cursor: pointer; color: var(--text-muted); padding: 0 4px; }
 .import-role.on-x { background: #1E88E5; border-color: #1E88E5; color: #fff; }
 .import-role.on-y { background: #43A047; border-color: #43A047; color: #fff; }
 .import-role.on-t { background: #7E57C2; border-color: #7E57C2; color: #fff; }
+.import-role.on-labels { background: #00897B; border-color: #00897B; color: #fff; }
+.import-role.on-prob { background: #FB8C00; border-color: #FB8C00; color: #fff; }
 .import-preview { width: 100%; height: 230px; border: 1px solid var(--border); border-radius: 8px; background: #fff; display: block; }
 .import-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0 10px; }
 .import-nav .btn { padding: 4px 14px; height: 34px; }

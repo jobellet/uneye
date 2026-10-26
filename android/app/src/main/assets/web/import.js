@@ -418,7 +418,7 @@
         else if (Array.isArray(v.data) && typeof v.data[0] === 'string') strings.push({ name, list: v.data });
       }
     };
-    for (const k of Object.keys(vars)) walk(vars[k], k, 0);
+    for (const k of Object.keys(vars)) { if (k[0] === '@') continue; walk(vars[k], k, 0); }
     return { leaves, strings };
   }
 
@@ -435,8 +435,11 @@
   function tablesFromVars(vars, fileName, kind) {
     const { leaves, strings } = leavesOf(vars);
     let rate = null;
+    const pp = {};
+    for (const k of ['threshold', 'merge_ms', 'min_dur_ms']) if (vars && vars['@' + k] !== undefined) pp[k] = vars['@' + k];
+    const probParams = Object.keys(pp).length ? pp : null;
     const groups = new Map();
-    const add = (n, name, data) => { if (!groups.has(n)) groups.set(n, []); groups.get(n).push({ name, data }); };
+    const add = (n, name, data, labels, fromOffsets) => { if (!groups.has(n)) groups.set(n, []); groups.get(n).push({ name, data, labels, fromOffsets }); };
     const headerFor = (leafName, k) => {
       const ok = strings.filter(s => s.list.length === k);
       if (!ok.length) return null;
@@ -444,6 +447,7 @@
       const pref = ok.find(s => /head|colname|columns|labels|names|channels/i.test(s.name)) || ok.find(s => s.name.toLowerCase().indexOf(stem) >= 0) || ok[0];
       return uniqueNames(pref.list);
     };
+    const offsetLeaves = [];
     for (const lf of leaves) {
       if (lf.cells) {                                                 // cell array of matrices: one table, the cell number as a column
         const parts = lf.cells.map(cl => columnsOfMatrix(cl.dims, cl.data, 'F')).filter(p => p.n >= 2);
@@ -462,15 +466,55 @@
       }
       const m = columnsOfMatrix(lf.dims, lf.data, lf.order);
       if (m.n === 1) { if (RATE_NAME.test(lf.name) && m.cols[0][0] >= 10 && m.cols[0][0] <= 5000) rate = m.cols[0][0]; continue; }
+      if (m.cols.length === 1 && /^(trial_?offsets?|(trial_?)?lengths)$/i.test(lf.name)) {
+        offsetLeaves.push({ name: lf.name, col: m.cols[0] });
+        continue;
+      }
       const names = m.cols.length > 1 ? headerFor(lf.name, m.cols.length) : null;
       m.cols.forEach((col, j) => add(m.n, names ? names[j] : (m.cols.length === 1 ? lf.name : lf.name + '(:,' + (j + 1) + ')'), col));
+    }
+    // Convert trial_offset or trial_lengths into a per-sample 'trial' column on the matching table
+    for (const ol of offsetLeaves) {
+      let offs = null;
+      if (/offset/i.test(ol.name)) {
+        if (ol.col.length >= 2 && ol.col[0] === 0) offs = ol.col;
+      } else {
+        offs = new Float64Array(ol.col.length + 1);
+        for (let i = 0; i < ol.col.length; i++) offs[i + 1] = offs[i] + ol.col[i];
+      }
+      const total = offs ? Math.round(offs[offs.length - 1]) : 0;
+      if (offs && total >= 20 && groups.has(total)) {
+        const nTrials = offs.length - 1;
+        const trNamesObj = strings.find(s => s.list.length === nTrials && /name|trial/i.test(s.name)) || strings.find(s => s.list.length === nTrials);
+        const trLabels = trNamesObj ? trNamesObj.list : undefined;
+        const trCol = new Float64Array(total);
+        for (let k = 0; k < nTrials; k++) {
+          const s = Math.max(0, Math.min(total, Math.round(offs[k])));
+          const e = Math.max(s, Math.min(total, Math.round(offs[k + 1])));
+          trCol.fill(trLabels ? k : k + 1, s, e);
+        }
+        add(total, 'trial', trCol, trLabels, true);
+      } else {
+        add(ol.col.length, ol.name, ol.col);
+      }
     }
     const tables = [];
     for (const [n, cols] of groups) {
       if (n < 20) continue;
-      const seen = new Set();
       const named = uniqueNames(cols.map(c => c.name));
-      const table = { kind: kind || 'mat', name: fileName, title: named.slice(0, 3).join(', ') + (named.length > 3 ? ', …' : ''), nRows: n, cols: named.map((nm, i) => ({ name: nm, data: cols[i].data })), info: { rate, delimiter: null, header: true } };
+      const table = {
+        kind: kind || 'mat',
+        name: fileName,
+        title: named.slice(0, 3).join(', ') + (named.length > 3 ? ', …' : ''),
+        nRows: n,
+        cols: named.map((nm, i) => {
+          const c = { name: nm, data: cols[i].data };
+          if (cols[i].labels) c.labels = cols[i].labels;
+          if (cols[i].fromOffsets) c.fromOffsets = true;
+          return c;
+        }),
+        info: { rate, probParams, delimiter: null, header: true },
+      };
       addDerived(table);
       tables.push(table);
     }
@@ -586,6 +630,9 @@
   const baseName = (s) => s.slice(s.lastIndexOf('/') + 1);              // HDF5 group path: only the last part names the variable
   const normName = (s) => baseName(s).toLowerCase().replace(/[^a-z0-9]/g, '');
   function scoreXY(name, axis) {
+    const b = baseName(name);
+    if (/^(xy|eye)\(:,\s*1\)$/i.test(b)) return axis === 'x' ? 92 : -100;
+    if (/^(xy|eye)\(:,\s*2\)$/i.test(b)) return axis === 'y' ? 92 : -100;
     const n = normName(name);
     const o = axis === 'x' ? 'y' : 'x';
     if (/(^|[a-z])(gt|target|head|tgt)/.test(n) || /^(gt|tgt)/.test(n) || n === axis + 't' || /(target|goal|stim)/.test(n)) return -50;
@@ -622,6 +669,7 @@
   function partnerIndex(table, i, from, to) {
     const name = table.cols[i].name;
     const cand = [];
+    if (from === 'x' && to === 'y' && /\(:,\s*1\)$/.test(name)) cand.push(name.replace(/\(:,\s*1\)$/, '(:,2)'));
     for (let k = name.length - 1; k >= 0; k--) if (name[k].toLowerCase() === from) { cand.push(name.slice(0, k) + (name[k] === name[k].toUpperCase() ? to.toUpperCase() : to) + name.slice(k + 1)); break; }
     for (const c of cand) { const j = table.cols.findIndex(cc => cc.name === c); if (j >= 0) return j; }
     return -1;
@@ -645,7 +693,7 @@
   function suggest(table, stats) {
     stats = stats || describeColumns(table);
     const num = (i) => !stats[i].nominal && stats[i].finite >= 0.3 * stats[i].n;
-    const sug = { x: -1, y: -1, t: -1, valid: null, trial: -1, notes: [], time: null };
+    const sug = { x: -1, y: -1, t: -1, valid: null, trial: -1, labels: -1, labelsRole: 'prelabels', prob: -1, notes: [], time: null };
     let best = -Infinity;
     for (let i = 0; i < table.cols.length; i++) {
       if (!num(i)) continue;
@@ -700,6 +748,37 @@
       if (sc > trScore) { trScore = sc; tr = i; sug.trialRuns = runs; }
     }
     sug.trial = tr;
+
+    // labels / pre-labels (optional)
+    let labBest = -1, labScore = 0;
+    for (let i = 0; i < table.cols.length; i++) {
+      if (i === sug.x || i === sug.y || i === sug.t || i === sug.trial || stats[i].nominal) continue;
+      if (!stats[i].isInt || stats[i].min < -1 || stats[i].max > 4) continue;
+      const b = baseName(table.cols[i].name).toLowerCase();
+      let sc = 0;
+      if (b === 'labels' || b === 'pred_labels' || b === 'predlabels') sc = 100;
+      else if (/^(saccade_?labels?|label|events?|gt|ground_?truth)$/.test(b)) sc = 80;
+      if (sc > labScore) {
+        labScore = sc;
+        labBest = i;
+        sug.labelsRole = (/^labels?$/i.test(b) && (stats[i].min < 0 || table.cols.some(c => /^(observed|reviewed)$/i.test(baseName(c.name))))) ? 'reviewed' : 'prelabels';
+      }
+    }
+    sug.labels = labBest;
+
+    // predictive probability (optional)
+    let probBest = -1, probScore = 0;
+    for (let i = 0; i < table.cols.length; i++) {
+      if (i === sug.x || i === sug.y || i === sug.t || i === sug.trial || i === sug.labels || stats[i].nominal) continue;
+      if (stats[i].min < -0.001 || stats[i].max > 1.001) continue;
+      const b = baseName(table.cols[i].name).toLowerCase();
+      let sc = 0;
+      if (b === 'prob') sc = 100;
+      else if (/^(probability|p_?sacc\w*|pred_?prob|net_?prob|saccade_?prob)$/.test(b)) sc = 85;
+      if (sc > probScore) { probScore = sc; probBest = i; }
+    }
+    sug.prob = probBest;
+
     return sug;
   }
 
@@ -749,7 +828,7 @@
     return out;
   }
 
-  // m: { x, y, t (-1 none), unit, fs, valid, split: {mode, col, gapSec}, chunkSec, resample, gapFactor, minSamples }
+  // m: { x, y, t (-1 none), unit, fs, valid, split: {mode, col, gapSec}, chunkSec, resample, gapFactor, minSamples, labels (-1 none), labelsRole, prob (-1 none) }
   function buildTrials(table, m) {
     const notes = [];
     const T = (m.t >= 0 && m.unit && m.unit !== 'samples') ? table.cols[m.t].data : null;
@@ -757,38 +836,57 @@
     const fs = m.fs;
     if (!(fs > 0)) throw new Error('The sampling rate is missing.');
     const X = table.cols[m.x].data, Y = table.cols[m.y].data;
+    const Lcol = (m.labels !== undefined && m.labels >= 0 && table.cols[m.labels]) ? table.cols[m.labels].data : null;
+    const Pcol = (m.prob !== undefined && m.prob >= 0 && table.cols[m.prob]) ? table.cols[m.prob].data : null;
+    const isRev = m.labelsRole === 'reviewed';
+    const defLab = isRev ? -1 : 0;
     const ok = validArray(table, m);
     const ranges = trialRanges(table, m, T, sc);
     const splitCol = m.split && m.split.mode === 'column' && m.split.col >= 0 ? table.cols[m.split.col] : null;
-    const minSamples = m.minSamples || 50, gapFactor = m.gapFactor || 3;
+    const minSamples = m.minSamples || (splitCol && splitCol.fromOffsets ? 1 : 50), gapFactor = m.gapFactor || 3;
     const trials = [];
+    const outLabels = Lcol ? [] : null;
+    const outProb = Pcol ? [] : null;
     let dropped = 0, resampledAny = false;
     for (const [a, b] of ranges) {
-      let x, y, valid, t0 = T ? T[a] * sc : a / fs, resampled = false;
+      let x, y, valid, lab = null, pr = null, t0 = T ? T[a] * sc : a / fs, resampled = false;
       if (T && m.resample) {
         const tFirst = T[a] * sc, tLast = T[b - 1] * sc;
         const len = Math.floor((tLast - tFirst) * fs + 1e-9) + 1;
         if (len < 2) { dropped++; continue; }
         x = new Float32Array(len).fill(NaN); y = new Float32Array(len).fill(NaN); valid = new Uint8Array(len);
+        if (Lcol) lab = new Int8Array(len).fill(defLab);
+        if (Pcol) pr = new Float32Array(len).fill(NaN);
         const maxSpan = gapFactor / fs;
         let j = a;
         for (let i = 0; i < len; i++) {
           const g = tFirst + i / fs;
           while (j + 1 < b && T[j + 1] * sc <= g + 1e-12) j++;
           const tj = T[j] * sc;
-          if (Math.abs(tj - g) < 1e-9 && ok[j]) { x[i] = X[j]; y[i] = Y[j]; valid[i] = 1; continue; }
+          if (Math.abs(tj - g) < 1e-9 && ok[j]) {
+            x[i] = X[j]; y[i] = Y[j]; valid[i] = 1;
+            if (lab) { const lv = Lcol[j]; lab[i] = (lv === lv && isFinite(lv)) ? Math.round(lv) : defLab; }
+            if (pr) { const pv = Pcol[j]; pr[i] = (pv === pv && isFinite(pv)) ? pv : NaN; }
+            continue;
+          }
           if (j + 1 >= b) continue;
           const tn = T[j + 1] * sc, span = tn - tj;
           if (!ok[j] || !ok[j + 1] || span <= 0 || span > maxSpan) continue;
           const w = (g - tj) / span;
           x[i] = X[j] + w * (X[j + 1] - X[j]); y[i] = Y[j] + w * (Y[j + 1] - Y[j]); valid[i] = 1;
+          if (lab) { const nearJ = w < 0.5 ? j : j + 1, lv = Lcol[nearJ]; lab[i] = (lv === lv && isFinite(lv)) ? Math.round(lv) : defLab; }
+          if (pr) { const p0 = Pcol[j], p1 = Pcol[j + 1]; pr[i] = (isFinite(p0) && isFinite(p1)) ? p0 + w * (p1 - p0) : NaN; }
         }
         resampled = true; resampledAny = true; t0 = tFirst;
       } else {
         const len = b - a;
         x = new Float32Array(len); y = new Float32Array(len); valid = new Uint8Array(len);
+        if (Lcol) lab = new Int8Array(len);
+        if (Pcol) pr = new Float32Array(len);
         for (let i = 0; i < len; i++) {
           if (ok[a + i]) { x[i] = X[a + i]; y[i] = Y[a + i]; valid[i] = 1; } else { x[i] = NaN; y[i] = NaN; }
+          if (lab) { const lv = Lcol[a + i]; lab[i] = (lv === lv && isFinite(lv)) ? Math.round(lv) : defLab; }
+          if (pr) { const pv = Pcol[a + i]; pr[i] = (pv === pv && isFinite(pv)) ? pv : NaN; }
         }
       }
       let good = 0; for (let i = 0; i < valid.length; i++) good += valid[i];
@@ -804,15 +902,30 @@
           if (x.length - e < 0.25 * chunk) e = x.length;
           const v = valid.slice(s, e); let g = 0; for (let i = 0; i < v.length; i++) g += v[i];
           k++;
-          if (g >= minSamples) trials.push({ x: x.slice(s, e), y: y.slice(s, e), valid: v, name: (name ? name + ' · ' : '') + 'part ' + k, t0: base.t0 + s / fs, rows: base.rows, resampled });
-          else dropped++;
+          if (g >= minSamples) {
+            trials.push({ x: x.slice(s, e), y: y.slice(s, e), valid: v, name: (name ? name + ' · ' : '') + 'part ' + k, t0: base.t0 + s / fs, rows: base.rows, resampled });
+            if (outLabels) outLabels.push(lab.slice(s, e));
+            if (outProb) outProb.push(pr.slice(s, e));
+          } else dropped++;
           s = e;
         }
-      } else trials.push({ x, y, valid, name, t0: base.t0, rows: base.rows, resampled });
+      } else {
+        trials.push({ x, y, valid, name, t0: base.t0, rows: base.rows, resampled });
+        if (outLabels) outLabels.push(lab);
+        if (outProb) outProb.push(pr);
+      }
     }
     if (dropped) notes.push(dropped + ' stretch' + (dropped === 1 ? '' : 'es') + ' with fewer than ' + minSamples + ' valid samples skipped.');
     if (resampledAny) notes.push('Resampled to a uniform ' + fs + ' Hz grid; gaps longer than ' + gapFactor + ' samples stay invalid.');
-    return { trials, fs, notes };
+    return {
+      trials,
+      fs,
+      notes,
+      labels: (outLabels && isRev) ? outLabels : null,
+      predLabels: (outLabels && !isRev) ? outLabels : null,
+      prob: outProb,
+      probParams: (table.info && table.info.probParams) || null,
+    };
   }
 
   // how many trials buildTrials() will return (before dropping stretches that are too short), without building them

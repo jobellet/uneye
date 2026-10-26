@@ -208,6 +208,18 @@ if (process.env.MOCOL_H5) {
   const t0 = Date.now();
   await inp.uploadFile(process.env.MOCOL_H5);
   await waitFor(() => !document.getElementById('loadModal').classList.contains('hidden'));
+  // wait for file inspection to populate #modalLabelsVar and #modalProbVar
+  const inspected = await waitFor(() => document.getElementById('modalLabelsVar').value === 'pred_labels' && document.getElementById('modalProbVar').value === 'prob', 30000);
+  const modalVars = await ev(() => ({
+    summary: document.getElementById('modalFileSummary').textContent,
+    labelsVar: document.getElementById('modalLabelsVar').value,
+    labelsRole: document.getElementById('modalLabelsRole').value,
+    probVar: document.getElementById('modalProbVar').value,
+    labelOpts: Array.from(document.getElementById('modalLabelsVar').options).map(o => o.value),
+    probOpts: Array.from(document.getElementById('modalProbVar').options).map(o => o.value),
+  }));
+  check(inspected && modalVars.labelsRole === 'prelabels' && modalVars.labelOpts.includes('pred_labels') && modalVars.probOpts.includes('prob'),
+    `loadModal variable selectors populated from ${process.env.MOCOL_H5.split('/').pop()}: labels='${modalVars.labelsVar}' (${modalVars.labelsRole}), prob='${modalVars.probVar}', summary='${modalVars.summary}'`);
   await page.click('#modalConfirmBtn');
   const loaded = await waitFor(() => state.trials.length > 1000 && state.hasProb, 180000);
   const tl = Date.now() - t0;
@@ -220,6 +232,21 @@ if (process.env.MOCOL_H5) {
   await ev(() => { document.getElementById('viewedScroll').scrollTop = 0; });
   await sleep(200);
   await page.screenshot({ path: SHOTS + '_session_viewed.png' });
+  await page.click('#viewedCloseBtn');
+
+  // Also test loading with pred_labels chosen as 'reviewed' ground-truth labels and prob disabled ('(none)')
+  await inp.uploadFile(process.env.MOCOL_H5);
+  await waitFor(() => !document.getElementById('loadModal').classList.contains('hidden') && document.getElementById('modalLabelsVar').value === 'pred_labels', 30000);
+  await ev(() => {
+    document.getElementById('modalLabelsVar').value = 'pred_labels';
+    document.getElementById('modalLabelsRole').value = 'reviewed';
+    document.getElementById('modalProbVar').value = '';
+  });
+  await page.click('#modalConfirmBtn');
+  const loadedCustom = await waitFor(() => state.trials.length > 1000 && !state.hasProb && state.expertEvents[0].length > 0, 60000);
+  const customSt = await ev(() => ({ hasProb: state.hasProb, ev0: state.expertEvents[0].length, rev0: state.reviewedRanges[0].length }));
+  check(loadedCustom && !customSt.hasProb && customSt.ev0 > 0 && customSt.rev0 > 0,
+    `custom variable selection (labels='pred_labels' as reviewed, prob='(none)'): hasProb=${customSt.hasProb}, trial 0 expertEvents=${customSt.ev0}, reviewedRanges=${customSt.rev0}`);
 }
 
 check(errors.length === 0, 'no page error' + (errors.length ? ': ' + errors.join(' | ') : ''));

@@ -317,7 +317,8 @@
     return dir;
   }
 
-  const H5_WANTED = /^(xy|eye|x|y|trial_offset|trial_lengths|lengths|names|fs|labels|pred_labels|predlabels|prob|trials?.*|x_\d+|y_\d+)$/i;
+  const H5_WANTED = /^(xy|eye|x|y|trial_offset|trial_lengths|lengths|names|fs|labels|pred_labels|predlabels|prob|observed|reviewed|trials?.*|x_\d+|y_\d+)$/i;
+  const H5_SKIP = /^(a?mua|lfp|ephys|neural|raw_ephys)$/i;
 
   // opts.all: every numeric dataset (up to 40 M values each), not only the layouts of this page - for the column explorer
   async function readH5(buf, h5, opts) {
@@ -331,11 +332,15 @@
         for (const k of group.keys()) {
           const item = group.get(k);
           if (item && item.type === 'Group') { walk(item, prefix + k + '/'); continue; }
-          if (!all && !H5_WANTED.test(k) && !H5_WANTED.test(prefix.split('/')[0] || '')) continue;
           const shape = item.shape || [];
-          if (all && shape.reduce((a, b) => a * b, 1) > 4e7) continue;
+          const count = shape.reduce((a, b) => a * b, 1);
+          const wanted = H5_WANTED.test(k) || H5_WANTED.test(prefix.split('/')[0] || '');
+          const small1Dor2Col = !H5_SKIP.test(k) && count <= 4e7 && (shape.length <= 1 || (shape.length === 2 && Math.min(shape[0], shape[1]) <= 2));
+          if (!all && !wanted && !small1Dor2Col) continue;
+          if (all && count > 4e7) continue;
           let v; try { v = item.value; } catch (e) { continue; }
-          if (all && !ArrayBuffer.isView(v) && typeof v !== 'number') continue;
+          const isStrArr = Array.isArray(v) && v.length <= 100000 && (v.length === 0 || typeof v[0] === 'string');
+          if (all && !ArrayBuffer.isView(v) && typeof v !== 'number' && !isStrArr) continue;
           vars[(prefix + k).replace(/^(trials?[^/]*)\//i, '$1/')] = { shape, data: (v && v.constructor && v.constructor.name === 'BigInt64Array') ? Float64Array.from(v, Number) : v };
         }
       };
@@ -344,7 +349,7 @@
       for (const k of Object.keys(attrs)) {
         const val = () => Number(attrs[k].value !== undefined ? attrs[k].value : attrs[k]);
         if (/^fs$/i.test(k) && !vars.fs) vars.fs = { shape: [], data: [val()] };
-        else if (/^(threshold|merge_ms|min_dur_ms)$/i.test(k) && !all) { const v = val(); if (isFinite(v)) vars['@' + k.toLowerCase()] = v; }
+        else if (/^(threshold|merge_ms|min_dur_ms|savgol_ms)$/i.test(k)) { const v = val(); if (isFinite(v)) vars['@' + k.toLowerCase()] = v; }
       }
       f.close();
     } finally { try { FS.unlink(path); } catch (e) { /* ignore */ } }
@@ -392,13 +397,134 @@
     throw new Error('A trial must be an N x 2 or 2 x N matrix of x and y (found ' + a + ' x ' + b + ').');
   }
 
+  // Inspects a vars map (from readVarsFile / readH5 / readMat5 / readNpz) to list candidate per-sample variables for labels and probability.
+  function inspectVars(vars0) {
+    const vars = lc(vars0);
+    let fs = null;
+    if (vars.fs) { const f = toC(vars.fs); const d = f.data; const fv = Number(d && d.length ? d[0] : d); if (isFinite(fv) && fv > 0) fs = fv; }
+    const savgolMs = vars['@savgol_ms'] !== undefined ? Number(vars['@savgol_ms']) : null;
+    const pp = {}; for (const k of ['threshold', 'merge_ms', 'min_dur_ms']) if (vars['@' + k] !== undefined) pp[k] = vars['@' + k];
+    const probParams = Object.keys(pp).length ? pp : null;
+
+    // Determine the expected sample count / layout of per-sample variables
+    let layout = null, nSamples = 0, nTrials = 0, shape2D = null;
+    const num = k => (vars[k] ? toC(vars[k]) : null);
+    if (vars.trials && vars.trials.cells) {
+      layout = 'cells'; nTrials = vars.trials.cells.length;
+      for (const c of vars.trials.cells) { const s = c.shape || c.dims || []; nSamples += Math.max(s[0] || 0, s[1] || 0); }
+    } else if (vars.x && vars.x.cells && vars.y && vars.y.cells) {
+      layout = 'cells'; nTrials = vars.x.cells.length;
+      for (const c of vars.x.cells) nSamples += (c.data ? c.data.length : 0);
+    } else if (vars.xy || vars.eye) {
+      const xyv = num(vars.xy ? 'xy' : 'eye');
+      if (xyv && xyv.shape && xyv.shape[1] === 2) {
+        layout = 'concat'; nSamples = xyv.shape[0];
+        const off = num('trial_offset'), len = num('trial_lengths') || num('lengths');
+        nTrials = off && off.data ? Math.max(1, off.data.length - 1) : (len && len.data ? len.data.length : 1);
+      }
+    } else if ((vars.x && vars.y) && ((vars.x.shape || vars.x.dims || []).length === 2) && Math.min(...(vars.x.shape || vars.x.dims)) > 1) {
+      const X = num('x');
+      layout = '2d'; shape2D = X.shape; nTrials = X.shape[0]; nSamples = X.shape[0] * X.shape[1];
+    } else if (vars.x && vars.y && num('x').data) {
+      layout = 'concat'; nTrials = 1; nSamples = num('x').data.length;
+    }
+
+    const SKIP_KEYS = /^(xy|eye|x|y|trials|trial_offset|trial_lengths|lengths|names|fs|@.*)$/i;
+    const candidates = [];
+    const summarizeArr = (arr) => {
+      if (!arr || !arr.length) return { min: NaN, max: NaN, isInt: false, hasNeg: false };
+      let min = Infinity, max = -Infinity, isInt = true, hasNeg = false, finite = 0;
+      const step = Math.max(1, Math.floor(arr.length / 5000));
+      for (let i = 0; i < arr.length; i += step) {
+        const v = arr[i];
+        if (v === v && isFinite(v)) {
+          finite++;
+          if (v < min) min = v;
+          if (v > max) max = v;
+          if (v !== Math.floor(v)) isInt = false;
+          if (v < 0) hasNeg = true;
+        }
+      }
+      return { min: finite ? min : NaN, max: finite ? max : NaN, isInt: finite > 0 && isInt, hasNeg };
+    };
+
+    for (const origKey of Object.keys(vars0)) {
+      if (SKIP_KEYS.test(origKey)) continue;
+      const v = vars0[origKey];
+      if (!v) continue;
+      if (layout === 'cells' && v.cells && v.cells.length === nTrials && v.cells[0] && toC(v.cells[0]).data) {
+        const st = summarizeArr(toC(v.cells[0]).data);
+        candidates.push({ name: origKey, length: nSamples, ...st });
+      } else if (layout === '2d' && shape2D) {
+        const c = toC(v);
+        if (c && c.shape && c.shape.length === 2 && c.shape[0] === shape2D[0] && c.shape[1] === shape2D[1] && c.data && ArrayBuffer.isView(c.data)) {
+          const st = summarizeArr(c.data);
+          candidates.push({ name: origKey, length: nSamples, ...st });
+        }
+      } else {
+        const c = toC(v);
+        if (!c || !c.data || !ArrayBuffer.isView(c.data)) continue;
+        const sh = c.shape || c.dims || [c.data.length];
+        const is1D = sh.length === 1 || (sh.length === 2 && (sh[0] === 1 || sh[1] === 1));
+        const len = c.data.length;
+        if (is1D && ((layout === 'concat' && len === nSamples) || (!layout && len >= 20))) {
+          const st = summarizeArr(c.data);
+          candidates.push({ name: origKey, length: len, ...st });
+        }
+      }
+    }
+
+    for (const c of candidates) {
+      const rng = isFinite(c.min) ? (c.isInt ? `${c.min}…${c.max}` : `${Number(c.min.toFixed(3))}…${Number(c.max.toFixed(3))}`) : 'empty';
+      c.summary = `${c.isInt ? 'int · ' : ''}${rng} · ${c.length.toLocaleString()} samples`;
+    }
+
+    let defaultLabelsVar = '', defaultLabelsRole = 'prelabels', defaultProbVar = '';
+    const byLc = new Map(candidates.map(c => [c.name.toLowerCase(), c]));
+    if (byLc.has('labels')) {
+      defaultLabelsVar = byLc.get('labels').name;
+      defaultLabelsRole = 'reviewed';
+    } else if (byLc.has('pred_labels')) {
+      defaultLabelsVar = byLc.get('pred_labels').name;
+      defaultLabelsRole = 'prelabels';
+    } else if (byLc.has('predlabels')) {
+      defaultLabelsVar = byLc.get('predlabels').name;
+      defaultLabelsRole = 'prelabels';
+    } else {
+      const m = candidates.find(c => /^(saccade_?labels?|label|events?|gt|ground_?truth)$/i.test(c.name) && c.isInt && c.min >= -1 && c.max <= 4);
+      if (m) { defaultLabelsVar = m.name; defaultLabelsRole = m.hasNeg ? 'reviewed' : 'prelabels'; }
+    }
+
+    if (byLc.has('prob')) {
+      defaultProbVar = byLc.get('prob').name;
+    } else {
+      const p = candidates.find(c => /^(probability|p_?sacc\w*|pred_?prob|net_?prob|saccade_?prob)$/i.test(c.name) && c.min >= -0.001 && c.max <= 1.001);
+      if (p) defaultProbVar = p.name;
+    }
+
+    return {
+      hasStandardTrace: !!layout,
+      fs,
+      savgolMs: isFinite(savgolMs) ? savgolMs : null,
+      probParams,
+      nTrials,
+      nSamples,
+      vars: candidates,
+      defaultLabelsVar,
+      defaultLabelsRole,
+      defaultProbVar,
+    };
+  }
+
   // returns {trials: [{x, y, valid, name}], fs, labels: [Int8Array|null] or null, predLabels: [Int8Array] or null, prob: [Float32Array] or null, probParams}
-  function trialsFromVars(vars0) {
+  // opts (optional): { labelsVar: string, labelsRole: 'prelabels'|'reviewed', probVar: string }
+  function trialsFromVars(vars0, opts) {
     const vars = lc(vars0), out = { trials: [], fs: null, labels: null, predLabels: null, prob: null, probParams: null };
     if (!vars.pred_labels && vars.predlabels) vars.pred_labels = vars.predlabels;
     const names = strList(vars.names);
     if (vars.fs) { const f = toC(vars.fs); const d = f.data; const fv = Number(d && d.length ? d[0] : d); if (isFinite(fv) && fv > 0) out.fs = fv; }
-    const num = k => (vars[k] ? toC(vars[k]) : null);
+    const num = k => (vars[k.toLowerCase()] ? toC(vars[k.toLowerCase()]) : null);
+    const rawVar = k => (k ? vars[k.toLowerCase()] : null);
 
     const splitByOffsets = (xyv, key) => {
       const off = num('trial_offset'), len = num('trial_lengths') || num('lengths');
@@ -411,31 +537,24 @@
       return { trials, offs };
     };
 
+    let offs = null, shape2D = null;
     if (vars.trials && vars.trials.cells) {                                       // MAT cell of N x 2 matrices
       out.trials = vars.trials.cells.map((c, k) => { const m = toC(c); const [x, y] = xyOf(m.shape || m.dims, m.data); return mkTrial(x, y, names ? names[k] : undefined); });
-      if (vars.labels && vars.labels.cells) out.labels = vars.labels.cells.map((c, k) => Int8Array.from(toC(c).data.subarray(0, out.trials[k].x.length)));
-      if (vars.pred_labels && vars.pred_labels.cells) out.predLabels = perTrial(vars.pred_labels, null, out.trials, Int8Array);
-      if (vars.prob && vars.prob.cells) out.prob = perTrial(vars.prob, null, out.trials, Float32Array);
     } else if (vars.x && vars.x.cells && vars.y && vars.y.cells) {                // two cell arrays
       out.trials = vars.x.cells.map((c, k) => mkTrial(c.data, vars.y.cells[k].data, names ? names[k] : undefined));
     } else if (vars.xy || vars.eye) {
-      const key = vars.xy ? 'xy' : 'eye'; const r = splitByOffsets(num(key), key); out.trials = r.trials;
-      if (vars.labels) out.labels = labelsByOffsets(num('labels'), r.offs, out.trials);
-      if (vars.pred_labels) out.predLabels = perTrial(num('pred_labels'), r.offs, out.trials, Int8Array);
-      if (vars.prob) out.prob = perTrial(num('prob'), r.offs, out.trials, Float32Array);
+      const key = vars.xy ? 'xy' : 'eye'; const r = splitByOffsets(num(key), key); out.trials = r.trials; offs = r.offs;
     } else if (vars.trials && vars.trials.shape) {                                // numeric 3-D (n, T, 2) or (n, 2, T)
       const t = num('trials'), [n, a, b] = t.shape;
       if (t.shape.length !== 3) throw new Error('"trials" must be a cell array or a 3-D array.');
       for (let k = 0; k < n; k++) { const sl = t.data.subarray(k * a * b, (k + 1) * a * b); const [x, y] = xyOf([a, b], sl); out.trials.push(mkTrial(x, y, names ? names[k] : undefined)); }
     } else if ((vars.x && vars.y) && ((vars.x.shape || vars.x.dims || []).length === 2) && Math.min(...(vars.x.shape || vars.x.dims)) > 1) {   // 2-D X, Y: trials x time
       const X = num('x'), Y = num('y'), [n, T] = X.shape;
+      shape2D = [n, T];
       for (let k = 0; k < n; k++) out.trials.push(mkTrial(X.data.subarray(k * T, (k + 1) * T), Y.data.subarray(k * T, (k + 1) * T), names ? names[k] : undefined));
-      if (vars.labels) { const L = num('labels'); out.labels = []; for (let k = 0; k < n; k++) out.labels.push(Int8Array.from(L.data.subarray(k * T, k * T + out.trials[k].x.length))); }
-      const rowsOf = (key, Type) => { const L = num(key); if (!L || !L.shape || L.shape[0] !== n || L.shape[1] !== T) return null; const o = []; for (let k = 0; k < n; k++) o.push(Type.from(L.data.subarray(k * T, k * T + out.trials[k].x.length))); return o; };
-      if (vars.pred_labels) out.predLabels = rowsOf('pred_labels', Int8Array);
-      if (vars.prob) out.prob = rowsOf('prob', Float32Array);
     } else if (vars.x && vars.y) {                                                // one trial
       out.trials = [mkTrial(num('x').data, num('y').data, names ? names[0] : undefined)];
+      offs = [0, out.trials[0].x.length];
     } else {                                                                      // group / dataset names trial_k (T x 2), x_k / y_k
       const keys = Object.keys(vars).filter(k => /^trials?[_/]?\d+$/.test(k)).sort((a, b) => parseInt(a.replace(/\D+/g, '')) - parseInt(b.replace(/\D+/g, '')));
       if (keys.length) out.trials = keys.map((k, i) => { const m = num(k); const [x, y] = xyOf(m.shape, m.data); return mkTrial(x, y, names ? names[i] : k); });
@@ -446,6 +565,48 @@
       }
     }
     if (!out.trials.length) throw new Error('The file holds no trial.');
+
+    // Extract any per-sample variable (by name) into an array of TypedArrays matching out.trials
+    const extractVar = (key, Type) => {
+      if (!key) return null;
+      const v0 = rawVar(key);
+      if (!v0) return null;
+      if (v0.cells) return perTrial(v0, null, out.trials, Type);
+      const L = toC(v0);
+      if (!L || !L.data) return null;
+      if (shape2D) {
+        const [n, T] = shape2D;
+        if (!L.shape || L.shape[0] !== n || L.shape[1] !== T) return null;
+        const o = [];
+        for (let k = 0; k < n; k++) o.push(Type.from(L.data.subarray(k * T, k * T + out.trials[k].x.length)));
+        return o;
+      }
+      if (offs) return perTrial(L, offs, out.trials, Type);
+      return null;
+    };
+
+    // Labels / pre-labels selection
+    if (opts && opts.labelsVar !== undefined) {
+      if (opts.labelsVar && opts.labelsVar !== 'none') {
+        const arr = extractVar(opts.labelsVar, Int8Array);
+        const role = opts.labelsRole || (/^labels$/i.test(opts.labelsVar) ? 'reviewed' : 'prelabels');
+        if (role === 'reviewed') out.labels = arr;
+        else out.predLabels = arr;
+      }
+    } else {
+      if (vars.labels) out.labels = extractVar('labels', Int8Array);
+      if (vars.pred_labels) out.predLabels = extractVar('pred_labels', Int8Array);
+    }
+
+    // Predictive probability selection
+    if (opts && opts.probVar !== undefined) {
+      if (opts.probVar && opts.probVar !== 'none') {
+        out.prob = extractVar(opts.probVar, Float32Array);
+      }
+    } else {
+      if (vars.prob) out.prob = extractVar('prob', Float32Array);
+    }
+
     const pp = {}; for (const k of ['threshold', 'merge_ms', 'min_dur_ms']) if (vars['@' + k] !== undefined) pp[k] = vars['@' + k];
     if (Object.keys(pp).length) out.probParams = pp;
     return out;
@@ -463,18 +624,14 @@
   }
 
   function labelsByOffsets(L, offs, trials) {
-    if (!L) return null;
-    const out = [];
-    if (L.cells) { return L.cells.map((c, k) => Int8Array.from(toC(c).data.subarray(0, trials[k].x.length))); }
-    for (let k = 0; k + 1 < offs.length; k++) out.push(Int8Array.from(L.data.subarray(offs[k], offs[k + 1]).subarray(0, trials[k].x.length)));
-    return out;
+    return perTrial(L, offs, trials, Int8Array);
   }
 
   // ---------------------------------------------------------------- top level
   function extOf(name) { const m = /\.([A-Za-z0-9]+)$/.exec(name || ''); return m ? m[1].toLowerCase() : ''; }
 
   // name: file name, buf: ArrayBuffer, h5: h5wasm module or an async function returning it (only for HDF5)
-  async function readTrialsFile(name, buf, h5) {
+  async function readTrialsFile(name, buf, h5, opts) {
     const ext = extOf(name);
     let vars;
     if (ext === 'npz') vars = await readNpz(buf);
@@ -483,7 +640,7 @@
       catch (e) { if (!e.hdf5) throw e; vars = await readH5(buf, typeof h5 === 'function' ? await h5() : h5); }
     } else if (ext === 'h5' || ext === 'hdf5' || ext === 'hdf') vars = await readH5(buf, typeof h5 === 'function' ? await h5() : h5);
     else throw new Error('Unknown file type: ' + name);
-    return trialsFromVars(vars);
+    return trialsFromVars(vars, opts);
   }
 
   // the variables of a .mat / .npz / .h5 file as they are (no layout expected): input of the column explorer (import.js tablesFromVars)
@@ -548,5 +705,5 @@
     return buildH5(vars, { fs }, typeof h5 === 'function' ? await h5() : h5);
   }
 
-  return { readTrialsFile, readVarsFile, readNpz, readMat5, readH5, readZip, parseNpy, trialsFromVars, writeNpzFile, writeMatFile, writeH5File, buildNpz, buildMat5, buildH5, buildZip, crc32, extOf };
+  return { readTrialsFile, readVarsFile, readNpz, readMat5, readH5, readZip, parseNpy, inspectVars, trialsFromVars, writeNpzFile, writeMatFile, writeH5File, buildNpz, buildMat5, buildH5, buildZip, crc32, extOf };
 }));
