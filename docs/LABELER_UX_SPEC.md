@@ -43,8 +43,13 @@ Implemented in `app.js` / `index.html` (web) and checked by `test_labeler_flow.m
     rejected near miss; bounds where `prob` falls below half the peak (inside the run), centre = the peak. Shown like a pass-2 event (±50 ms,
     Wider, Prev / Next, "Near miss k/N (p = 0.43)"). Dragging a bound handle moves it; *Accept*, a double tap or a press-drag store an expert
     saccade (as a pass-2 refinement); *Not an Event* keeps it in `rejectedNearMisses` (saved), and the window on screen joins the seen windows
-    (reviewed as fixation). Leaving (button again) returns to the normal pass 2; Switch Pass leaves it too.
+    (reviewed as fixation); *Undo* cancels the rejection (or acceptance), re-queuing and focusing the candidate again. Leaving (button again) returns to the normal pass 2; Switch Pass leaves it too.
 17. **Viewed periods** (menu). Every window drawn on screen, in any mode, is recorded per trial (`viewedRanges`, merged; autosaved, in the labels
     file, old files without it still load). The window shows one row per trial (time from the trial start, all trials on the scale of the longest):
     not viewed / viewed / reviewed / saccade / blink / rejected near miss, the totals (% of samples viewed, trials fully viewed), the trial on hover;
     a click opens that trial in pass 1 at the window holding that time. Drawn from a one-pixel-per-trial offscreen image (1289 trials: ~60 ms).
+18. **Desktop keyboard shortcuts & boundary grabbing** (`⌨ Shortcuts` button in the top bar and menu, `?`). Every button and action has a customizable
+    keyboard shortcut (persisted in `localStorage` under `uneye_shortcuts`, with QWERTY and AZERTY presets): `←` / `→` move to the previous / next
+    window (pass 1) or event (pass 2); `↑` / `↓` switch trials; `a` and `s` (or `q` and `s` in AZERTY) grab the start (onset) and end (offset)
+    boundary handles in pass 2 (move with mouse hover or nudge with `←`/`→` while holding, release or click to commit); `Space` / `Enter` accepts,
+    `d` / `Delete` / `Backspace` rejects (*Not an Event*), `z` (and `Ctrl/Cmd+Z`) undoes.

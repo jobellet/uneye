@@ -41,6 +41,7 @@
         expertEvents: [],
         prelabels: [],
         undoStack: [],
+        globalUndoStack: [],
 
         // Pass 2 state: One event at a time, centered [-50ms .. +50ms]
         refineQueue: [],
@@ -104,6 +105,10 @@
         nearMiss: { active: false, queue: [], idx: 0, lower: 0.1 },
         netSuggestions: true,       // once a network has been trained: show its proposals (on) or the HMM's (off); toggle in the menu
         minNewSecondsForAutoTrain: 2.0,   // automatic training after a pass 2 needs at least this much newly reviewed data
+        hoverSample: -1,
+        hoverPos: null,
+        shortcuts: {},
+        recordingShortcutAction: null,
 
         // Signal Filtering & Preprocessing (Savitzky-Golay + Adaptive Engbert/HMM Threshold)
         filterSettings: {
@@ -212,6 +217,15 @@
         viewedSizer: document.getElementById('viewedSizer'),
         viewedSummary: document.getElementById('viewedSummary'),
         viewedTip: document.getElementById('viewedTip'),
+        shortcutsBtn: document.getElementById('shortcutsBtn'),
+        shortcutsTopBtn: document.getElementById('shortcutsTopBtn'),
+        shortcutsModal: document.getElementById('shortcutsModal'),
+        shortcutsCloseBtn: document.getElementById('shortcutsCloseBtn'),
+        shortcutsDoneBtn: document.getElementById('shortcutsDoneBtn'),
+        shortcutsResetBtn: document.getElementById('shortcutsResetBtn'),
+        shortcutsPresetQwerty: document.getElementById('shortcutsPresetQwerty'),
+        shortcutsPresetAzerty: document.getElementById('shortcutsPresetAzerty'),
+        shortcutsList: document.getElementById('shortcutsList'),
     };
 
     const ctx = elements.canvas.getContext('2d');
@@ -630,6 +644,7 @@
         state.expertEvents = Array.from({ length: n }, () => []);
         state.prelabels = Array.from({ length: n }, () => []);
         state.undoStack = Array.from({ length: n }, () => []);
+        state.globalUndoStack = [];
         state.viewedRanges = Array.from({ length: n }, () => []);
         state.rejectedNearMisses = Array.from({ length: n }, () => []);
         state.nearMiss.active = false; state.nearMiss.queue = []; state.nearMiss.idx = 0;
@@ -758,27 +773,87 @@
     }
 
     // --- State Operations: Point Marks & Refinement ---
-    function saveUndo(trialIdx) {
+    function saveUndo(trialIdx, meta = {}) {
         if (!state.undoStack[trialIdx]) state.undoStack[trialIdx] = [];      // e.g. a session restored from the autosave
-        state.undoStack[trialIdx].push({
-            pointMarks: JSON.parse(JSON.stringify(state.pointMarks[trialIdx])),
-            expertEvents: JSON.parse(JSON.stringify(state.expertEvents[trialIdx])),
-        });
+        if (!state.globalUndoStack) state.globalUndoStack = [];
+        const snap = {
+            trialIdx,
+            pointMarks: JSON.parse(JSON.stringify(state.pointMarks[trialIdx] || [])),
+            expertEvents: JSON.parse(JSON.stringify(state.expertEvents[trialIdx] || [])),
+            rejectedNearMisses: JSON.parse(JSON.stringify((state.rejectedNearMisses && state.rejectedNearMisses[trialIdx]) || [])),
+            scanWins: JSON.parse(JSON.stringify((state.scanWins && state.scanWins[trialIdx]) || [])),
+            nearMiss: meta.nearMiss || null,
+        };
+        state.undoStack[trialIdx].push(snap);
         if (state.undoStack[trialIdx].length > 30) state.undoStack[trialIdx].shift();
+        state.globalUndoStack.push(snap);
+        if (state.globalUndoStack.length > 50) state.globalUndoStack.shift();
     }
 
     function undo(trialIdx) {
-        const stack = state.undoStack[trialIdx];
-        if (!stack || stack.length === 0) return;
-        const prev = stack.pop();
-        state.pointMarks[trialIdx] = prev.pointMarks;
-        state.expertEvents[trialIdx] = prev.expertEvents;
-        recomputeReviewed(trialIdx, false);
-        syncRenderedLabels(trialIdx);
-        if (state.pass === PASS_TWO) {
+        let snap = null;
+        if (!state.globalUndoStack) state.globalUndoStack = [];
+        if (state.nearMiss.active || trialIdx === undefined || (!state.undoStack[trialIdx]?.length && state.globalUndoStack.length)) {
+            if (state.globalUndoStack.length === 0) return;
+            snap = state.globalUndoStack.pop();
+            const t = snap.trialIdx;
+            const tStack = state.undoStack[t];
+            if (tStack && tStack.length) {
+                const idx = tStack.lastIndexOf(snap);
+                if (idx >= 0) tStack.splice(idx, 1);
+                else tStack.pop();
+            }
+        } else {
+            const stack = state.undoStack[trialIdx];
+            if (!stack || stack.length === 0) {
+                if (state.globalUndoStack.length === 0) return;
+                snap = state.globalUndoStack.pop();
+            } else {
+                snap = stack.pop();
+                const gIdx = state.globalUndoStack.lastIndexOf(snap);
+                if (gIdx >= 0) state.globalUndoStack.splice(gIdx, 1);
+            }
+        }
+        if (!snap) return;
+
+        const t = snap.trialIdx;
+        state.pointMarks[t] = snap.pointMarks;
+        state.expertEvents[t] = snap.expertEvents;
+        if (snap.rejectedNearMisses !== undefined && state.rejectedNearMisses) {
+            state.rejectedNearMisses[t] = snap.rejectedNearMisses;
+        }
+        if (snap.scanWins !== undefined && state.scanWins) {
+            state.scanWins[t] = snap.scanWins;
+        }
+
+        if (snap.nearMiss) {
+            const { candidate, idx } = snap.nearMiss;
+            const alreadyInQueue = state.nearMiss.queue.some(
+                c => c.trial === candidate.trial && c.at === candidate.at
+            );
+            if (!alreadyInQueue) {
+                const insertIdx = Math.min(idx, state.nearMiss.queue.length);
+                state.nearMiss.queue.splice(insertIdx, 0, candidate);
+            }
+            if (state.nearMiss.active) {
+                state.currentTrialIdx = candidate.trial;
+                state.nearMiss.idx = Math.min(idx, state.nearMiss.queue.length - 1);
+                state.zoomMultiplier = 1.0;
+                resetGesture();
+                nmFocus();
+            }
+        }
+
+        recomputeReviewed(t, false);
+        syncRenderedLabels(t);
+
+        if (state.nearMiss.active) {
+            nmFocus();
+        } else if (state.pass === PASS_TWO) {
             buildRefineQueue();
             focusCurrentMark();
         }
+
         updateStatus();
         render();
         requestAnimationFrame(() => {
@@ -811,8 +886,8 @@
         recomputeReviewed(trialIdx, false);
     }
 
-    function refineMark(trialIdx, at, onset, offset, cls) {
-        saveUndo(trialIdx);
+    function refineMark(trialIdx, at, onset, offset, cls, skipUndo = false) {
+        if (!skipUndo) saveUndo(trialIdx);
         onset = Math.max(0, onset);
         offset = Math.min(trialLenOf(trialIdx) - 1, offset);
         if (onset > offset) return false;
@@ -833,6 +908,12 @@
         // Add refined event and merge any overlapping events of the same class
         state.expertEvents[trialIdx].push({ onset, offset, cls, fromPrelabel: false });
         mergeOverlappingEvents(trialIdx);
+
+        if (state.rejectedNearMisses && state.rejectedNearMisses[trialIdx]) {
+            state.rejectedNearMisses[trialIdx] = state.rejectedNearMisses[trialIdx].filter(
+                r => r.offset < onset || r.onset > offset
+            );
+        }
 
         if (state.pass === PASS_ONE && state.scanWins[trialIdx]) {
             let [f, e] = gridWindow(trialIdx, state.winIdx);
@@ -859,9 +940,12 @@
         state.pointMarks[trialIdx] = state.pointMarks[trialIdx].filter(m => m.at < a || m.at > b);
         state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => e.offset < a || e.onset > b);
         state.prelabels[trialIdx] = state.prelabels[trialIdx].filter(p => p.offset < a || p.onset > b);
+        if (state.rejectedNearMisses && state.rejectedNearMisses[trialIdx]) {
+            state.rejectedNearMisses[trialIdx] = state.rejectedNearMisses[trialIdx].filter(r => r.offset < a || r.onset > b);
+        }
         syncRenderedLabels(trialIdx);
         recomputeReviewed(trialIdx, true);
-        if (state.pass === PASS_TWO) {
+        if (state.pass === PASS_TWO && !state.nearMiss.active) {
             buildRefineQueue();
             state.refineIdx = Math.min(state.refineIdx, state.refineQueue.length);
             focusCurrentMark();
@@ -876,6 +960,9 @@
         state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => !(e.onset <= at && at <= e.offset));
         if (state.pass === PASS_TWO && state.prelabels[trialIdx]) {
             state.prelabels[trialIdx] = state.prelabels[trialIdx].filter(p => !(p.onset <= at && at <= p.offset) && Math.abs(p.onset - at) > 25);
+        }
+        if (state.rejectedNearMisses && state.rejectedNearMisses[trialIdx]) {
+            state.rejectedNearMisses[trialIdx] = state.rejectedNearMisses[trialIdx].filter(r => !(r.onset <= at && at <= r.offset) && Math.abs(r.at - at) > 25);
         }
         syncRenderedLabels(trialIdx);
         recomputeReviewed(trialIdx, true);
@@ -1182,7 +1269,15 @@
         const nm = state.nearMiss, c = nm.queue[nm.idx];
         if (!c) return false;
         if (onset === undefined) { onset = state.currentPutativeOnset >= 0 ? state.currentPutativeOnset : c.onset; offset = state.currentPutativeOffset >= 0 ? state.currentPutativeOffset : c.offset; }
-        refineMark(c.trial, c.at, onset, offset, CLS_SACCADE);
+        const t = c.trial;
+        saveUndo(t, {
+            nearMiss: {
+                action: 'accept',
+                candidate: { onset: c.onset, offset: c.offset, at: c.at, peak: c.peak, trial: c.trial },
+                idx: nm.idx,
+            }
+        });
+        refineMark(t, c.at, onset, offset, CLS_SACCADE, true);
         nm.queue.splice(nm.idx, 1);
         state.zoomMultiplier = 1.0;
         nmFocus();
@@ -1193,6 +1288,13 @@
         const nm = state.nearMiss, c = nm.queue[nm.idx];
         if (!c) return false;
         const t = c.trial;
+        saveUndo(t, {
+            nearMiss: {
+                action: 'reject',
+                candidate: { onset: c.onset, offset: c.offset, at: c.at, peak: c.peak, trial: c.trial },
+                idx: nm.idx,
+            }
+        });
         if (!state.rejectedNearMisses[t]) state.rejectedNearMisses[t] = [];
         state.rejectedNearMisses[t].push({ onset: c.onset, offset: c.offset, at: c.at, peak: Math.round(c.peak * 1e4) / 1e4 });
         if (state.scanWins[t] && t === state.currentTrialIdx) {
@@ -1760,6 +1862,32 @@
             ctx.fillStyle = color;
             ctx.beginPath(); ctx.arc(x1, h / 2, HANDLE_R_PX, 0, 2 * Math.PI); ctx.fill();
             ctx.beginPath(); ctx.arc(x2, h / 2, HANDLE_R_PX, 0, 2 * Math.PI); ctx.fill();
+
+            // Highlight active grabbed handle & draw shortcut key badges on handles
+            if (state.handleDrag && state.handleDrag.current) {
+                const gx = state.handleDrag.side === 'on' ? x1 : x2;
+                ctx.save();
+                ctx.strokeStyle = '#FFA000';
+                ctx.fillStyle = 'rgba(255, 193, 7, 0.35)';
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.arc(gx, h / 2, HANDLE_R_PX + 6, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+            }
+            const onKey = state.shortcuts && state.shortcuts.grabOnset ? formatShortcutKey(state.shortcuts.grabOnset) : '';
+            const offKey = state.shortcuts && state.shortcuts.grabOffset ? formatShortcutKey(state.shortcuts.grabOffset) : '';
+            if (onKey || offKey) {
+                ctx.save();
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = 'bold 9px var(--font-stack)';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                if (onKey && onKey.length <= 2) ctx.fillText(onKey, x1, h / 2);
+                if (offKey && offKey.length <= 2) ctx.fillText(offKey, x2, h / 2);
+                ctx.restore();
+            }
         }
     }
 
@@ -1804,8 +1932,25 @@
             return best;
         };
 
+        canvas.addEventListener('pointerleave', () => {
+            state.hoverSample = -1;
+            state.hoverPos = null;
+        });
+
         canvas.addEventListener('pointerdown', (e) => {
             canvasRect = canvas.getBoundingClientRect();
+            if (state.handleDrag && state.handleDrag.viaKey) {
+                const sample = pxToSample(local(e).x, canvas.clientWidth);
+                const hd = state.handleDrag;
+                if (hd.side === 'on') hd.onset = Math.max(0, Math.min(sample, hd.offset - 1));
+                else hd.offset = Math.min(curLen() - 1, Math.max(sample, hd.onset + 1));
+                if (hd.current) { state.currentPutativeOnset = hd.onset; state.currentPutativeOffset = hd.offset; }
+                commitHandleDrag(hd);
+                state.handleDrag = null;
+                updateStatus();
+                render();
+                return;
+            }
             try { canvas.setPointerCapture(e.pointerId); } catch (err) { }
             if (e.isPrimary) state.pointers.clear();      // a primary pointer starts a new gesture: drop pointers whose pointerup never arrived
             if (state.pointers.size === 0) {
@@ -1838,6 +1983,27 @@
 
         // move / up / cancel are listened to on the window: they still arrive when the pointer capture is lost
         window.addEventListener('pointermove', (e) => {
+            const r = canvas.getBoundingClientRect();
+            const lx = e.clientX - r.left, ly = e.clientY - r.top;
+            const inside = lx >= 0 && lx <= r.width && ly >= 0 && ly <= r.height;
+            if (inside && r.width > 0) {
+                state.hoverSample = pxToSample(lx, r.width);
+                state.hoverPos = { x: lx, y: ly };
+            }
+            if (state.handleDrag && state.handleDrag.viaKey && r.width > 0) {
+                const sample = pxToSample(lx, r.width);
+                const hd = state.handleDrag;
+                if (hd.side === 'on') hd.onset = Math.max(0, Math.min(sample, hd.offset - 1));
+                else hd.offset = Math.min(curLen() - 1, Math.max(sample, hd.onset + 1));
+                if (hd.current) { state.currentPutativeOnset = hd.onset; state.currentPutativeOffset = hd.offset; }
+                hd.moved = true;
+                requestRender();
+                return;
+            }
+            if (inside && state.pointers.size === 0 && !state.pointerDown) {
+                const h = handleAt({ x: lx, y: ly });
+                canvas.style.cursor = h ? 'ew-resize' : (state.eraser ? 'cell' : 'crosshair');
+            }
             if (!state.pointers.has(e.pointerId)) return;
             state.pointers.set(e.pointerId, local(e));
 
@@ -2057,6 +2223,17 @@
             const existingExpIdx = (state.expertEvents[trialIdx] || []).findIndex(e => (e.onset <= sample && sample <= e.offset) || Math.abs(e.onset - sample) <= 15 || Math.abs(e.offset - sample) <= 15);
             if (existingExpIdx !== -1) {
                 deleteMarkAt(trialIdx, sample);
+                updateStatus();
+                render();
+                return;
+            }
+
+            // 2b. Tap on existing rejected near miss removes it (cancels the rejection)
+            const existingRejIdx = (state.rejectedNearMisses[trialIdx] || []).findIndex(r => (r.onset <= sample && sample <= r.offset) || Math.abs(r.onset - sample) <= 15 || Math.abs(r.offset - sample) <= 15 || Math.abs(r.at - sample) <= 15);
+            if (existingRejIdx !== -1) {
+                saveUndo(trialIdx);
+                state.rejectedNearMisses[trialIdx].splice(existingRejIdx, 1);
+                recomputeReviewed(trialIdx, false);
                 updateStatus();
                 render();
                 return;
@@ -2479,6 +2656,7 @@
                 state.nearMiss.active = false; state.nearMiss.queue = []; state.nearMiss.idx = 0;
                 updateProbUI();
                 state.undoStack = Array.from({ length: n }, () => []);
+                state.globalUndoStack = [];
                 state.labels = data.labels.map(l => new Uint8Array(l));
                 state.reviewedRanges = data.reviewedRanges || Array.from({ length: n }, () => []);
                 state.expertEvents = data.expertEvents || Array.from({ length: n }, () => []);
@@ -3573,6 +3751,10 @@
         setupViewedPeriods();
 
         elements.acceptPreBtn.addEventListener('click', () => {
+            if (state.handleDrag && state.handleDrag.viaKey) {
+                commitHandleDrag(state.handleDrag);
+                state.handleDrag = null;
+            }
             if (state.nearMiss.active) { nmAccept(); updateStatus(); render(); return; }
             if (state.currentMarkAt >= 0) {
                 const onset = state.currentPutativeOnset >= 0 ? state.currentPutativeOnset : state.currentMarkAt - 15;
@@ -3590,6 +3772,581 @@
         });
     }
 
+    // --- Keyboard Shortcuts & Desktop Boundary Grabbing ---
+    const SHORTCUT_ACTIONS = [
+        // Navigation
+        { id: 'prevWindowOrEvent', group: 'Navigation', label: 'Previous window / event', sub: 'Pass 1: Prev window · Pass 2: Prev event', btnIds: ['prevEpochBtn', 'prevEventBtn'], defaultKey: 'ArrowLeft', azertyKey: 'ArrowLeft' },
+        { id: 'nextWindowOrEvent', group: 'Navigation', label: 'Next window / event', sub: 'Pass 1: Next window · Pass 2: Next event', btnIds: ['nextEpochBtn', 'nextEventBtn'], defaultKey: 'ArrowRight', azertyKey: 'ArrowRight' },
+        { id: 'prevTrial', group: 'Navigation', label: 'Previous trial', sub: 'Jump to previous trial', btnIds: ['prevTrialBtn'], defaultKey: 'ArrowUp', azertyKey: 'ArrowUp' },
+        { id: 'nextTrial', group: 'Navigation', label: 'Next trial', sub: 'Jump to next trial', btnIds: ['nextTrialBtn'], defaultKey: 'ArrowDown', azertyKey: 'ArrowDown' },
+        { id: 'switchPass', group: 'Navigation', label: 'Switch Pass (Pass 1 ⇄ Pass 2)', sub: 'Toggle between marking and refinement', btnIds: ['switchPassBtn'], defaultKey: 'p', azertyKey: 'p' },
+
+        // Pass 2 & Near Misses Refinement
+        { id: 'grabOnset', group: 'Pass 2 & Boundary Refinement', label: 'Grab start (onset) boundary', sub: 'Hold/tap while hovering trace, or hold + ←/→', btnIds: [], defaultKey: 'a', azertyKey: 'q' },
+        { id: 'grabOffset', group: 'Pass 2 & Boundary Refinement', label: 'Grab end (offset) boundary', sub: 'Hold/tap while hovering trace, or hold + ←/→', btnIds: [], defaultKey: 's', azertyKey: 's' },
+        { id: 'acceptEvent', group: 'Pass 2 & Boundary Refinement', label: 'Accept Pre-label / candidate', sub: 'Confirm current event or near miss (Enter also works)', btnIds: ['acceptPreBtn'], defaultKey: 'Space', azertyKey: 'Space' },
+        { id: 'notAnEvent', group: 'Pass 2 & Boundary Refinement', label: 'Not an Event (reject / delete)', sub: 'Reject candidate or delete mark (Delete/Backspace also work)', btnIds: ['notEventBtn'], defaultKey: 'd', azertyKey: 'd' },
+        { id: 'wider', group: 'Pass 2 & Boundary Refinement', label: 'Wider zoom', sub: 'Cycle zoom width (±50ms → 2.5× → 5×)', btnIds: ['widerBtn'], defaultKey: 'w', azertyKey: 'z' },
+        { id: 'nearMisses', group: 'Pass 2 & Boundary Refinement', label: 'Toggle Near misses mode', sub: 'Review sub-threshold P(saccade) peaks', btnIds: ['nearMissBtn', 'nearMissMenuBtn'], defaultKey: 'n', azertyKey: 'n' },
+
+        // Annotation Tools & Classes
+        { id: 'saccadeTool', group: 'Annotation Tools & Classes', label: 'Select Saccade tool', sub: 'Class 1 (blue)', btnIds: ['saccadeBtn'], defaultKey: '1', azertyKey: '1' },
+        { id: 'blinkTool', group: 'Annotation Tools & Classes', label: 'Select Blink tool', sub: 'Class 2 (red)', btnIds: ['blinkBtn'], defaultKey: '2', azertyKey: '2' },
+        { id: 'toggleClass', group: 'Annotation Tools & Classes', label: 'Toggle Saccade / Blink class', sub: 'Switch active event class', btnIds: ['classToggle'], defaultKey: 'c', azertyKey: 'c' },
+        { id: 'eraserTool', group: 'Annotation Tools & Classes', label: 'Toggle Eraser tool', sub: 'Erase marks/events in dragged range', btnIds: ['eraserBtn'], defaultKey: 'e', azertyKey: 'e' },
+        { id: 'undo', group: 'Annotation Tools & Classes', label: 'Undo last action', sub: 'Ctrl+Z / Cmd+Z also works', btnIds: ['undoBtn'], defaultKey: 'z', azertyKey: 'w' },
+        { id: 'autoSlide', group: 'Annotation Tools & Classes', label: 'Toggle Auto-slide', sub: 'Slide window after marking in Pass 1', btnIds: ['autoSlideBtn'], defaultKey: 'l', azertyKey: 'l' },
+
+        // Files, Model & Views
+        { id: 'viewedPeriods', group: 'Files, Model & Views', label: 'Viewed periods overview', sub: 'Open trial overview map', btnIds: ['viewedBtn'], defaultKey: 'v', azertyKey: 'v' },
+        { id: 'netSuggestions', group: 'Files, Model & Views', label: 'Toggle Network suggestions', sub: 'Switch between trained network and HMM proposals', btnIds: ['netSuggestBtn'], defaultKey: 'g', azertyKey: 'g' },
+        { id: 'openFile', group: 'Files, Model & Views', label: 'Open eye trace file…', sub: 'Load a new dataset', btnIds: ['openBtn'], defaultKey: 'o', azertyKey: 'o' },
+        { id: 'saveLabels', group: 'Files, Model & Views', label: 'Save labels (.json)', sub: 'Ctrl+S / Cmd+S also works', btnIds: ['saveLabelsBtn'], defaultKey: 'k', azertyKey: 'k' },
+        { id: 'loadLabels', group: 'Files, Model & Views', label: 'Load saved labels (.json)', sub: 'Import previously saved labels', btnIds: ['loadLabelsBtn'], defaultKey: 'j', azertyKey: 'j' },
+        { id: 'filterSettings', group: 'Files, Model & Views', label: 'Filter settings', sub: 'Savitzky-Golay display smoothing', btnIds: ['filterBtn'], defaultKey: 'f', azertyKey: 'f' },
+        { id: 'metricsModal', group: 'Files, Model & Views', label: 'Learning curves (Metrics)', sub: 'Show test-set F1 & kappa curves', btnIds: ['metricsBtn'], defaultKey: 'm', azertyKey: 'm' },
+        { id: 'trainModel', group: 'Files, Model & Views', label: 'Train network now', sub: 'Start an on-device training round', btnIds: ['trainNowBtn'], defaultKey: 't', azertyKey: 't' },
+        { id: 'downloadModel', group: 'Files, Model & Views', label: 'Download trained model', sub: 'Save .bin and .json weights', btnIds: ['downloadModelBtn'], defaultKey: 'b', azertyKey: 'b' },
+        { id: 'exportData', group: 'Files, Model & Views', label: 'Export dataset', sub: 'Export labels & traces in selected format', btnIds: ['exportBtn'], defaultKey: 'x', azertyKey: 'x' },
+        { id: 'toggleMenu', group: 'Files, Model & Views', label: 'Show / hide settings bar (☰)', sub: 'Toggle tools panel', btnIds: ['menuBtn'], defaultKey: 'u', azertyKey: 'u' },
+        { id: 'openShortcuts', group: 'Files, Model & Views', label: 'Keyboard shortcuts list', sub: 'Open this shortcuts window', btnIds: ['shortcutsBtn', 'shortcutsTopBtn'], defaultKey: '?', azertyKey: '?' },
+    ];
+
+    function normalizeShortcutKey(rawKey) {
+        if (rawKey === undefined || rawKey === null) return '';
+        const k = typeof rawKey === 'string' ? rawKey : rawKey.key;
+        if (!k || k === 'Shift' || k === 'Control' || k === 'Alt' || k === 'Meta' || k === 'CapsLock') return '';
+        if (k === ' ' || k === 'Spacebar') return 'Space';
+        if (k.length === 1) return k.toLowerCase();
+        return k;
+    }
+
+    function formatShortcutKey(k) {
+        if (!k) return '';
+        const map = {
+            ArrowLeft: '←',
+            ArrowRight: '→',
+            ArrowUp: '↑',
+            ArrowDown: '↓',
+            Space: 'Space',
+            Enter: 'Enter',
+            Backspace: '⌫',
+            Delete: 'Del',
+            Escape: 'Esc',
+            Tab: 'Tab',
+            PageUp: 'PgUp',
+            PageDown: 'PgDn',
+        };
+        if (map[k]) return map[k];
+        return k.length === 1 ? k.toUpperCase() : k;
+    }
+
+    function defaultShortcutsForPreset(preset) {
+        const out = {};
+        for (const a of SHORTCUT_ACTIONS) {
+            out[a.id] = preset === 'azerty' ? a.azertyKey : a.defaultKey;
+        }
+        return out;
+    }
+
+    function loadShortcuts() {
+        const base = defaultShortcutsForPreset('qwerty');
+        try {
+            const raw = localStorage.getItem('uneye_shortcuts');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object') {
+                    for (const a of SHORTCUT_ACTIONS) {
+                        if (Object.prototype.hasOwnProperty.call(parsed, a.id)) {
+                            base[a.id] = parsed[a.id] ? normalizeShortcutKey(parsed[a.id]) : '';
+                        }
+                    }
+                }
+            }
+        } catch (e) { }
+        state.shortcuts = base;
+        syncShortcutBadgesOnButtons();
+    }
+
+    function saveShortcuts() {
+        try {
+            localStorage.setItem('uneye_shortcuts', JSON.stringify(state.shortcuts));
+        } catch (e) { }
+        syncShortcutBadgesOnButtons();
+        render();
+    }
+
+    function syncShortcutBadgesOnButtons() {
+        for (const a of SHORTCUT_ACTIONS) {
+            const key = state.shortcuts[a.id] || '';
+            const disp = formatShortcutKey(key);
+            for (const bid of a.btnIds) {
+                const el = document.getElementById(bid);
+                if (!el) continue;
+                el.dataset.shortcut = disp;
+                if (!el.dataset.baseTitle) {
+                    el.dataset.baseTitle = el.getAttribute('title') || a.label;
+                }
+                el.title = disp ? `${el.dataset.baseTitle} [${disp}]` : el.dataset.baseTitle;
+            }
+        }
+    }
+
+    function setShortcut(actionId, newKey) {
+        const act = SHORTCUT_ACTIONS.find(a => a.id === actionId);
+        if (!act) return false;
+        const norm = newKey ? normalizeShortcutKey(newKey) : '';
+        if (norm) {
+            for (const a of SHORTCUT_ACTIONS) {
+                if (a.id !== actionId && state.shortcuts[a.id] === norm) {
+                    state.shortcuts[a.id] = '';
+                }
+            }
+        }
+        state.shortcuts[actionId] = norm;
+        saveShortcuts();
+        if (elements.shortcutsModal && !elements.shortcutsModal.classList.contains('hidden')) {
+            renderShortcutsList();
+        }
+        return true;
+    }
+
+    function applyShortcutPreset(preset) {
+        state.recordingShortcutAction = null;
+        state.shortcuts = defaultShortcutsForPreset(preset === 'azerty' ? 'azerty' : 'qwerty');
+        saveShortcuts();
+        if (elements.shortcutsModal && !elements.shortcutsModal.classList.contains('hidden')) {
+            renderShortcutsList();
+        }
+    }
+
+    function renderShortcutsList() {
+        const container = elements.shortcutsList;
+        if (!container) return;
+        container.innerHTML = '';
+        let currentGroup = '';
+        for (const a of SHORTCUT_ACTIONS) {
+            if (a.group !== currentGroup) {
+                currentGroup = a.group;
+                const h = document.createElement('div');
+                h.className = 'shortcut-group-title';
+                h.textContent = currentGroup;
+                container.appendChild(h);
+            }
+            const row = document.createElement('div');
+            row.className = 'shortcut-row';
+
+            const lblWrap = document.createElement('div');
+            lblWrap.className = 'shortcut-label';
+            lblWrap.textContent = a.label;
+            if (a.sub) {
+                const sub = document.createElement('span');
+                sub.className = 'shortcut-sub';
+                sub.textContent = `(${a.sub})`;
+                lblWrap.appendChild(sub);
+            }
+
+            const ctrls = document.createElement('div');
+            ctrls.className = 'shortcut-controls';
+
+            const keyBtn = document.createElement('button');
+            keyBtn.type = 'button';
+            keyBtn.dataset.action = a.id;
+            const isRec = state.recordingShortcutAction === a.id;
+            const curKey = state.shortcuts[a.id] || '';
+            keyBtn.className = 'shortcut-key-btn' + (isRec ? ' recording' : (!curKey ? ' unbound' : ''));
+            keyBtn.textContent = isRec ? 'Press a key…' : (curKey ? formatShortcutKey(curKey) : 'Unbound');
+            keyBtn.title = 'Click and press a key to rebind';
+            keyBtn.addEventListener('click', () => {
+                state.recordingShortcutAction = (state.recordingShortcutAction === a.id) ? null : a.id;
+                renderShortcutsList();
+            });
+
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.className = 'shortcut-clear-btn';
+            clearBtn.dataset.clear = a.id;
+            clearBtn.textContent = '×';
+            clearBtn.title = 'Unbind this shortcut';
+            clearBtn.addEventListener('click', () => {
+                state.recordingShortcutAction = null;
+                setShortcut(a.id, '');
+            });
+
+            ctrls.appendChild(keyBtn);
+            ctrls.appendChild(clearBtn);
+            row.appendChild(lblWrap);
+            row.appendChild(ctrls);
+            container.appendChild(row);
+        }
+    }
+
+    function openShortcutsModal() {
+        if (!elements.shortcutsModal) return;
+        state.recordingShortcutAction = null;
+        renderShortcutsList();
+        elements.shortcutsModal.classList.remove('hidden');
+    }
+
+    function closeShortcutsModal() {
+        if (!elements.shortcutsModal) return;
+        state.recordingShortcutAction = null;
+        elements.shortcutsModal.classList.add('hidden');
+    }
+
+    function startKeyGrab(side, normKey) {
+        if (!state.trials.length) return false;
+        // If already in a sticky key-grab for the same side, pressing the key again commits & ends it
+        if (state.handleDrag && state.handleDrag.viaKey && state.handleDrag.sticky && state.handleDrag.side === side) {
+            commitHandleDrag(state.handleDrag);
+            state.handleDrag = null;
+            updateStatus();
+            render();
+            return true;
+        }
+        // If already in a key-grab for the other side, commit it first
+        if (state.handleDrag && state.handleDrag.viaKey) {
+            commitHandleDrag(state.handleDrag);
+            state.handleDrag = null;
+        }
+        const t = state.currentTrialIdx;
+        let ev = null, on0 = -1, off0 = -1, isCurrent = false;
+        if (state.pass === PASS_TWO && state.currentMarkAt >= 0 && state.currentPutativeOnset >= 0) {
+            on0 = state.currentPutativeOnset;
+            off0 = state.currentPutativeOffset;
+            isCurrent = true;
+            if (!state.nearMiss.active) {
+                ev = (state.expertEvents[t] || []).find(e => e.onset === on0 && e.offset === off0) ||
+                     (state.expertEvents[t] || []).find(e => e.onset <= state.currentMarkAt && state.currentMarkAt <= e.offset) ||
+                     null;
+            }
+        } else if (state.pass === PASS_ONE) {
+            const vis = (state.expertEvents[t] || []).filter(e => e.offset >= state.fromSample && e.onset <= state.toSample);
+            if (state.hoverSample >= 0) {
+                ev = vis.find(e => e.onset - 25 <= state.hoverSample && state.hoverSample <= e.offset + 25) || null;
+            }
+            if (!ev && vis.length === 1) ev = vis[0];
+            if (ev) {
+                on0 = ev.onset;
+                off0 = ev.offset;
+            }
+        }
+        if (on0 < 0 || off0 < 0) return false;
+
+        const hd = {
+            ev,
+            side,
+            onset: on0,
+            offset: off0,
+            on0,
+            off0,
+            current: isCurrent,
+            viaKey: true,
+            key: normKey,
+            moved: false,
+            sticky: false,
+        };
+        if (state.hoverSample >= 0) {
+            if (side === 'on') hd.onset = Math.max(0, Math.min(state.hoverSample, hd.offset - 1));
+            else hd.offset = Math.min(curLen() - 1, Math.max(state.hoverSample, hd.onset + 1));
+            if (hd.current) {
+                state.currentPutativeOnset = hd.onset;
+                state.currentPutativeOffset = hd.offset;
+            }
+            hd.moved = (hd.onset !== hd.on0 || hd.offset !== hd.off0);
+        }
+        state.handleDrag = hd;
+        render();
+        return true;
+    }
+
+    function finishKeyGrab(normKey) {
+        const hd = state.handleDrag;
+        if (!hd || !hd.viaKey || hd.key !== normKey) return;
+        if (hd.sticky) return;
+        if (hd.moved || state.hoverSample >= 0) {
+            commitHandleDrag(hd);
+            state.handleDrag = null;
+            updateStatus();
+            render();
+        } else {
+            hd.sticky = true;
+            render();
+        }
+    }
+
+    function anyModalOpen() {
+        const modals = [
+            elements.startModal,
+            elements.loadModal,
+            document.getElementById('importModal'),
+            elements.filterModal,
+            elements.metricsModal,
+            elements.viewedModal,
+            elements.alertModal,
+            elements.shortcutsModal,
+        ];
+        return modals.some(m => m && !m.classList.contains('hidden'));
+    }
+
+    function executeShortcutAction(actionId, normKey) {
+        switch (actionId) {
+            case 'prevWindowOrEvent':
+                if (state.pass === PASS_ONE) elements.prevEpochBtn.click();
+                else elements.prevEventBtn.click();
+                return true;
+            case 'nextWindowOrEvent':
+                if (state.pass === PASS_ONE) elements.nextEpochBtn.click();
+                else elements.nextEventBtn.click();
+                return true;
+            case 'prevTrial':
+                elements.prevTrialBtn.click();
+                return true;
+            case 'nextTrial':
+                elements.nextTrialBtn.click();
+                return true;
+            case 'switchPass':
+                elements.switchPassBtn.click();
+                return true;
+            case 'grabOnset':
+                return startKeyGrab('on', normKey);
+            case 'grabOffset':
+                return startKeyGrab('off', normKey);
+            case 'acceptEvent':
+                if (state.handleDrag && state.handleDrag.viaKey) {
+                    commitHandleDrag(state.handleDrag);
+                    state.handleDrag = null;
+                }
+                if (state.pass === PASS_TWO) {
+                    elements.acceptPreBtn.click();
+                    return true;
+                }
+                if (state.pass === PASS_ONE && state.hoverSample >= 0) {
+                    handleTap(state.hoverSample);
+                    return true;
+                }
+                return false;
+            case 'notAnEvent':
+                if (state.handleDrag && state.handleDrag.viaKey) {
+                    state.handleDrag = null;
+                }
+                if (state.pass === PASS_TWO) {
+                    elements.notEventBtn.click();
+                    return true;
+                }
+                if (state.pass === PASS_ONE && state.hoverSample >= 0) {
+                    deleteMarkAt(state.currentTrialIdx, state.hoverSample);
+                    updateStatus();
+                    render();
+                    return true;
+                }
+                return false;
+            case 'wider':
+                if (state.pass === PASS_TWO) elements.widerBtn.click();
+                return true;
+            case 'nearMisses':
+                if (state.hasProb && elements.nearMissBtn) elements.nearMissBtn.click();
+                return true;
+            case 'saccadeTool':
+                if (elements.saccadeBtn) elements.saccadeBtn.click();
+                return true;
+            case 'blinkTool':
+                if (elements.blinkBtn) elements.blinkBtn.click();
+                return true;
+            case 'toggleClass':
+                if (elements.classToggle) elements.classToggle.click();
+                return true;
+            case 'eraserTool':
+                if (elements.eraserBtn) elements.eraserBtn.click();
+                return true;
+            case 'undo':
+                if (elements.undoBtn) elements.undoBtn.click();
+                return true;
+            case 'autoSlide':
+                if (elements.autoSlideBtn) elements.autoSlideBtn.click();
+                return true;
+            case 'viewedPeriods':
+                if (elements.viewedBtn) elements.viewedBtn.click();
+                return true;
+            case 'netSuggestions':
+                if (elements.netSuggestBtn) elements.netSuggestBtn.click();
+                return true;
+            case 'openFile':
+                if (elements.openBtn) elements.openBtn.click();
+                return true;
+            case 'saveLabels':
+                if (elements.saveLabelsBtn) elements.saveLabelsBtn.click();
+                return true;
+            case 'loadLabels':
+                if (elements.loadLabelsBtn) elements.loadLabelsBtn.click();
+                return true;
+            case 'filterSettings':
+                if (elements.filterBtn) elements.filterBtn.click();
+                return true;
+            case 'metricsModal':
+                if (elements.metricsBtn) elements.metricsBtn.click();
+                return true;
+            case 'trainModel':
+                if (elements.trainNowBtn) elements.trainNowBtn.click();
+                return true;
+            case 'downloadModel':
+                if (elements.downloadModelBtn) elements.downloadModelBtn.click();
+                return true;
+            case 'exportData':
+                if (elements.exportBtn) elements.exportBtn.click();
+                return true;
+            case 'toggleMenu':
+                if (elements.menuBtn) elements.menuBtn.click();
+                return true;
+            case 'openShortcuts':
+                openShortcutsModal();
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    function setupKeyboardShortcuts() {
+        loadShortcuts();
+        if (elements.shortcutsBtn) elements.shortcutsBtn.addEventListener('click', openShortcutsModal);
+        if (elements.shortcutsTopBtn) elements.shortcutsTopBtn.addEventListener('click', openShortcutsModal);
+        if (elements.shortcutsCloseBtn) elements.shortcutsCloseBtn.addEventListener('click', closeShortcutsModal);
+        if (elements.shortcutsDoneBtn) elements.shortcutsDoneBtn.addEventListener('click', closeShortcutsModal);
+        if (elements.shortcutsResetBtn) elements.shortcutsResetBtn.addEventListener('click', () => applyShortcutPreset('qwerty'));
+        if (elements.shortcutsPresetQwerty) elements.shortcutsPresetQwerty.addEventListener('click', () => applyShortcutPreset('qwerty'));
+        if (elements.shortcutsPresetAzerty) elements.shortcutsPresetAzerty.addEventListener('click', () => applyShortcutPreset('azerty'));
+
+        window.addEventListener('keydown', (e) => {
+            // 1. If recording a custom shortcut in the Shortcuts Modal
+            if (state.recordingShortcutAction) {
+                const norm = normalizeShortcutKey(e);
+                if (!norm) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const actId = state.recordingShortcutAction;
+                state.recordingShortcutAction = null;
+                if (norm === 'Escape') {
+                    renderShortcutsList();
+                    return;
+                }
+                if (norm === 'Backspace' || norm === 'Delete') {
+                    setShortcut(actId, '');
+                    return;
+                }
+                setShortcut(actId, norm);
+                return;
+            }
+
+            // 2. Ignore when typing in input, select, textarea, or contentEditable
+            const tag = e.target && e.target.tagName ? e.target.tagName.toUpperCase() : '';
+            if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) {
+                return;
+            }
+
+            // 3. Standard Ctrl / Cmd combinations (Undo, Save)
+            if (e.ctrlKey || e.metaKey) {
+                const k = e.key ? e.key.toLowerCase() : '';
+                if (k === 'z') {
+                    e.preventDefault();
+                    undo(state.currentTrialIdx);
+                } else if (k === 's') {
+                    e.preventDefault();
+                    saveLabelsJson();
+                }
+                return;
+            }
+            if (e.altKey) return;
+
+            const norm = normalizeShortcutKey(e);
+            if (!norm) return;
+
+            // 4. Escape cancels active handle grab or closes open modals
+            if (norm === 'Escape') {
+                if (state.handleDrag && state.handleDrag.viaKey) {
+                    e.preventDefault();
+                    const hd = state.handleDrag;
+                    if (hd.current) {
+                        state.currentPutativeOnset = hd.on0;
+                        state.currentPutativeOffset = hd.off0;
+                    }
+                    state.handleDrag = null;
+                    render();
+                    return;
+                }
+                if (elements.shortcutsModal && !elements.shortcutsModal.classList.contains('hidden')) { closeShortcutsModal(); return; }
+                if (elements.viewedModal && !elements.viewedModal.classList.contains('hidden')) { elements.viewedModal.classList.add('hidden'); return; }
+                if (elements.metricsModal && !elements.metricsModal.classList.contains('hidden')) { elements.metricsModal.classList.add('hidden'); return; }
+                if (elements.filterModal && !elements.filterModal.classList.contains('hidden')) { elements.filterModal.classList.add('hidden'); return; }
+                return;
+            }
+
+            // 5. If any modal is open, only allow closing shortcutsModal with its shortcut key
+            if (anyModalOpen()) {
+                if (elements.shortcutsModal && !elements.shortcutsModal.classList.contains('hidden') && state.shortcuts.openShortcuts === norm) {
+                    e.preventDefault();
+                    closeShortcutsModal();
+                }
+                return;
+            }
+
+            // 6. While grabbing a boundary handle via keyboard, ArrowLeft/ArrowRight nudge the boundary, and Enter commits
+            if (state.handleDrag && state.handleDrag.viaKey) {
+                const hd = state.handleDrag;
+                if (norm === 'ArrowLeft' || norm === 'ArrowRight' || norm === state.shortcuts.prevWindowOrEvent || norm === state.shortcuts.nextWindowOrEvent) {
+                    const isLeft = (norm === 'ArrowLeft' || norm === state.shortcuts.prevWindowOrEvent);
+                    const step = (e.shiftKey ? 5 : 1) * (isLeft ? -1 : 1);
+                    e.preventDefault();
+                    if (hd.side === 'on') hd.onset = Math.max(0, Math.min(hd.onset + step, hd.offset - 1));
+                    else hd.offset = Math.min(curLen() - 1, Math.max(hd.offset + step, hd.onset + 1));
+                    if (hd.current) {
+                        state.currentPutativeOnset = hd.onset;
+                        state.currentPutativeOffset = hd.offset;
+                    }
+                    hd.moved = true;
+                    render();
+                    return;
+                }
+                if (norm === 'Enter') {
+                    e.preventDefault();
+                    commitHandleDrag(hd);
+                    state.handleDrag = null;
+                    updateStatus();
+                    render();
+                    return;
+                }
+            }
+
+            // 7. Match configured shortcut action
+            const matched = SHORTCUT_ACTIONS.find(a => state.shortcuts[a.id] === norm);
+            if (matched) {
+                if ((matched.id === 'grabOnset' || matched.id === 'grabOffset') && e.repeat) {
+                    e.preventDefault();
+                    return;
+                }
+                e.preventDefault();
+                executeShortcutAction(matched.id, norm);
+                return;
+            }
+
+            // 8. Built-in fallbacks in Pass 2 if not bound elsewhere (Enter = Accept, Delete/Backspace = Not an Event)
+            if (state.pass === PASS_TWO) {
+                if (norm === 'Enter') {
+                    e.preventDefault();
+                    executeShortcutAction('acceptEvent', norm);
+                } else if (norm === 'Delete' || norm === 'Backspace') {
+                    e.preventDefault();
+                    executeShortcutAction('notAnEvent', norm);
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const norm = normalizeShortcutKey(e);
+            if (!norm) return;
+            finishKeyGrab(norm);
+        });
+    }
+
     // --- Init ---
     function init() {
         try { const w = parseFloat(localStorage.getItem('uneye_winMs')); if (w >= 20) state.winMs = w; } catch (e) { }
@@ -3599,6 +4356,7 @@
         if (elements.nearMissLowerInput) elements.nearMissLowerInput.value = String(state.nearMiss.lower);
         setupListeners();
         setupPointerEvents();
+        setupKeyboardShortcuts();
         resizeCanvas();
 
         try { const v = localStorage.getItem('uneye_netSuggestions'); setNetSuggestions(v === null ? true : v === '1'); } catch (e) { setNetSuggestions(true); }
@@ -3649,4 +4407,9 @@
     window.openViewedPeriods = openViewedPeriods;
     window.jumpToTrialTime = jumpToTrialTime;
     window.viewedTotals = viewedTotals;
+    window.SHORTCUT_ACTIONS = SHORTCUT_ACTIONS;
+    window.setShortcut = setShortcut;
+    window.applyShortcutPreset = applyShortcutPreset;
+    window.openShortcutsModal = openShortcutsModal;
+    window.closeShortcutsModal = closeShortcutsModal;
 })();

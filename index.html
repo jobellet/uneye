@@ -47,6 +47,7 @@
             </div>
 
             <div class="bar-right">
+                <button id="shortcutsTopBtn" class="btn btn-secondary desktop-only" title="Keyboard shortcuts (view &amp; customize)">⌨ Shortcuts</button>
                 <button id="menuBtn" class="btn btn-secondary" title="Show / hide the settings, files, training and export buttons">☰</button>
             </div>
         </header>
@@ -64,6 +65,7 @@
                 <input type="number" id="nearMissLowerInput" class="win-input" value="0.1" min="0.01" max="0.49" step="0.01" title="Lower bound of P(saccade) of a near miss (a run of samples above it whose peak stays below the threshold)">
             </span>
             <button id="viewedBtn" class="btn btn-secondary" title="Overview of the periods displayed on screen, reviewed, labelled, and of the rejected near misses, for every trial">Viewed periods</button>
+            <button id="shortcutsBtn" class="btn btn-secondary" title="View and customize keyboard shortcuts">⌨ Shortcuts</button>
             <button id="openBtn" class="btn btn-secondary">Open…</button>
             <button id="saveLabelsBtn" class="btn btn-secondary" title="Save my manual labels (marks, refined events, windows seen) to a file I can reload later">Save labels</button>
             <button id="loadLabelsBtn" class="btn btn-secondary" title="Reload labels saved earlier (open the same eye traces first)">Load labels</button>
@@ -347,6 +349,30 @@
                     <div id="viewedSizer"></div>
                 </div>
                 <p id="viewedTip" class="form-help viewed-tip">Hover a row for the trial; click to go there (pass 1).</p>
+            </div>
+        </div>
+
+        <!-- Keyboard Shortcuts Modal -->
+        <div id="shortcutsModal" class="modal hidden">
+            <div class="modal-card modal-large shortcuts-card">
+                <div class="modal-header">
+                    <h3>Keyboard Shortcuts</h3>
+                    <button id="shortcutsCloseBtn" class="btn-close" type="button" aria-label="Close">&times;</button>
+                </div>
+                <p class="form-help">
+                    Click any key badge below and press a new key to customize it (<b>Backspace</b> / <b>Delete</b> to unbind, <b>Esc</b> to cancel).
+                    In Pass 2, hold or tap the <b>Grab start / end</b> keys while hovering the trace (or press ←/→ while holding) to move event boundaries.
+                </p>
+                <div class="shortcuts-presets">
+                    <span class="win-label">Keyboard layout preset:</span>
+                    <button id="shortcutsPresetQwerty" class="btn btn-secondary btn-sm" type="button">QWERTY / Default (A / S)</button>
+                    <button id="shortcutsPresetAzerty" class="btn btn-secondary btn-sm" type="button">AZERTY (Q / S)</button>
+                </div>
+                <div id="shortcutsList" class="shortcuts-list"></div>
+                <div class="modal-buttons">
+                    <button id="shortcutsResetBtn" class="btn btn-secondary" type="button">Reset to Default</button>
+                    <button id="shortcutsDoneBtn" class="btn btn-primary" type="button">Done</button>
+                </div>
             </div>
         </div>
 

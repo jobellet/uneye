@@ -124,6 +124,14 @@ await page.click('#notEventBtn');
 const rej = await ev((t) => ({ rej: state.rejectedNearMisses[t], n: state.nearMiss.queue.length, rev: state.reviewedRanges[t], scan: state.scanWins[t] }), rj.c.trial);
 check(rej.n === n0 - 2 && rej.rej.length === 1 && rej.rej[0].at === rj.c.at && rej.rev.some(r => r[0] <= rj.win[0] && r[1] >= rj.win[1]),
   `Not an Event: kept as rejected ${JSON.stringify(rej.rej)}, the window ${JSON.stringify(rj.win)} is reviewed ${JSON.stringify(rej.rev)}`);
+
+// undo cancels the rejection: brings back the candidate to the queue, removes it from rejectedNearMisses, re-focuses it
+await page.click('#undoBtn');
+const unrej = await ev((t) => ({ rej: state.rejectedNearMisses[t], n: state.nearMiss.queue.length, idx: state.nearMiss.idx, badge: document.getElementById('eventCounterBadge').textContent, c: state.nearMiss.queue[state.nearMiss.idx] }), rj.c.trial);
+check(unrej.n === n0 - 1 && unrej.rej.length === 0 && unrej.c.at === rj.c.at,
+  `Undo cancels the rejection: queue restored (${unrej.n}), candidate removed from rejectedNearMisses, focused (${unrej.badge})`);
+// reject it again to continue the rest of the flow
+await page.click('#notEventBtn');
 // double tap = accept with the proposed bounds
 const dt = await ev(() => {
   const c = document.getElementById('traceCanvas'), r = c.getBoundingClientRect(), w = c.clientWidth, h = c.clientHeight, q = state.nearMiss.queue[state.nearMiss.idx];

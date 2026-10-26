@@ -594,6 +594,9 @@ html, body {
         height: 36px;
         font-size: 0.9rem;
     }
+    .desktop-only {
+        display: none !important;
+    }
 }
 
 @media (max-width: 480px) {
@@ -657,3 +660,134 @@ html, body {
 }
 #viewedCanvas { position: sticky; top: 0; display: block; width: 100%; cursor: crosshair; }
 .viewed-tip { min-height: 1.3em; margin-top: 0; font-family: monospace; }
+
+/* --- Keyboard Shortcuts Modal & Desktop Hints --- */
+.shortcuts-card { max-width: 780px; }
+.shortcuts-presets {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.btn-sm {
+    height: 30px;
+    padding: 0 10px;
+    font-size: 0.8rem;
+}
+.shortcuts-list {
+    max-height: 54vh;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #FAFAFA;
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.shortcut-group-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--primary);
+    margin-top: 8px;
+    margin-bottom: 2px;
+    padding-bottom: 3px;
+    border-bottom: 1px solid #E0E0E0;
+}
+.shortcut-group-title:first-child { margin-top: 0; }
+.shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 4px;
+    border-bottom: 1px solid #F0F0F0;
+}
+.shortcut-row:last-child { border-bottom: none; }
+.shortcut-label {
+    font-size: 0.88rem;
+    color: var(--text-main);
+}
+.shortcut-sub {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-left: 6px;
+}
+.shortcut-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.shortcut-key-btn {
+    min-width: 64px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid #B0BEC5;
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    background: #FFFFFF;
+    color: #263238;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s ease;
+}
+.shortcut-key-btn:hover {
+    border-color: var(--primary);
+    background: #E3F2FD;
+}
+.shortcut-key-btn.recording {
+    background: #FFF3E0;
+    border-color: var(--accent);
+    color: var(--accent);
+    animation: pulse-rec 1s infinite alternate;
+}
+.shortcut-key-btn.unbound {
+    color: #9E9E9E;
+    font-weight: 400;
+    font-style: italic;
+}
+.shortcut-clear-btn {
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #90A4AE;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.shortcut-clear-btn:hover {
+    background: #FFEBEE;
+    color: var(--danger);
+}
+@keyframes pulse-rec {
+    from { opacity: 1; }
+    to { opacity: 0.65; }
+}
+@media (min-width: 900px) {
+    button[data-shortcut]:not([data-shortcut=""])::after {
+        content: attr(data-shortcut);
+        margin-left: 5px;
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 10px;
+        font-weight: 600;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: rgba(0, 0, 0, 0.09);
+        color: inherit;
+        opacity: 0.78;
+        line-height: 1.1;
+    }
+    .btn-primary[data-shortcut]::after,
+    .btn-train[data-shortcut]::after,
+    .btn-success[data-shortcut]::after,
+    .btn-class-opt.active[data-shortcut]::after {
+        background: rgba(255, 255, 255, 0.22);
+    }
+}

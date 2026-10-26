@@ -439,6 +439,74 @@ check(p2a[0] === 3 && p2a[2] === 290 && JSON.stringify(p2e) === '[[290,345],[400
 await page.click('#undoBtn');
 const p2u = await ev(() => state.expertEvents[3].map(e => [e.onset, e.offset]));
 check(JSON.stringify(p2u) === '[[290,330],[400,430]]', `Undo restores the boundary moved with a handle: ${JSON.stringify(p2u)}`);
+
+// --- Desktop keyboard shortcuts: ArrowLeft/ArrowRight navigation, "a"/"s" in Pass 2 to grab start/end, and customizable shortcuts modal
+const kbNav1 = await ev(() => {
+  setPass(1);
+  state.currentTrialIdx = 3;
+  state.winIdx = 0;
+  applyGridWindow();
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  const afterRight = [state.fromSample, state.toSample];
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  const afterLeft = [state.fromSample, state.toSample];
+  return { afterRight, afterLeft };
+});
+check(kbNav1.afterRight[0] === 450 && kbNav1.afterLeft[0] === 0,
+  `ArrowRight / ArrowLeft navigate to next / previous window in Pass 1: ${JSON.stringify(kbNav1)}`);
+
+const kbPass2Grab = await ev(() => {
+  setPass(2);
+  // Event 0 on trial 3 is [290, 330]; hover at sample 282 and press 'a' (grabOnset), then hover at 342 and press 's' (grabOffset)
+  state.hoverSample = 282;
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
+  const afterA = state.expertEvents[3][0] ? [state.expertEvents[3][0].onset, state.expertEvents[3][0].offset] : null;
+
+  state.hoverSample = 342;
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent('keyup', { key: 's', bubbles: true }));
+  const afterS = state.expertEvents[3][0] ? [state.expertEvents[3][0].onset, state.expertEvents[3][0].offset] : null;
+  state.hoverSample = -1;
+  return { afterA, afterS };
+});
+check(
+  JSON.stringify(kbPass2Grab.afterA) === '[282,330]' && JSON.stringify(kbPass2Grab.afterS) === '[282,342]',
+  `Pass 2 "a" and "s" shortcuts grab start (onset) and end (offset) boundaries: ${JSON.stringify(kbPass2Grab)}`
+);
+
+// Test customizing shortcuts via the Shortcuts Modal (e.g. rebinding grabOnset to "q" for AZERTY)
+await page.click('#shortcutsTopBtn');
+const modalInfo = await ev(() => {
+  const open = !document.getElementById('shortcutsModal').classList.contains('hidden');
+  const rows = document.querySelectorAll('#shortcutsList .shortcut-row').length;
+  // Click the grabOnset key button to enter recording mode, then press 'q'
+  const btn = document.querySelector('#shortcutsList .shortcut-key-btn[data-action="grabOnset"]');
+  if (btn) btn.click();
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true }));
+  const newBinding = state.shortcuts.grabOnset;
+  const saved = JSON.parse(localStorage.getItem('uneye_shortcuts') || '{}').grabOnset;
+  closeShortcutsModal();
+  // Verify 'q' now grabs the onset boundary in Pass 2
+  state.hoverSample = 290;
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent('keyup', { key: 'q', bubbles: true }));
+  state.hoverSample = -1;
+  const afterCustomQ = state.expertEvents[3][0] ? [state.expertEvents[3][0].onset, state.expertEvents[3][0].offset] : null;
+  // Restore offset to 330 and reset shortcuts to default
+  state.hoverSample = 330;
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent('keyup', { key: 's', bubbles: true }));
+  state.hoverSample = -1;
+  applyShortcutPreset('qwerty');
+  return { open, rows, newBinding, saved, afterCustomQ, resetBinding: state.shortcuts.grabOnset };
+});
+check(
+  modalInfo.open && modalInfo.rows >= 20 && modalInfo.newBinding === 'q' && modalInfo.saved === 'q' &&
+  JSON.stringify(modalInfo.afterCustomQ) === '[290,342]' && modalInfo.resetBinding === 'a',
+  `Shortcuts modal lists ${modalInfo.rows} shortcuts and supports custom key rebinding ('a' -> 'q'): ${JSON.stringify(modalInfo)}`
+);
+
 await ev(() => setPass(1));
 // --- no automatic training during pass 1, whatever the amount reviewed; it starts when a pass 2 is left
 // (the pass-2 navigation above reached the last event, which ends a pass 2 and may have started a training: stop it first)
