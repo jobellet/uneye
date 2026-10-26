@@ -193,8 +193,15 @@
         modalPickModelBtn: document.getElementById('modalPickModelBtn'),
         modalModelFile: document.getElementById('modalModelFile'),
         modalLabelsFileName: document.getElementById('modalLabelsFileName'),
+        modalPrevLabelsVar: document.getElementById('modalPrevLabelsVar'),
         modalPickLabelsBtn: document.getElementById('modalPickLabelsBtn'),
         modalLabelsFile: document.getElementById('modalLabelsFile'),
+        pickLabelsVarModal: document.getElementById('pickLabelsVarModal'),
+        pickLabelsVarSummary: document.getElementById('pickLabelsVarSummary'),
+        pickLabelsVarSelect: document.getElementById('pickLabelsVarSelect'),
+        pickLabelsVarConfirmBtn: document.getElementById('pickLabelsVarConfirmBtn'),
+        pickLabelsVarCancelBtn: document.getElementById('pickLabelsVarCancelBtn'),
+        pickLabelsVarCloseBtn: document.getElementById('pickLabelsVarCloseBtn'),
         prelabelerSelect: document.getElementById('prelabelerSelect'),
         alwaysExplorer: document.getElementById('alwaysExplorer'),
         modalConfirmBtn: document.getElementById('modalConfirmBtn'),
@@ -217,6 +224,7 @@
         nearMissLowerInput: document.getElementById('nearMissLowerInput'),
         viewedBtn: document.getElementById('viewedBtn'),
         viewedModal: document.getElementById('viewedModal'),
+        viewedResetBtn: document.getElementById('viewedResetBtn'),
         viewedCloseBtn: document.getElementById('viewedCloseBtn'),
         viewedScroll: document.getElementById('viewedScroll'),
         viewedCanvas: document.getElementById('viewedCanvas'),
@@ -598,13 +606,10 @@
     }
 
     // Reviewed = displayed in pass 1 (scanned) AND without a point mark still waiting for its refinement in pass 2,
-    // plus any explicitly refined/accepted expert event intervals.
+    // plus any intervals explicitly refined/accepted by the user (stored in scanWins).
     function recomputeReviewed(t, notify) {
         const marks = state.pointMarks[t] || [];
         const ok = (state.scanWins[t] || []).filter(([f, e]) => !marks.some(m => m.at >= f && m.at <= e)).map(r => r.slice());
-        for (const ev of (state.expertEvents[t] || [])) {
-            ok.push([ev.onset, ev.offset]);
-        }
         state.reviewedRanges[t] = mergeRangeList(ok, trialLenOf(t));
         if (notify) saveToIndexedDB();          // no automatic training here: it starts when a pass 2 is finished (maybeAutoTrain)
     }
@@ -664,9 +669,15 @@
         // 1. Preprocess all trials with Savitzky-Golay
         preprocessAllTrials();
 
-        // 2. Proposals: HMM (a network trained in this session replaces them only if the toggle is on and a model is loaded)
+        // 2. Proposals & initial file pre-labels (file pre-labels are loaded directly as ground truth so they don't need to be confirmed one by one)
         for (let t = 0; t < n; t++) {
             runPrelabeler(t, state.prelabelerMode);
+            if (state.prelabelerMode === 'file' && state.fileEvents[t] && state.fileEvents[t].length > 0) {
+                state.expertEvents[t] = state.fileEvents[t].map(e => ({ onset: e.onset, offset: e.offset, cls: e.cls, fromPrelabel: false }));
+                mergeOverlappingEvents(t);
+                recomputeReviewed(t, false);
+            }
+            syncRenderedLabels(t);
         }
         if (state.netSuggestions && state.trainedModelBin) refreshSuggestions();
 
@@ -786,6 +797,7 @@
             trialIdx,
             pointMarks: JSON.parse(JSON.stringify(state.pointMarks[trialIdx] || [])),
             expertEvents: JSON.parse(JSON.stringify(state.expertEvents[trialIdx] || [])),
+            prelabels: JSON.parse(JSON.stringify(state.prelabels[trialIdx] || [])),
             rejectedNearMisses: JSON.parse(JSON.stringify((state.rejectedNearMisses && state.rejectedNearMisses[trialIdx]) || [])),
             scanWins: JSON.parse(JSON.stringify((state.scanWins && state.scanWins[trialIdx]) || [])),
             nearMiss: meta.nearMiss || null,
@@ -825,6 +837,9 @@
         const t = snap.trialIdx;
         state.pointMarks[t] = snap.pointMarks;
         state.expertEvents[t] = snap.expertEvents;
+        if (snap.prelabels !== undefined && state.prelabels) {
+            state.prelabels[t] = snap.prelabels;
+        }
         if (snap.rejectedNearMisses !== undefined && state.rejectedNearMisses) {
             state.rejectedNearMisses[t] = snap.rejectedNearMisses;
         }
@@ -932,6 +947,10 @@
             if (!state.scanWins[trialIdx].some(r => r[0] === f && r[1] === e)) {
                 state.scanWins[trialIdx].push([f, e]);
             }
+        } else if (state.scanWins[trialIdx]) {
+            if (!state.scanWins[trialIdx].some(r => r[0] <= onset && r[1] >= offset)) {
+                state.scanWins[trialIdx].push([onset, offset]);
+            }
         }
 
         syncRenderedLabels(trialIdx);
@@ -963,9 +982,9 @@
     function deleteMarkAt(trialIdx, at) {
         saveUndo(trialIdx);
         state.pointMarks[trialIdx] = state.pointMarks[trialIdx].filter(m => Math.abs(m.at - at) > 25);
-        state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => !(e.onset <= at && at <= e.offset));
-        if (state.pass === PASS_TWO && state.prelabels[trialIdx]) {
-            state.prelabels[trialIdx] = state.prelabels[trialIdx].filter(p => !(p.onset <= at && at <= p.offset) && Math.abs(p.onset - at) > 25);
+        state.expertEvents[trialIdx] = state.expertEvents[trialIdx].filter(e => !((e.onset <= at && at <= e.offset) || Math.abs(e.onset - at) <= 15 || Math.abs(e.offset - at) <= 15));
+        if (state.prelabels[trialIdx]) {
+            state.prelabels[trialIdx] = state.prelabels[trialIdx].filter(p => !((p.onset <= at && at <= p.offset) || Math.abs(p.onset - at) <= 25 || Math.abs(p.offset - at) <= 15));
         }
         if (state.rejectedNearMisses && state.rejectedNearMisses[trialIdx]) {
             state.rejectedNearMisses[trialIdx] = state.rejectedNearMisses[trialIdx].filter(r => !(r.onset <= at && at <= r.offset) && Math.abs(r.at - at) > 25);
@@ -1069,16 +1088,14 @@
         if (leavingPassTwo) maybeAutoTrain();
     }
 
-    // Pass 2 shows all events (both pending point marks and refined/accepted expert events) that lie in windows displayed in pass 1
+    // Pass 2 shows all events (confirmed/pre-labeled expert events and pending point marks in scanned windows)
     function trialQueue(t) {
         const items = [];
         const exps = state.expertEvents[t] || [];
         for (let i = 0; i < exps.length; i++) {
             const e = exps[i];
             const mid = Math.round((e.onset + e.offset) / 2);
-            if (inScanned(t, mid) || inScanned(t, e.onset) || inScanned(t, e.offset)) {
-                items.push({ at: mid, onset: e.onset, offset: e.offset, cls: e.cls, isExpert: true });
-            }
+            items.push({ at: mid, onset: e.onset, offset: e.offset, cls: e.cls, isExpert: true });
         }
         const pms = state.pointMarks[t] || [];
         for (const m of pms) {
@@ -1423,7 +1440,7 @@
         return Math.round(state.fromSample + f * (state.toSample - state.fromSample));
     }
 
-    function render() {
+    function render(recordViewed = true) {
         const { width, height } = syncCanvasDimensions();
         if (width <= 0 || height <= 0) return;
 
@@ -1437,7 +1454,9 @@
         }
 
         ensureDerived(state.currentTrialIdx);
-        markViewed();
+        if (recordViewed !== false && (!elements.viewedModal || elements.viewedModal.classList.contains('hidden'))) {
+            markViewed();
+        }
 
         // Layout lanes (2 lanes: position X and Y on the same axes, then speed) with top margin in Pass 2 so header never collides with the trace
         const topMargin = state.pass === PASS_TWO ? 26 : 0;
@@ -1761,9 +1780,10 @@
     function drawAnnotations(w, h) {
         const trialIdx = state.currentTrialIdx;
 
-        // 1. Prelabels (Dimmed brackets)
+        // 1. Prelabels (Dimmed brackets - skipped if already covered by a ground-truth expert event)
         for (const p of state.prelabels[trialIdx]) {
             if (p.offset < state.fromSample || p.onset > state.toSample) continue;
+            if ((state.expertEvents[trialIdx] || []).some(e => !(p.offset < e.onset || p.onset > e.offset))) continue;
             const x1 = sampleToPx(p.onset, w);
             const x2 = sampleToPx(p.offset, w);
             ctx.strokeStyle = p.cls === CLS_SACCADE ? 'rgba(21, 101, 192, 0.45)' : 'rgba(198, 40, 40, 0.45)';
@@ -2136,6 +2156,13 @@
             saveUndo(t);
             const i = state.expertEvents[t].indexOf(hd.ev);
             if (i >= 0) state.expertEvents[t][i] = { onset: hd.onset, offset: hd.offset, cls: hd.ev.cls, fromPrelabel: false };
+            if (state.prelabels[t]) {
+                const lo = Math.min(hd.on0, hd.onset), hi = Math.max(hd.off0, hd.offset);
+                state.prelabels[t] = state.prelabels[t].filter(p => p.offset < lo || p.onset > hi);
+            }
+            if (state.scanWins[t] && !state.scanWins[t].some(r => r[0] <= hd.onset && r[1] >= hd.offset)) {
+                state.scanWins[t].push([hd.onset, hd.offset]);
+            }
             mergeOverlappingEvents(t);
             syncRenderedLabels(t);
             recomputeReviewed(t, true);
@@ -2855,8 +2882,12 @@
         const rows = [];
         for (const line of lines) {
             if (!line.trim()) continue;
-            const parts = line.split(/[,\t ]+/).map(v => {
-                const f = parseFloat(v);
+            const parts = line.trim().split(/[,\t; ]+/).map(v => {
+                const s = v.replace(/^["']|["']$/g, '').trim();
+                const sl = s.toLowerCase();
+                if (sl === 'true') return 1;
+                if (sl === 'false') return 0;
+                const f = parseFloat(s);
                 return isNaN(f) ? NaN : f;
             });
             rows.push(new Float32Array(parts));
@@ -3005,7 +3036,69 @@
         }
     }
 
-    async function loadPreviousLabels(labelsFile) {
+    function promptPickLabelsVar(fileName, candidates, defaultVar) {
+        if (!elements.pickLabelsVarModal || !elements.pickLabelsVarSelect) return Promise.resolve(defaultVar || (candidates[0] && candidates[0].name) || '');
+        return new Promise((resolve) => {
+            if (elements.pickLabelsFileName) elements.pickLabelsFileName.textContent = fileName;
+            elements.pickLabelsVarSelect.innerHTML = candidates.map(c => `<option value="${escapeOptionHtml(c.name)}">${escapeOptionHtml(c.name)}${c.summary ? ' (' + escapeOptionHtml(c.summary) + ')' : ''}</option>`).join('');
+            elements.pickLabelsVarSelect.value = defaultVar && candidates.some(c => c.name === defaultVar) ? defaultVar : (candidates[0] && candidates[0].name) || '';
+            elements.pickLabelsVarModal.classList.remove('hidden');
+            const done = (val) => {
+                elements.pickLabelsVarModal.classList.add('hidden');
+                if (elements.pickLabelsVarConfirmBtn) elements.pickLabelsVarConfirmBtn.onclick = null;
+                if (elements.pickLabelsVarCancelBtn) elements.pickLabelsVarCancelBtn.onclick = null;
+                if (elements.pickLabelsVarCloseBtn) elements.pickLabelsVarCloseBtn.onclick = null;
+                resolve(val);
+            };
+            if (elements.pickLabelsVarConfirmBtn) elements.pickLabelsVarConfirmBtn.onclick = () => done(elements.pickLabelsVarSelect.value);
+            if (elements.pickLabelsVarCancelBtn) elements.pickLabelsVarCancelBtn.onclick = () => done(null);
+            if (elements.pickLabelsVarCloseBtn) elements.pickLabelsVarCloseBtn.onclick = () => done(null);
+        });
+    }
+
+    async function inspectLabelsFileForModal(file) {
+        if (!elements.modalPrevLabelsVar) return;
+        elements.modalPrevLabelsVar.innerHTML = '';
+        elements.modalPrevLabelsVar.classList.add('hidden');
+        if (!file) return;
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        try {
+            if (['mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {
+                const buf = await file.arrayBuffer();
+                const vars = await UnEyeFormats.readVarsFile(file.name, buf, loadH5Lib);
+                const listed = UnEyeFormats.listLabelVars ? UnEyeFormats.listLabelVars(vars, null) : { vars: [], defaultVar: '' };
+                if (pendingLabelsFile === file && listed.vars.length > 0) {
+                    elements.modalPrevLabelsVar.innerHTML = listed.vars.map(v => `<option value="${escapeOptionHtml(v.name)}">${escapeOptionHtml(v.name)}${v.summary ? ' (' + escapeOptionHtml(v.summary) + ')' : ''}</option>`).join('');
+                    elements.modalPrevLabelsVar.value = listed.defaultVar || listed.vars[0].name;
+                    elements.modalPrevLabelsVar.classList.remove('hidden');
+                }
+            } else if (['csv', 'tsv', 'txt', 'dat', 'arff'].includes(ext)) {
+                const headText = await file.slice(0, 65536).text();
+                const sniff = window.UnEyeImport ? UnEyeImport.sniffHead(headText, file.name) : { plain: true };
+                if (!sniff.plain && window.UnEyeImport) {
+                    const parsed = await UnEyeImport.parseFile(file, loadH5Lib);
+                    const table = (parsed && parsed.cols) ? parsed : (parsed && parsed.tables && parsed.tables[0]);
+                    if (pendingLabelsFile === file && table && table.cols) {
+                        const st = UnEyeImport.describeColumns(table);
+                        const sug = UnEyeImport.suggest(table, st);
+                        const cands = table.cols.map((c, idx) => ({ name: c.name, st: st[idx] }))
+                            .filter(x => x.st.isBool || (x.st.isInt && x.st.min >= -1 && x.st.max <= 9) || (x.st.nominal && x.st.distinct <= 2))
+                            .map(x => ({ name: x.name, summary: x.st.isBool ? 'bool (0/1)' : x.st.nominal ? 'bool/nominal' : `${x.st.min}..${x.st.max}` }));
+                        if (cands.length > 0) {
+                            elements.modalPrevLabelsVar.innerHTML = cands.map(v => `<option value="${escapeOptionHtml(v.name)}">${escapeOptionHtml(v.name)} (${escapeOptionHtml(v.summary)})</option>`).join('');
+                            const defName = sug.labels >= 0 && table.cols[sug.labels] ? table.cols[sug.labels].name : cands[0].name;
+                            elements.modalPrevLabelsVar.value = cands.some(c => c.name === defName) ? defName : cands[0].name;
+                            elements.modalPrevLabelsVar.classList.remove('hidden');
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn('inspectLabelsFileForModal:', err);
+        }
+    }
+
+    async function loadPreviousLabels(labelsFile, chosenVarName) {
         if (!labelsFile) return;
         const ext = (labelsFile.name.split('.').pop() || '').toLowerCase();
         try {
@@ -3014,20 +3107,102 @@
                 applyLabelsJson(JSON.parse(text));
             } else if (['mat', 'npz', 'h5', 'hdf5', 'hdf'].includes(ext)) {
                 const buf = await labelsFile.arrayBuffer();
-                const r = await UnEyeFormats.readTrialsFile(labelsFile.name, buf, loadH5Lib);
-                if (r && r.labels) applyLoadedLabels(r.labels);
-            } else if (ext === 'csv' || ext === 'txt') {
+                const vars = await UnEyeFormats.readVarsFile(labelsFile.name, buf, loadH5Lib);
+                const listed = UnEyeFormats.listLabelVars ? UnEyeFormats.listLabelVars(vars, state.trials) : { vars: [], defaultVar: '' };
+                let varToUse = chosenVarName || '';
+                if (!varToUse) {
+                    if (listed.vars.length > 1) {
+                        varToUse = await promptPickLabelsVar(labelsFile.name, listed.vars, listed.defaultVar);
+                        if (!varToUse) return;
+                    } else if (listed.vars.length === 1) {
+                        varToUse = listed.vars[0].name;
+                    }
+                }
+                let loaded = UnEyeFormats.extractLabelsFromVars ? UnEyeFormats.extractLabelsFromVars(vars, state.trials, varToUse) : null;
+                if (!loaded) {
+                    const r = UnEyeFormats.trialsFromVars(vars, varToUse ? { labelsVar: varToUse, labelsRole: 'reviewed' } : undefined);
+                    if (r) loaded = r.labels || r.predLabels || null;
+                }
+                if (loaded) applyLoadedLabels(loaded);
+                else throw new Error('No compatible label or boolean variable found in ' + labelsFile.name);
+            } else if (['csv', 'tsv', 'txt', 'dat', 'arff'].includes(ext)) {
                 const text = await labelsFile.text();
+                const sniff = window.UnEyeImport ? UnEyeImport.sniffHead(text.slice(0, 65536), labelsFile.name) : { plain: true };
+                if ((!sniff.plain || ext === 'arff') && window.UnEyeImport) {
+                    const parsed = await UnEyeImport.parseFile(labelsFile, loadH5Lib);
+                    const table = (parsed && parsed.cols) ? parsed : (parsed && parsed.tables && parsed.tables[0]);
+                    if (table && table.cols && table.cols.length > 0) {
+                        const st = UnEyeImport.describeColumns(table);
+                        const sug = UnEyeImport.suggest(table, st);
+                        const cands = table.cols.map((c, idx) => ({ idx, name: c.name, st: st[idx] }))
+                            .filter(x => x.st.isBool || (x.st.isInt && x.st.min >= -1 && x.st.max <= 9) || (x.st.nominal && x.st.distinct <= 2))
+                            .map(x => ({ idx: x.idx, name: x.name, summary: x.st.isBool ? 'bool (0/1)' : x.st.nominal ? 'bool/nominal' : `${x.st.min}..${x.st.max}` }));
+                        if (cands.length > 0) {
+                            let varToUse = chosenVarName || '';
+                            if (!varToUse) {
+                                const defName = sug.labels >= 0 && table.cols[sug.labels] ? table.cols[sug.labels].name : cands[0].name;
+                                if (cands.length > 1) {
+                                    varToUse = await promptPickLabelsVar(labelsFile.name, cands, defName);
+                                    if (!varToUse) return;
+                                } else {
+                                    varToUse = cands[0].name;
+                                }
+                            }
+                            const chosen = cands.find(c => c.name === varToUse) || cands[0];
+                            const col = table.cols[chosen.idx], colSt = st[chosen.idx];
+                            const rawVals = new Int8Array(table.nRows);
+                            let targetPos = 1;
+                            if (colSt.nominal && col.labels) {
+                                const posIdx = col.labels.findIndex(s => /^(true|1|yes|saccade|blink|event)$/i.test(String(s).trim()));
+                                const negIdx = col.labels.findIndex(s => /^(false|0|no|fixation|none)$/i.test(String(s).trim()));
+                                targetPos = posIdx >= 0 ? posIdx : (negIdx === 0 ? 1 : negIdx === 1 ? 0 : 1);
+                            }
+                            for (let i = 0; i < table.nRows; i++) {
+                                const v = col.data[i];
+                                if (colSt.nominal && col.labels) {
+                                    rawVals[i] = (isNaN(v) || v < 0) ? -1 : (Math.round(v) === targetPos ? 1 : 0);
+                                } else {
+                                    rawVals[i] = (isNaN(v) || v < 0) ? -1 : (v >= 2 ? 2 : v >= 1 ? 1 : 0);
+                                }
+                            }
+                            const loaded = [];
+                            let off = 0;
+                            for (let t = 0; t < state.trials.length; t++) {
+                                const len = state.trials[t].x.length;
+                                const arr = new Int8Array(len).fill(-1);
+                                for (let i = 0; i < len && off + i < rawVals.length; i++) arr[i] = rawVals[off + i];
+                                off += len;
+                                loaded.push(arr);
+                            }
+                            applyLoadedLabels(loaded);
+                            return;
+                        }
+                    }
+                }
                 const rows = parseCSV(text);
                 if (rows.length > 0) {
-                    const loaded = rows.map(r => {
-                        const arr = new Int8Array(r.length);
-                        for (let i = 0; i < r.length; i++) {
-                            const v = r[i];
-                            arr[i] = (isNaN(v) || v < 0) ? -1 : Math.round(v);
-                        }
-                        return arr;
-                    });
+                    let loaded;
+                    if (rows.length > 1 && rows[0].length === 1 && state.trials.length >= 1) {
+                        // Single column of 0/1 or true/false values across trials
+                        let off = 0;
+                        loaded = state.trials.map(tr => {
+                            const arr = new Int8Array(tr.x.length).fill(-1);
+                            for (let i = 0; i < tr.x.length && off < rows.length; i++, off++) {
+                                const v = rows[off][0];
+                                arr[i] = (isNaN(v) || v < 0) ? -1 : Math.round(v);
+                            }
+                            return arr;
+                        });
+                    } else {
+                        loaded = rows.map(r => {
+                            const arr = new Int8Array(r.length);
+                            for (let i = 0; i < r.length; i++) {
+                                const v = r[i];
+                                arr[i] = (isNaN(v) || v < 0) ? -1 : Math.round(v);
+                            }
+                            return arr;
+                        });
+                    }
                     applyLoadedLabels(loaded);
                 }
             }
@@ -3053,6 +3228,7 @@
             pendingLabelsFile = null;
             if (elements.modalModelFileName) elements.modalModelFileName.textContent = 'No file chosen';
             if (elements.modalLabelsFileName) elements.modalLabelsFileName.textContent = '(none)';
+            if (elements.modalPrevLabelsVar) { elements.modalPrevLabelsVar.innerHTML = ''; elements.modalPrevLabelsVar.classList.add('hidden'); }
             if (elements.localModelRow) elements.localModelRow.classList.add('hidden');
             if (elements.initialModelSelect) elements.initialModelSelect.value = 'pretrained';
             elements.loadModal.classList.remove('hidden');
@@ -3111,7 +3287,8 @@
                     applyLoadedLabels(r.labels);
                 }
                 if (pendingLabelsFile) {
-                    await loadPreviousLabels(pendingLabelsFile);
+                    const chosenPrevVar = (elements.modalPrevLabelsVar && !elements.modalPrevLabelsVar.classList.contains('hidden')) ? elements.modalPrevLabelsVar.value : '';
+                    await loadPreviousLabels(pendingLabelsFile, chosenPrevVar);
                 }
                 const lens = r.trials.map(t => t.x.length);
                 console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples${r.fs ? ', ' + r.fs + ' Hz' : ''}${r.labels ? ', with labels' : ''}${r.predLabels ? ', with pred_labels' : ''}${r.prob ? ', with prob' : ''}`);
@@ -3181,7 +3358,10 @@
         if (!r) { elements.modalFileName.textContent = file.name; elements.loadModal.classList.remove('hidden'); return; }      // cancelled: back to the load dialog
         loadDataset(r.trials, r.fs, r.degPerUnit, prelabeler, { prob: r.prob, predLabels: r.predLabels, probParams: r.probParams });
         if (r.labels) applyLoadedLabels(r.labels);
-        if (pendingLabelsFile) await loadPreviousLabels(pendingLabelsFile);
+        if (pendingLabelsFile) {
+            const chosenPrevVar = (elements.modalPrevLabelsVar && !elements.modalPrevLabelsVar.classList.contains('hidden')) ? elements.modalPrevLabelsVar.value : '';
+            await loadPreviousLabels(pendingLabelsFile, chosenPrevVar);
+        }
         const lens = r.trials.map(t => t.x.length);
         console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples at ${r.fs} Hz (${r.source}, ${r.degPerUnit} deg/unit)` + (r.notes.length ? ' · ' + r.notes.join(' ') : ''));
     }
@@ -3244,6 +3424,7 @@
         const labels = state.trials.map((tr, t) => {
             const out = new Int8Array(tr.x.length).fill(-1), lab = humanLabels(t);
             for (const [s, e] of state.reviewedRanges[t]) for (let i = s; i <= e && i < out.length; i++) out[i] = lab[i];
+            for (const ev of (state.expertEvents[t] || [])) for (let i = ev.onset; i <= ev.offset && i < out.length; i++) out[i] = ev.cls;
             return out;
         });
         const names = (state.trialNames && state.trialNames.some(n => n)) ? state.trialNames.map((n, i) => n || ('trial_' + i)) : null;
@@ -3383,7 +3564,7 @@
                 const rev = state.reviewedRanges[t];
                 for (let i = 0; i < lab.length; i++) {
                     const isRev = rev.some(([s, e]) => s <= i && i <= e);
-                    row.push(isRev ? lab[i] : "nan");
+                    row.push((isRev || lab[i] > 0) ? lab[i] : "nan");
                 }
                 lCsv += row.join(",") + "\n";
             }
@@ -3596,14 +3777,39 @@
         render();
     }
 
+    function updateViewedSummary() {
+        const tot = viewedTotals(), pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '0.0') + ' %';
+        if (elements.viewedSummary) elements.viewedSummary.textContent = `Viewed ${pct(tot.seen, tot.total)} of the samples (${(tot.seen / state.rateHz).toFixed(1)} of ${(tot.total / state.rateHz).toFixed(1)} s), ` +
+            `${tot.full}/${tot.n} trials fully viewed · reviewed ${pct(tot.rev, tot.total)} · ${tot.nEv} expert events · ${tot.rej} rejected near misses`;
+        if (elements.viewedResetBtn) {
+            elements.viewedResetBtn.disabled = (tot.seen === 0 && tot.rev === 0);
+        }
+    }
+
+    // Reset all viewed and reviewed periods to zero (mark all as unseen) while keeping ground-truth labels (state.expertEvents) as they are
+    function resetViewedPeriods() {
+        const n = state.trials.length;
+        if (!n) return;
+        for (let t = 0; t < n; t++) {
+            state.viewedRanges[t] = [];
+            state.scanWins[t] = [];
+            state.reviewedRanges[t] = [];
+            syncRenderedLabels(t);
+        }
+        viewed.img = null;
+        updateViewedSummary();
+        drawViewed();
+        updateStatus();
+        render(false);
+        saveToIndexedDB();
+    }
+
     function openViewedPeriods() {
         if (!state.trials.length || !elements.viewedModal) return;
         const n = state.trials.length;
         viewed.rowH = n <= 40 ? 14 : n <= 150 ? 8 : n <= 600 ? 5 : 4;
         viewed.img = null;
-        const tot = viewedTotals(), pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '0.0') + ' %';
-        if (elements.viewedSummary) elements.viewedSummary.textContent = `Viewed ${pct(tot.seen, tot.total)} of the samples (${(tot.seen / state.rateHz).toFixed(1)} of ${(tot.total / state.rateHz).toFixed(1)} s), ` +
-            `${tot.full}/${tot.n} trials fully viewed · reviewed ${pct(tot.rev, tot.total)} · ${tot.nEv} expert events · ${tot.rej} rejected near misses`;
+        updateViewedSummary();
         elements.viewedModal.classList.remove('hidden');
         const sc = elements.viewedScroll;
         requestAnimationFrame(() => {
@@ -3759,6 +3965,8 @@
                 if (e.target.files && e.target.files[0]) {
                     pendingLabelsFile = e.target.files[0];
                     if (elements.modalLabelsFileName) elements.modalLabelsFileName.textContent = pendingLabelsFile.name;
+                    inspectLabelsFileForModal(pendingLabelsFile);
+                    e.target.value = '';
                 }
             });
         }
@@ -3900,6 +4108,7 @@
         if (elements.nearMissMenuBtn) elements.nearMissMenuBtn.addEventListener('click', toggleNearMiss);
         if (elements.nearMissLowerInput) elements.nearMissLowerInput.addEventListener('change', e => setNearMissLower(parseFloat(e.target.value)));
         if (elements.viewedBtn) elements.viewedBtn.addEventListener('click', openViewedPeriods);
+        if (elements.viewedResetBtn) elements.viewedResetBtn.addEventListener('click', resetViewedPeriods);
         if (elements.viewedCloseBtn) elements.viewedCloseBtn.addEventListener('click', () => elements.viewedModal.classList.add('hidden'));
         setupViewedPeriods();
 
@@ -4233,6 +4442,7 @@
             elements.startModal,
             elements.loadModal,
             document.getElementById('importModal'),
+            elements.pickLabelsVarModal,
             elements.filterModal,
             elements.metricsModal,
             elements.viewedModal,
@@ -4548,6 +4758,7 @@
     window.mergeOverlappingEvents = mergeOverlappingEvents;
     window.applyLabelsJson = applyLabelsJson;
     window.applyLoadedLabels = applyLoadedLabels;
+    window.loadPreviousLabels = loadPreviousLabels;
     window.saveLabelsJson = saveLabelsJson;
     window.recomputeReviewed = recomputeReviewed;
     window.buildRefineQueue = buildRefineQueue;
@@ -4558,6 +4769,7 @@
     window.nearMissReject = nmReject;
     window.setNearMissLower = setNearMissLower;
     window.openViewedPeriods = openViewedPeriods;
+    window.resetViewedPeriods = resetViewedPeriods;
     window.jumpToTrialTime = jumpToTrialTime;
     window.viewedTotals = viewedTotals;
     window.SHORTCUT_ACTIONS = SHORTCUT_ACTIONS;

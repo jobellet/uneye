@@ -63,13 +63,21 @@ await page.click('#modalConfirmBtn');
 check(await waitFor(() => state.trials.length === 20), 'the .h5 file with prob and pred_labels loads (20 trials)');
 await sleep(300);
 
-// --- proposals = pred_labels, never labels
-const st = await ev(() => ({ mode: state.prelabelerMode, hasProb: state.hasProb, pre0: state.prelabels[0].map(p => [p.onset, p.offset, p.cls]), pre3: state.prelabels[3].map(p => [p.onset, p.offset, p.cls]),
+// --- pre-labels loaded at start = immediately treated as ground truth (expertEvents) without needing to confirm one by one
+const st = await ev(() => ({ mode: state.prelabelerMode, hasProb: state.hasProb, pre0: state.prelabels[0].map(p => [p.onset, p.offset, p.cls]), exp0: state.expertEvents[0].map(e => [e.onset, e.offset, e.cls]), pre3: state.prelabels[3].map(p => [p.onset, p.offset, p.cls]),
   ev: state.expertEvents.reduce((a, e) => a + e.length, 0), rev: state.reviewedRanges.reduce((a, r) => a + r.length, 0), nmBtn: !document.getElementById('nearMissBtn').classList.contains('hidden') }));
 check(st.mode === 'file' && st.hasProb && st.nmBtn, `proposal source 'file', near-miss button shown: ${JSON.stringify([st.mode, st.hasProb, st.nmBtn])}`);
 check(JSON.stringify(st.pre0) === JSON.stringify([[298, 321, 1]]), 'the proposals are the runs of pred_labels: ' + JSON.stringify(st.pre0));
 check(st.pre3.some(p => p[2] === 2 && p[0] === 1800 && p[1] === 1849), 'blinks still come from the invalid runs: ' + JSON.stringify(st.pre3));
-check(st.ev === 0 && st.rev === 0, 'pred_labels are not labels: no expert event, nothing reviewed');
+check(st.ev === 20 && JSON.stringify(st.exp0) === JSON.stringify([[298, 321, 1]]), `pre-labels loaded at start are immediately ground-truth expertEvents (ev=${st.ev}, exp0=${JSON.stringify(st.exp0)})`);
+
+// clicking a ground-truth pre-label in Pass 1 deletes it without leaving a dashed prelabel behind, and Undo restores it
+await ev(() => handleTap(310));
+const afterDel = await ev(() => ({ exp0: state.expertEvents[0].length, pre0: state.prelabels[0].length }));
+await page.click('#undoBtn');
+const afterUndoDel = await ev(() => ({ exp0: state.expertEvents[0].length, pre0: state.prelabels[0].length }));
+check(afterDel.exp0 === 0 && afterDel.pre0 === 0 && afterUndoDel.exp0 === 1 && afterUndoDel.pre0 === 1,
+  `clicking a pre-label in Pass 1 deletes it completely (${JSON.stringify(afterDel)}) and Undo restores it (${JSON.stringify(afterUndoDel)})`);
 
 // --- probability band: orange line in the bottom band of the trace
 const band = await ev(() => {
@@ -112,11 +120,11 @@ const drag = await ev(() => {
   fire('pointerdown', px(on)); fire('pointermove', px(target)); fire('pointerup', px(target));
   return { target, on, after: state.currentPutativeOnset, ev: state.expertEvents[state.currentTrialIdx].length, c: state.nearMiss.queue[0] };
 });
-check(Math.abs(drag.after - drag.target) <= 1 && drag.ev === 0, `dragging the onset handle moves the bound only (no event yet): ${drag.on} -> ${drag.after}`);
+check(Math.abs(drag.after - drag.target) <= 1 && drag.ev === 1, `dragging the onset handle moves the bound only (still 1 pre-labeled event): ${drag.on} -> ${drag.after}`);
 const n0 = await ev(() => state.nearMiss.queue.length);
 await page.click('#acceptPreBtn');
 const acc = await ev((t) => ({ evs: state.expertEvents[t].map(e => [e.onset, e.offset, e.cls]), n: state.nearMiss.queue.length, rev: state.reviewedRanges[t] }), drag.c.trial);
-check(acc.n === n0 - 1 && acc.evs.length === 1 && acc.evs[0][0] === drag.after && acc.evs[0][1] === drag.c.offset && acc.evs[0][2] === 1,
+check(acc.n === n0 - 1 && acc.evs.length === 2 && acc.evs.some(e => e[0] === drag.after && e[1] === drag.c.offset && e[2] === 1),
   `Accept: an expert saccade with the dragged bounds ${JSON.stringify(acc.evs)}, removed from the queue (${n0} -> ${acc.n})`);
 // reject the next one
 const rj = await ev(() => ({ c: state.nearMiss.queue[state.nearMiss.idx], win: [state.fromSample, state.toSample] }));
@@ -178,6 +186,37 @@ await page.screenshot({ path: SHOTS + '_viewed.png' });
 await page.mouse.click(box.x + 46 + (box.width - 54) * 0.5, box.y + 18 + 7 * rowH + 3);
 const jump = await ev(() => [document.getElementById('viewedModal').classList.contains('hidden'), state.pass, state.currentTrialIdx, state.fromSample, state.toSample]);
 check(jump[0] && jump[1] === 1 && jump[2] === 7 && jump[3] <= 1000 && jump[4] >= 1000, 'a click goes to that trial and time (pass 1 window holding it): ' + JSON.stringify(jump));
+
+// --- reset viewed/reviewed periods to zero while keeping ground-truth labels (expertEvents) intact
+const beforeReset = await ev(() => ({
+  viewed: JSON.parse(JSON.stringify(state.viewedRanges)),
+  scan: JSON.parse(JSON.stringify(state.scanWins)),
+  rev: JSON.parse(JSON.stringify(state.reviewedRanges)),
+  nEv: state.expertEvents.reduce((a, e) => a + e.length, 0),
+}));
+await page.click('#viewedBtn');
+await sleep(200);
+await page.click('#viewedResetBtn');
+await sleep(100);
+const afterReset = await ev(() => {
+  const c = document.getElementById('viewedCanvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; const col = {};
+  for (let i = 0; i < d.length; i += 4) { const k = d[i] + ',' + d[i + 1] + ',' + d[i + 2]; col[k] = (col[k] || 0) + 1; }
+  const tot = viewedTotals();
+  return {
+    tot,
+    summary: document.getElementById('viewedSummary').textContent,
+    resetDisabled: document.getElementById('viewedResetBtn').disabled,
+    viewedPx: col['144,202,249'] || 0,
+    reviewedPx: col['102,187,106'] || 0,
+    saccPx: col['13,71,161'] || 0,
+  };
+});
+check(afterReset.tot.seen === 0 && afterReset.tot.rev === 0 && afterReset.tot.nEv === beforeReset.nEv &&
+  afterReset.viewedPx === 0 && afterReset.reviewedPx === 0 && afterReset.saccPx > 0 && afterReset.resetDisabled,
+  `Mark all as unseen resets viewed & reviewed to 0 while keeping all ${afterReset.tot.nEv} ground-truth events: ${afterReset.summary}`);
+await page.click('#viewedCloseBtn');
+// Restore viewed/scan/rev ranges for the subsequent save/reload checks
+await ev((b) => { state.viewedRanges = b.viewed; state.scanWins = b.scan; state.reviewedRanges = b.rev; updateStatus(); }, beforeReset);
 
 // --- save labels: viewedRanges and rejectedNearMisses; an old file without them still loads
 await ev(() => { window.__dl = []; saveLabelsJson(); });
@@ -248,6 +287,46 @@ if (process.env.MOCOL_H5) {
   check(loadedCustom && !customSt.hasProb && customSt.ev0 > 0 && customSt.rev0 > 0,
     `custom variable selection (labels='pred_labels' as reviewed, prob='(none)'): hasProb=${customSt.hasProb}, trial 0 expertEvents=${customSt.ev0}, reviewedRanges=${customSt.rev0}`);
 }
+
+// --- test loading boolean variables as labels (L) via Load labels (both HDF5/NPZ boolean variables with variable picker and CSV true/false)
+const boolRes = await ev(async () => {
+  const nSamples = state.trials[0].x.length;
+  const totalLen = state.trials.reduce((a, tr) => a + tr.x.length, 0);
+  // Create an H5 file with two boolean-like variables (bool_sacc_a and bool_sacc_b) and no xy
+  const h5 = window.h5wasm || await (async () => { const sc = document.createElement('script'); sc.src = 'web/h5wasm.js'; document.head.appendChild(sc); await new Promise(r => sc.onload = r); return window.h5wasm; })();
+  const a = new Uint8Array(totalLen), b = new Uint8Array(totalLen);
+  for (let i = 100; i <= 130; i++) a[i] = 1;
+  for (let i = 500; i <= 540; i++) b[i] = 1;
+  const bytes = await UnEyeFormats.buildH5([
+    { name: 'bool_sacc_a', type: 'u1', shape: [totalLen], data: a },
+    { name: 'bool_sacc_b', type: 'u1', shape: [totalLen], data: b },
+  ], {}, h5);
+  state.expertEvents[0] = [];
+  state.reviewedRanges[0] = [];
+  state.scanWins[0] = [];
+  const p = window.loadPreviousLabels(new File([bytes], 'bool_vars.h5'));
+  await new Promise(r => setTimeout(r, 200));
+  const modalOpen = !document.getElementById('pickLabelsVarModal').classList.contains('hidden');
+  const opts = Array.from(document.getElementById('pickLabelsVarSelect').options).map(o => o.value);
+  document.getElementById('pickLabelsVarSelect').value = 'bool_sacc_b';
+  document.getElementById('pickLabelsVarConfirmBtn').click();
+  await p;
+  const evAfterH5 = state.expertEvents[0].map(e => [e.onset, e.offset, e.cls]);
+
+  // Also test CSV with true/false column via Load labels
+  const csvLines = ['time_ms,is_saccade'];
+  for (let i = 0; i < nSamples; i++) {
+    csvLines.push(`${i},${(i >= 800 && i <= 835) ? 'true' : 'false'}`);
+  }
+  state.expertEvents[0] = [];
+  await window.loadPreviousLabels(new File([csvLines.join('\n')], 'bool_labels.csv'), 'is_saccade');
+  const evAfterCsv = state.expertEvents[0].map(e => [e.onset, e.offset, e.cls]);
+  return { modalOpen, opts, evAfterH5, evAfterCsv };
+});
+check(boolRes.modalOpen && boolRes.opts.includes('bool_sacc_a') && boolRes.opts.includes('bool_sacc_b') &&
+  JSON.stringify(boolRes.evAfterH5) === JSON.stringify([[500, 540, 1]]) &&
+  JSON.stringify(boolRes.evAfterCsv) === JSON.stringify([[800, 835, 1]]),
+  `boolean variables selectable for Load labels (L): picker opts=${JSON.stringify(boolRes.opts)}, H5=${JSON.stringify(boolRes.evAfterH5)}, CSV(true/false)=${JSON.stringify(boolRes.evAfterCsv)}`);
 
 check(errors.length === 0, 'no page error' + (errors.length ? ': ' + errors.join(' | ') : ''));
 await browser.close();

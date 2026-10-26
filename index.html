@@ -163,12 +163,12 @@
                 <div id="modalLabelsVarRow" class="form-row">
                     <label for="modalLabelsVar">Labels variable (in file):</label>
                     <div style="display: flex; gap: 6px; align-items: center; width: 100%;">
-                        <select id="modalLabelsVar" style="flex: 1; min-width: 0;" title="Choose a variable in the file for labels / machine pre-labels, or (none)">
+                        <select id="modalLabelsVar" style="flex: 1; min-width: 0;" title="Choose a boolean or integer variable in the file for labels / pre-labels, or (none)">
                             <option value="__auto__" selected>Auto-detect (pred_labels / labels)</option>
                             <option value="">(none)</option>
                         </select>
-                        <select id="modalLabelsRole" style="width: auto; max-width: 175px;" title="Use the selected labels variable as pre-labels (proposals to review) or as already-reviewed ground-truth labels">
-                            <option value="prelabels" selected>as pre-labels</option>
+                        <select id="modalLabelsRole" style="width: auto; max-width: 195px;" title="Both modes load events as confirmed ground-truth events (no need to click each one). 'as reviewed labels' also marks the entire trace as reviewed.">
+                            <option value="prelabels" selected>as pre-labels (ground truth)</option>
                             <option value="reviewed">as reviewed labels</option>
                         </select>
                     </div>
@@ -220,11 +220,12 @@
                 </div>
                 <div class="form-row">
                     <label>Previous labels (optional):</label>
-                    <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
-                        <span id="modalLabelsFileName" class="filename-display" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">(none)</span>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 100%; flex-wrap: wrap;">
+                        <span id="modalLabelsFileName" class="filename-display" style="flex: 1; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">(none)</span>
+                        <select id="modalPrevLabelsVar" class="hidden" style="flex: 1; min-width: 140px;" title="Choose which boolean or label variable (L) in the selected file to load"></select>
                         <button id="modalPickLabelsBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
                     </div>
-                    <input type="file" id="modalLabelsFile" accept=".json,.mat,.csv,.bin" style="display: none;">
+                    <input type="file" id="modalLabelsFile" style="display: none;">
                 </div>
                 <div class="form-row">
                     <label><input type="checkbox" id="alwaysExplorer"> Show the column explorer (choose X, Y and time)</label>
@@ -275,7 +276,7 @@
                             <div class="import-field"><label for="impDeg">Degrees per unit</label><input type="number" id="impDeg" min="0.00001" max="1000" step="any"></div>
                             <div class="import-field"><label for="impLabels">Labels (L)</label><select id="impLabels"></select></div>
                             <div class="import-field"><label for="impLabelsRole">Use labels as</label>
-                                <select id="impLabelsRole"><option value="prelabels">Pre-labels (proposals)</option><option value="reviewed">Reviewed labels (ground truth)</option></select></div>
+                                <select id="impLabelsRole"><option value="prelabels">Pre-labels (ground truth)</option><option value="reviewed">Reviewed labels (all reviewed)</option></select></div>
                             <div class="import-field import-wide"><label for="impProb">Predictive probability (P)</label><select id="impProb"></select></div>
                             <div class="import-field import-wide"><span id="impTimeHint" class="form-help"></span></div>
                             <div class="import-field import-wide" id="impResampleRow"><label class="import-check"><input type="checkbox" id="impResample"> Resample to a uniform grid (time stamps are not regular)</label></div>
@@ -358,7 +359,10 @@
             <div class="modal-card modal-large viewed-card">
                 <div class="modal-header">
                     <h3>Viewed periods</h3>
-                    <button id="viewedCloseBtn" class="btn-close">&times;</button>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button id="viewedResetBtn" class="btn btn-secondary btn-sm" type="button" title="Reset all viewed and reviewed periods to zero (mark all as unseen) while keeping ground-truth labels as they are">Mark all as unseen (reset to 0)</button>
+                        <button id="viewedCloseBtn" class="btn-close">&times;</button>
+                    </div>
                 </div>
                 <p id="viewedSummary" class="form-help"></p>
                 <div class="metrics-legend viewed-legend">
@@ -401,6 +405,25 @@
             </div>
         </div>
 
+        <!-- Choose Labels Variable Modal (when loading labels L from a file with boolean / label variables) -->
+        <div id="pickLabelsVarModal" class="modal hidden">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3>Load Labels (L)</h3>
+                    <button id="pickLabelsVarCloseBtn" class="btn-close" type="button" aria-label="Cancel">&times;</button>
+                </div>
+                <p id="pickLabelsVarSummary" class="form-help">Choose the boolean or label variable in the file to load as ground truth:</p>
+                <div class="form-row">
+                    <label for="pickLabelsVarSelect">Variable (L):</label>
+                    <select id="pickLabelsVarSelect" style="width: 100%;"></select>
+                </div>
+                <div class="modal-buttons">
+                    <button id="pickLabelsVarCancelBtn" class="btn btn-secondary" type="button">Cancel</button>
+                    <button id="pickLabelsVarConfirmBtn" class="btn btn-primary" type="button">Load Labels</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Convergence Alert Modal -->
         <div id="alertModal" class="modal hidden">
             <div class="modal-card">
@@ -413,12 +436,12 @@
         </div>
     </div>
 
-    <script src="formats.js?v=11"></script>
-    <script src="import.js?v=11"></script>
-    <script src="import_ui.js?v=11"></script>
-    <script src="hmm_prelabel.js?v=11"></script>
-    <script src="nearmiss.js?v=11"></script>
-    <script src="app.js?v=11"></script>
+    <script src="formats.js?v=13"></script>
+    <script src="import.js?v=13"></script>
+    <script src="import_ui.js?v=13"></script>
+    <script src="hmm_prelabel.js?v=13"></script>
+    <script src="nearmiss.js?v=13"></script>
+    <script src="app.js?v=13"></script>
 <script>
     if ("serviceWorker" in navigator && !window.AndroidBridge) {
         window.addEventListener("load", () => {

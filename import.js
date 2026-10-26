@@ -96,8 +96,11 @@
 
   const MISSING = /^(|nan|na|n\/a|null|none|\.|-|--|\?|inf|-inf)$/i;
   function parseNum(tok, decComma) {
-    if (decComma && tok.indexOf(',') >= 0) tok = tok.replace(',', '.');
-    const v = +tok;                                  // '' and ' ' give 0, handled by the caller through MISSING
+    const t = tok.trim();
+    if (/^true$/i.test(t)) return 1;
+    if (/^false$/i.test(t)) return 0;
+    if (decComma && t.indexOf(',') >= 0) return +t.replace(',', '.');
+    const v = +t;                                    // '' and ' ' give 0, handled by the caller through MISSING
     return v;
   }
   function numLike(tok, decComma) {
@@ -241,14 +244,21 @@
           const type = m[4].trim();
           if (type[0] === '{') {
             const labels = splitArffRow(type.replace(/^\{|\}$/g, '')).map(s => s.trim());
-            attrs.push({ name: aname, nominal: labels });
+            const isBoolSet = labels.length === 2 && labels.every(s => /^(true|false|0|1)$/i.test(s));
+            if (isBoolSet) attrs.push({ name: aname, numeric: true, isBool: true });
+            else attrs.push({ name: aname, nominal: labels });
+          } else if (/^boolean$/i.test(type)) {
+            attrs.push({ name: aname, numeric: true, isBool: true });
           } else attrs.push({ name: aname, numeric: /^(integer|numeric|real)/i.test(type) });
           return;
         }
         if (/^@data/i.test(l)) {
           inData = true;
           cols = attrs.map(a => new ColBuilder(a.name, !!a.nominal || a.numeric === false));
-          cols.forEach((c, j) => { if (attrs[j].nominal) { c.labels = attrs[j].nominal.slice(); attrs[j].nominal.forEach((s, k) => c.map.set(s, k)); } });
+          cols.forEach((c, j) => {
+            if (attrs[j].isBool) c.isBool = true;
+            if (attrs[j].nominal) { c.labels = attrs[j].nominal.slice(); attrs[j].nominal.forEach((s, k) => c.map.set(s, k)); }
+          });
         }
         return;
       }
@@ -257,12 +267,12 @@
       for (let j = 0; j < cols.length; j++) {
         const c = cols[j], tok = j < f.length ? f[j].trim() : '?';
         if (c.text) { if (tok === '?') c.push(NaN); else { const k = c.map.get(tok); if (k === undefined) c.pushText(tok); else c.push(k); } }
-        else c.push(tok === '?' || tok === '' ? NaN : +tok);
+        else c.push(tok === '?' || tok === '' ? NaN : parseNum(tok, false));
       }
       rowCount++;
     });
     if (!cols) throw new Error('This ARFF file has no @data section.');
-    return { kind: 'arff', name, nRows: rowCount, cols: cols.map(c => c.finish()), info: { relation, delimiter: ',', header: true } };
+    return { kind: 'arff', name, nRows: rowCount, cols: cols.map((c, j) => { const f = c.finish(); if (attrs[j] && attrs[j].isBool) f.isBool = true; return f; }), info: { relation, delimiter: ',', header: true } };
   }
 
   // ---------------------------------------------------------------- EyeLink ASC
@@ -410,11 +420,11 @@
         if (cs.length && cs.every(c => c && c.cls === 'char')) strings.push({ name, list: cs.map(c => c.strings.join('')) });
         else if (cs.length && cs.every(c => c && c.cls === 'numeric' && c.dims.length === 2)) leaves.push({ name, cells: cs.slice(0, 20000) });
       } else if (v.cls === 'char') strings.push({ name, list: v.strings });
-      else if (v.cls === 'numeric') { if (v.dims.length === 2) leaves.push({ name, dims: v.dims, data: v.data, order: 'F' }); }
+      else if (v.cls === 'numeric') { if (v.dims.length === 2) leaves.push({ name, dims: v.dims, data: v.data, order: 'F', isBool: !!v.isBool }); }
       else if (v.strings) strings.push({ name, list: v.strings });
       else if (v.data !== undefined && v.shape) {                           // npz / h5: C order
         if (typeof v.data === 'number') leaves.push({ name, dims: [1, 1], data: Float64Array.of(v.data), order: 'C' });
-        else if (ArrayBuffer.isView(v.data) && v.shape.length <= 2) leaves.push({ name, dims: v.shape.length === 2 ? v.shape : [v.shape[0] === undefined ? 1 : v.shape[0], 1], data: v.data, order: 'C' });
+        else if (ArrayBuffer.isView(v.data) && v.shape.length <= 2) leaves.push({ name, dims: v.shape.length === 2 ? v.shape : [v.shape[0] === undefined ? 1 : v.shape[0], 1], data: v.data, order: 'C', isBool: !!v.isBool });
         else if (Array.isArray(v.data) && typeof v.data[0] === 'string') strings.push({ name, list: v.data });
       }
     };
@@ -439,7 +449,7 @@
     for (const k of ['threshold', 'merge_ms', 'min_dur_ms']) if (vars && vars['@' + k] !== undefined) pp[k] = vars['@' + k];
     const probParams = Object.keys(pp).length ? pp : null;
     const groups = new Map();
-    const add = (n, name, data, labels, fromOffsets) => { if (!groups.has(n)) groups.set(n, []); groups.get(n).push({ name, data, labels, fromOffsets }); };
+    const add = (n, name, data, labels, fromOffsets, isBool) => { if (!groups.has(n)) groups.set(n, []); groups.get(n).push({ name, data, labels, fromOffsets, isBool }); };
     const headerFor = (leafName, k) => {
       const ok = strings.filter(s => s.list.length === k);
       if (!ok.length) return null;
@@ -471,7 +481,7 @@
         continue;
       }
       const names = m.cols.length > 1 ? headerFor(lf.name, m.cols.length) : null;
-      m.cols.forEach((col, j) => add(m.n, names ? names[j] : (m.cols.length === 1 ? lf.name : lf.name + '(:,' + (j + 1) + ')'), col));
+      m.cols.forEach((col, j) => add(m.n, names ? names[j] : (m.cols.length === 1 ? lf.name : lf.name + '(:,' + (j + 1) + ')'), col, undefined, false, !!lf.isBool));
     }
     // Convert trial_offset or trial_lengths into a per-sample 'trial' column on the matching table
     for (const ol of offsetLeaves) {
@@ -511,6 +521,7 @@
           const c = { name: nm, data: cols[i].data };
           if (cols[i].labels) c.labels = cols[i].labels;
           if (cols[i].fromOffsets) c.fromOffsets = true;
+          if (cols[i].isBool) c.isBool = true;
           return c;
         }),
         info: { rate, probParams, delimiter: null, header: true },
@@ -545,9 +556,11 @@
       if (c.labels) distinct = c.labels.length;
       else { const seen = new Set(); for (let i = 0; i < n && seen.size < 1000; i += stride) seen.add(d[i]); distinct = seen.size; }
       stepSample.sort((p, q) => p - q);
+      const isInt = finite > 0 && ints === finite;
+      const isBool = Boolean(!c.labels && (c.isBool || (isInt && min >= 0 && max <= 1)));
       return {
         name: c.name, n, finite, nanFrac: n ? 1 - finite / n : 1, min: finite ? min : NaN, max: finite ? max : NaN,
-        isInt: finite > 0 && ints === finite, monotonic: steps ? nonDec / steps : 0,
+        isInt, isBool, monotonic: steps ? nonDec / steps : 0,
         medianStep: stepSample.length ? stepSample[stepSample.length >> 1] : NaN, distinct, nominal: !!c.labels, derived: !!c.derived,
       };
     });
@@ -757,7 +770,7 @@
       const b = baseName(table.cols[i].name).toLowerCase();
       let sc = 0;
       if (b === 'labels' || b === 'pred_labels' || b === 'predlabels') sc = 100;
-      else if (/^(saccade_?labels?|label|events?|gt|ground_?truth)$/.test(b)) sc = 80;
+      else if (/^(saccade_?labels?|label|l|events?|gt|ground_?truth|is_?sacc\w*|saccade_?mask|saccade_?bool|bool_?labels?)$/.test(b)) sc = 80;
       if (sc > labScore) {
         labScore = sc;
         labBest = i;
@@ -836,7 +849,22 @@
     const fs = m.fs;
     if (!(fs > 0)) throw new Error('The sampling rate is missing.');
     const X = table.cols[m.x].data, Y = table.cols[m.y].data;
-    const Lcol = (m.labels !== undefined && m.labels >= 0 && table.cols[m.labels]) ? table.cols[m.labels].data : null;
+    let Lcol = null;
+    if (m.labels !== undefined && m.labels >= 0 && table.cols[m.labels]) {
+      const lc = table.cols[m.labels];
+      if (lc.labels && lc.labels.length === 2) {
+        const posIdx = lc.labels.findIndex(s => /^(true|1|yes|saccade|blink|event)$/i.test(String(s).trim()));
+        const negIdx = lc.labels.findIndex(s => /^(false|0|no|fixation|none)$/i.test(String(s).trim()));
+        const targetPos = posIdx >= 0 ? posIdx : (negIdx === 0 ? 1 : negIdx === 1 ? 0 : 1);
+        Lcol = new Float64Array(lc.data.length);
+        for (let i = 0; i < lc.data.length; i++) {
+          const v = lc.data[i];
+          Lcol[i] = (v === v && isFinite(v)) ? (Math.round(v) === targetPos ? 1 : 0) : NaN;
+        }
+      } else {
+        Lcol = lc.data;
+      }
+    }
     const Pcol = (m.prob !== undefined && m.prob >= 0 && table.cols[m.prob]) ? table.cols[m.prob].data : null;
     const isRev = m.labelsRole === 'reviewed';
     const defLab = isRev ? -1 : 0;

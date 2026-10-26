@@ -133,10 +133,11 @@
     S.notes = sug.notes.slice();
 
     const numeric = (c, s) => !s.nominal && s.finite >= 0.05 * s.n;
+    const canBeLabels = (c, s) => numeric(c, s) || (s.nominal && s.distinct === 2);
     E.x.innerHTML = optionsFor(T, st, numeric, '(choose)');
     E.y.innerHTML = optionsFor(T, st, numeric, '(choose)');
     E.t.innerHTML = optionsFor(T, st, numeric, '(none: use the sampling rate)');
-    if (E.labels) E.labels.innerHTML = optionsFor(T, st, numeric, '(none)');
+    if (E.labels) E.labels.innerHTML = optionsFor(T, st, canBeLabels, '(none)');
     if (E.prob) E.prob.innerHTML = optionsFor(T, st, numeric, '(none)');
     E.vcol.innerHTML = optionsFor(T, st, numeric, '(all samples)');
     E.splitCol.innerHTML = optionsFor(T, st, (c, s) => s.nominal || s.isInt, '');
@@ -166,16 +167,21 @@
       row.className = 'import-col';
       row.innerHTML = '<span class="nm"></span><div class="roles"></div><span class="st"></span><canvas></canvas>';
       row.querySelector('.nm').textContent = c.name;
-      row.querySelector('.st').textContent = s.nominal ? 'text · ' + s.distinct + ' values' : 'range ' + fmt(s.min) + ' … ' + fmt(s.max) + (s.nanFrac > 0.005 ? ' · ' + Math.round(s.nanFrac * 100) + '% empty' : '');
+      row.querySelector('.st').textContent = s.nominal
+        ? 'text · ' + s.distinct + ' values'
+        : (s.isBool ? 'boolean (0/1) · ' : '') + 'range ' + fmt(s.min) + ' … ' + fmt(s.max) + (s.nanFrac > 0.005 ? ' · ' + Math.round(s.nanFrac * 100) + '% empty' : '');
       const roles = row.querySelector('.roles');
-      if (!s.nominal) {
-        for (const [key, lbl, tip] of [
-          ['x', 'X', 'Horizontal eye position (X)'],
-          ['y', 'Y', 'Vertical eye position (Y)'],
-          ['t', 'T', 'Time column'],
-          ['labels', 'L', 'Labels / pre-labels column'],
-          ['prob', 'P', 'Predictive probability P(saccade) column'],
-        ]) {
+      const roleSpecs = !s.nominal
+        ? [
+            ['x', 'X', 'Horizontal eye position (X)'],
+            ['y', 'Y', 'Vertical eye position (Y)'],
+            ['t', 'T', 'Time column'],
+            ['labels', 'L', 'Labels / boolean column (ground truth)'],
+            ['prob', 'P', 'Predictive probability P(saccade) column'],
+          ]
+        : (s.distinct === 2 ? [['labels', 'L', 'Labels / boolean column (ground truth)']] : []);
+      if (roleSpecs.length) {
+        for (const [key, lbl, tip] of roleSpecs) {
           const b = document.createElement('button');
           b.type = 'button'; b.className = 'import-role'; b.textContent = lbl; b.title = tip; b.dataset.role = key; b.dataset.i = i;
           b.addEventListener('click', () => {

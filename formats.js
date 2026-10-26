@@ -142,7 +142,7 @@
       for (let i = 0; i < count; i++) data.push(dec.decode(u8.subarray(start + i * L, start + (i + 1) * L)).replace(/\0+$/, ''));
     } else throw new Error('Unsupported array type ' + descr + ' (object arrays / pickles cannot be read: save with plain numeric arrays).');
     if (fortran && shape.length === 2) data = transpose(data, shape[0], shape[1], true);
-    return { shape, data };
+    return { shape, data, isBool: descr === '|b1' };
   }
 
   // 2-D re-ordering: fromF=true: data is column-major (r x c) -> row-major
@@ -158,7 +158,7 @@
     for (const name of Object.keys(files)) {
       if (!name.endsWith('.npy')) continue;
       const a = parseNpy(files[name]);
-      vars[name.slice(0, -4)] = { shape: a.shape, data: a.data };
+      vars[name.slice(0, -4)] = { shape: a.shape, data: a.data, isBool: !!a.isBool };
     }
     return vars;
   }
@@ -261,7 +261,7 @@
       if (flags & 0x0800) return null;                                                       // complex: ignored
       const data = count ? numbersOf(u8, t4) : new Float64Array(0);
       const shape = dims.length === 2 ? dims : dims;
-      return { name, cls: 'numeric', dims: shape, data, order: 'F' };
+      return { name, cls: 'numeric', dims: shape, data, order: 'F', isBool: Boolean(flags & 0x0200) };
     }
     if (cls === MX.STRUCT) {                                                                 // fields -> {cls: 'struct', dims, fields, elems: [{field: matrix}]}
       const tl = readTag(u8, t3.next), fl = dv.getInt32(tl.body, true);
@@ -335,13 +335,16 @@
           const shape = item.shape || [];
           const count = shape.reduce((a, b) => a * b, 1);
           const wanted = H5_WANTED.test(k) || H5_WANTED.test(prefix.split('/')[0] || '');
-          const small1Dor2Col = !H5_SKIP.test(k) && count <= 4e7 && (shape.length <= 1 || (shape.length === 2 && Math.min(shape[0], shape[1]) <= 2));
+          const small1Dor2Col = !H5_SKIP.test(k) && count <= 4e7 && shape.length <= 2;
           if (!all && !wanted && !small1Dor2Col) continue;
           if (all && count > 4e7) continue;
           let v; try { v = item.value; } catch (e) { continue; }
+          const isBoolArr = Array.isArray(v) && v.length > 0 && typeof v[0] === 'boolean';
+          if (isBoolArr) v = Uint8Array.from(v, x => x ? 1 : 0);
+          const isEnumBool = Boolean(item.metadata && item.metadata.type === 8);
           const isStrArr = Array.isArray(v) && v.length <= 100000 && (v.length === 0 || typeof v[0] === 'string');
           if (all && !ArrayBuffer.isView(v) && typeof v !== 'number' && !isStrArr) continue;
-          vars[(prefix + k).replace(/^(trials?[^/]*)\//i, '$1/')] = { shape, data: (v && v.constructor && v.constructor.name === 'BigInt64Array') ? Float64Array.from(v, Number) : v };
+          vars[(prefix + k).replace(/^(trials?[^/]*)\//i, '$1/')] = { shape, data: (v && v.constructor && v.constructor.name === 'BigInt64Array') ? Float64Array.from(v, Number) : v, isBool: isBoolArr || isEnumBool };
         }
       };
       walk(f, '');
@@ -373,7 +376,7 @@
   // ---------------------------------------------------------------- vars -> trials
   // v: {shape, data} (C order) or MAT {cls, dims, data (F order), cells, strings}. Returns plain objects.
   function toC(v) {
-    if (v.cls === 'numeric') { const d = v.dims; if (d.length === 2 && d[0] > 1 && d[1] > 1) return { shape: d, data: transpose(v.data, d[0], d[1], true) }; return { shape: d, data: v.data }; }
+    if (v.cls === 'numeric') { const d = v.dims; if (d.length === 2 && d[0] > 1 && d[1] > 1) return { shape: d, data: transpose(v.data, d[0], d[1], true), isBool: !!v.isBool }; return { shape: d, data: v.data, isBool: !!v.isBool }; }
     return v;
   }
   const lc = vars => { const o = {}; for (const k of Object.keys(vars)) o[k.toLowerCase()] = vars[k]; return o; };
@@ -431,8 +434,8 @@
 
     const SKIP_KEYS = /^(xy|eye|x|y|trials|trial_offset|trial_lengths|lengths|names|fs|@.*)$/i;
     const candidates = [];
-    const summarizeArr = (arr) => {
-      if (!arr || !arr.length) return { min: NaN, max: NaN, isInt: false, hasNeg: false };
+    const summarizeArr = (arr, vIsBool) => {
+      if (!arr || !arr.length) return { min: NaN, max: NaN, isInt: false, isBool: !!vIsBool, hasNeg: false };
       let min = Infinity, max = -Infinity, isInt = true, hasNeg = false, finite = 0;
       const step = Math.max(1, Math.floor(arr.length / 5000));
       for (let i = 0; i < arr.length; i += step) {
@@ -445,7 +448,9 @@
           if (v < 0) hasNeg = true;
         }
       }
-      return { min: finite ? min : NaN, max: finite ? max : NaN, isInt: finite > 0 && isInt, hasNeg };
+      const intOk = finite > 0 && isInt;
+      const isBool = Boolean(vIsBool || (intOk && min >= 0 && max <= 1));
+      return { min: finite ? min : NaN, max: finite ? max : NaN, isInt: intOk, isBool, hasNeg };
     };
 
     for (const origKey of Object.keys(vars0)) {
@@ -453,12 +458,13 @@
       const v = vars0[origKey];
       if (!v) continue;
       if (layout === 'cells' && v.cells && v.cells.length === nTrials && v.cells[0] && toC(v.cells[0]).data) {
-        const st = summarizeArr(toC(v.cells[0]).data);
+        const c0 = toC(v.cells[0]);
+        const st = summarizeArr(c0.data, v.isBool || c0.isBool);
         candidates.push({ name: origKey, length: nSamples, ...st });
       } else if (layout === '2d' && shape2D) {
         const c = toC(v);
         if (c && c.shape && c.shape.length === 2 && c.shape[0] === shape2D[0] && c.shape[1] === shape2D[1] && c.data && ArrayBuffer.isView(c.data)) {
-          const st = summarizeArr(c.data);
+          const st = summarizeArr(c.data, v.isBool || c.isBool);
           candidates.push({ name: origKey, length: nSamples, ...st });
         }
       } else {
@@ -468,7 +474,7 @@
         const is1D = sh.length === 1 || (sh.length === 2 && (sh[0] === 1 || sh[1] === 1));
         const len = c.data.length;
         if (is1D && ((layout === 'concat' && len === nSamples) || (!layout && len >= 20))) {
-          const st = summarizeArr(c.data);
+          const st = summarizeArr(c.data, v.isBool || c.isBool);
           candidates.push({ name: origKey, length: len, ...st });
         }
       }
@@ -476,7 +482,7 @@
 
     for (const c of candidates) {
       const rng = isFinite(c.min) ? (c.isInt ? `${c.min}…${c.max}` : `${Number(c.min.toFixed(3))}…${Number(c.max.toFixed(3))}`) : 'empty';
-      c.summary = `${c.isInt ? 'int · ' : ''}${rng} · ${c.length.toLocaleString()} samples`;
+      c.summary = `${c.isBool ? 'bool (0/1) · ' : c.isInt ? 'int · ' : ''}${rng} · ${c.length.toLocaleString()} samples`;
     }
 
     let defaultLabelsVar = '', defaultLabelsRole = 'prelabels', defaultProbVar = '';
@@ -491,7 +497,7 @@
       defaultLabelsVar = byLc.get('predlabels').name;
       defaultLabelsRole = 'prelabels';
     } else {
-      const m = candidates.find(c => /^(saccade_?labels?|label|events?|gt|ground_?truth)$/i.test(c.name) && c.isInt && c.min >= -1 && c.max <= 4);
+      const m = candidates.find(c => /^(saccade_?labels?|label|l|events?|gt|ground_?truth|is_?sacc\w*|saccade_?mask|saccade_?bool|bool_?labels?)$/i.test(c.name) && (c.isBool || (c.isInt && c.min >= -1 && c.max <= 4)));
       if (m) { defaultLabelsVar = m.name; defaultLabelsRole = m.hasNeg ? 'reviewed' : 'prelabels'; }
     }
 
@@ -514,6 +520,126 @@
       defaultLabelsRole,
       defaultProbVar,
     };
+  }
+
+  // Lists candidate label / boolean variables in vars0 that match an existing trials array (or standalone layout)
+  function listLabelVars(vars0, trials) {
+    const vars = lc(vars0);
+    const nTrials = trials && trials.length ? trials.length : 0;
+    const totalSamples = nTrials ? trials.reduce((a, t) => a + t.x.length, 0) : 0;
+    const maxTrialLen = nTrials ? Math.max(...trials.map(t => t.x.length)) : 0;
+    const offV = vars.trial_offset ? toC(vars.trial_offset) : null;
+    const offTotal = (offV && offV.data && offV.data.length >= 2) ? Number(offV.data[offV.data.length - 1]) : 0;
+    const SKIP = /^(xy|eye|x|y|trials|trial_offset|trial_lengths|lengths|names|fs|@.*)$/i;
+    const out = [];
+    for (const origKey of Object.keys(vars0 || {})) {
+      if (SKIP.test(origKey)) continue;
+      const v = vars0[origKey];
+      if (!v) continue;
+      let sampleArr = null, length = 0, matches = false;
+      if (v.cells && (!nTrials || v.cells.length >= nTrials) && v.cells[0] && toC(v.cells[0]).data) {
+        sampleArr = toC(v.cells[0]).data;
+        length = v.cells.reduce((a, cl) => a + (toC(cl).data ? toC(cl).data.length : 0), 0);
+        matches = true;
+      } else {
+        const c = toC(v);
+        if (!c || !c.data || !ArrayBuffer.isView(c.data)) continue;
+        sampleArr = c.data;
+        length = c.data.length;
+        const sh = c.shape || c.dims || [length];
+        const is1D = sh.length === 1 || (sh.length === 2 && (sh[0] === 1 || sh[1] === 1));
+        const is2D = sh.length === 2 && sh[0] > 1 && sh[1] > 1;
+        if (is1D && (!nTrials || length === totalSamples || (offTotal > 0 && length === offTotal) || (nTrials === 1 && length >= trials[0].x.length))) matches = true;
+        else if (is2D && (!nTrials || (sh[0] === nTrials && sh[1] >= maxTrialLen) || (sh[1] === nTrials && sh[0] >= maxTrialLen))) matches = true;
+      }
+      if (!matches || !sampleArr || !sampleArr.length) continue;
+      let min = Infinity, max = -Infinity, isInt = true, hasNeg = false, finite = 0;
+      const step = Math.max(1, Math.floor(sampleArr.length / 5000));
+      for (let i = 0; i < sampleArr.length; i += step) {
+        const val = sampleArr[i];
+        if (val === val && isFinite(val)) {
+          finite++;
+          if (val < min) min = val;
+          if (val > max) max = val;
+          if (val !== Math.floor(val)) isInt = false;
+          if (val < 0) hasNeg = true;
+        }
+      }
+      if (!finite) continue;
+      const intOk = isInt;
+      const isBool = Boolean(v.isBool || (intOk && min >= 0 && max <= 1));
+      const isLabelLike = isBool || (intOk && min >= -1 && max <= 4);
+      const rng = intOk ? `${min}…${max}` : `${Number(min.toFixed(3))}…${Number(max.toFixed(3))}`;
+      const summary = `${isBool ? 'bool (0/1) · ' : intOk ? 'int · ' : ''}${rng} · ${length.toLocaleString()} samples`;
+      out.push({ name: origKey, length, min, max, isInt: intOk, isBool, isLabelLike, hasNeg, summary });
+    }
+    out.sort((a, b) => (b.isLabelLike ? 1 : 0) - (a.isLabelLike ? 1 : 0) || (b.isBool ? 1 : 0) - (a.isBool ? 1 : 0));
+    let defaultVar = '';
+    const byLc = new Map(out.map(c => [c.name.toLowerCase(), c]));
+    for (const pref of ['labels', 'pred_labels', 'predlabels', 'l', 'is_saccade', 'saccade']) {
+      if (byLc.has(pref)) { defaultVar = byLc.get(pref).name; break; }
+    }
+    if (!defaultVar) {
+      const m = out.find(c => c.isLabelLike && !/^(observed|reviewed)$/i.test(c.name)) || out[0];
+      if (m) defaultVar = m.name;
+    }
+    return { vars: out, defaultVar };
+  }
+
+  // Extracts a boolean or integer label variable from vars0 into an array of Int8Arrays matching trials
+  function extractLabelsFromVars(vars0, trials, varName) {
+    if (!vars0 || !trials || !trials.length) return null;
+    const vars = lc(vars0);
+    let key = varName;
+    if (!key) {
+      const listed = listLabelVars(vars0, trials);
+      key = listed.defaultVar;
+    }
+    if (!key) return null;
+    const v0 = vars[key.toLowerCase()];
+    if (!v0) return null;
+    const toLabArray = (src, len) => {
+      const arr = new Int8Array(len);
+      for (let i = 0; i < len; i++) {
+        const v = i < src.length ? src[i] : -1;
+        if (v === true) arr[i] = 1;
+        else if (v === false) arr[i] = 0;
+        else if (!(v === v && isFinite(v)) || v < 0) arr[i] = -1;
+        else arr[i] = Math.round(v);
+      }
+      return arr;
+    };
+    if (v0.cells && v0.cells.length >= trials.length) {
+      return trials.map((t, k) => toLabArray(toC(v0.cells[k]).data, t.x.length));
+    }
+    const L = toC(v0);
+    if (!L || !L.data) return null;
+    const sh = L.shape || L.dims || [L.data.length];
+    if (sh.length === 2 && sh[0] > 1 && sh[1] > 1) {
+      const [r, c] = sh;
+      if (r === trials.length) {
+        return trials.map((t, k) => toLabArray(L.data.subarray(k * c, (k + 1) * c), t.x.length));
+      }
+      if (c === trials.length) {
+        return trials.map((t, k) => {
+          const tmp = new Float64Array(t.x.length);
+          for (let i = 0; i < t.x.length && i < r; i++) tmp[i] = L.data[i * c + k];
+          return toLabArray(tmp, t.x.length);
+        });
+      }
+    }
+    let offs = null;
+    const offV = vars.trial_offset ? toC(vars.trial_offset) : null;
+    const lenV = (vars.trial_lengths || vars.lengths) ? toC(vars.trial_lengths || vars.lengths) : null;
+    if (offV && offV.data && offV.data.length >= trials.length + 1 && L.data.length >= offV.data[trials.length]) {
+      offs = Array.from(offV.data);
+    } else if (lenV && lenV.data && lenV.data.length >= trials.length) {
+      offs = [0]; for (let k = 0; k < trials.length; k++) offs.push(offs[offs.length - 1] + Number(lenV.data[k]));
+    } else {
+      offs = [0]; for (const t of trials) offs.push(offs[offs.length - 1] + t.x.length);
+    }
+    if (L.data.length < offs[trials.length]) return null;
+    return trials.map((t, k) => toLabArray(L.data.subarray(offs[k], offs[k + 1]), t.x.length));
   }
 
   // returns {trials: [{x, y, valid, name}], fs, labels: [Int8Array|null] or null, predLabels: [Int8Array] or null, prob: [Float32Array] or null, probParams}
@@ -705,5 +831,5 @@
     return buildH5(vars, { fs }, typeof h5 === 'function' ? await h5() : h5);
   }
 
-  return { readTrialsFile, readVarsFile, readNpz, readMat5, readH5, readZip, parseNpy, inspectVars, trialsFromVars, writeNpzFile, writeMatFile, writeH5File, buildNpz, buildMat5, buildH5, buildZip, crc32, extOf };
+  return { readTrialsFile, readVarsFile, readNpz, readMat5, readH5, readZip, parseNpy, inspectVars, listLabelVars, extractLabelsFromVars, trialsFromVars, writeNpzFile, writeMatFile, writeH5File, buildNpz, buildMat5, buildH5, buildZip, crc32, extOf };
 }));
