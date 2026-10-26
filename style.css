@@ -643,3 +643,17 @@ html, body {
     .import-collist { max-height: 26dvh; }
     .import-preview { height: 190px; }
 }
+
+/* Viewed periods overview (one row per trial) */
+.viewed-card { max-width: 1000px; }
+.viewed-legend { flex-wrap: wrap; gap: 12px; }
+.viewed-scroll {
+    position: relative;
+    height: 56vh;
+    overflow-y: auto;
+    background: #FAFAFA;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+#viewedCanvas { position: sticky; top: 0; display: block; width: 100%; cursor: crosshair; }
+.viewed-tip { min-height: 1.3em; margin-top: 0; font-family: monospace; }

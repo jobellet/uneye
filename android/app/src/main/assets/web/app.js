@@ -87,7 +87,21 @@
         previousPrelabels: null,
         wakeLock: null,
         initialWeightsMode: 'pretrained',
-        prelabelerMode: 'hmm',      // 'hmm' (label-free HMM, hmm_prelabel.js) or 'none'
+        prelabelerMode: 'hmm',      // 'hmm' (label-free HMM, hmm_prelabel.js), 'file' (the machine detection stored in the file: pred_labels, or prob thresholded) or 'none'
+
+        // Machine detection read from the file (never labels, never reviewed):
+        // prob[t] = Float32Array P(saccade) of the network (NaN = none) or null; fileEvents[t] = [{onset, offset, cls}] its detected events
+        // (pred_labels runs, or prob thresholded with the U'n'Eye post-processing) = the proposals of the 'file' source
+        prob: [],
+        hasProb: false,
+        probThreshold: 0.5,
+        fileEvents: [],
+        // viewedRanges[t] = merged [start, end] of every window drawn on screen (any pass, near misses)
+        viewedRanges: [],
+        // rejectedNearMisses[t] = [{onset, offset, at, peak}]: near misses the user judged "Not an Event"
+        rejectedNearMisses: [],
+        // Near-miss review (inside pass 2): queue of candidates of all trials sorted by decreasing peak probability
+        nearMiss: { active: false, queue: [], idx: 0, lower: 0.1 },
         netSuggestions: true,       // once a network has been trained: show its proposals (on) or the HMM's (off); toggle in the menu
         minNewSecondsForAutoTrain: 2.0,   // automatic training after a pass 2 needs at least this much newly reviewed data
 
@@ -186,6 +200,18 @@
         alertModal: document.getElementById('alertModal'),
         alertMessage: document.getElementById('alertMessage'),
         alertOkBtn: document.getElementById('alertOkBtn'),
+        nearMissBtn: document.getElementById('nearMissBtn'),
+        nearMissMenuBtn: document.getElementById('nearMissMenuBtn'),
+        nearMissMenuGroup: document.getElementById('nearMissMenuGroup'),
+        nearMissLowerInput: document.getElementById('nearMissLowerInput'),
+        viewedBtn: document.getElementById('viewedBtn'),
+        viewedModal: document.getElementById('viewedModal'),
+        viewedCloseBtn: document.getElementById('viewedCloseBtn'),
+        viewedScroll: document.getElementById('viewedScroll'),
+        viewedCanvas: document.getElementById('viewedCanvas'),
+        viewedSizer: document.getElementById('viewedSizer'),
+        viewedSummary: document.getElementById('viewedSummary'),
+        viewedTip: document.getElementById('viewedTip'),
     };
 
     const ctx = elements.canvas.getContext('2d');
@@ -346,7 +372,7 @@
     // Version of the trainer that produced a saved model. Models saved by earlier versions (random 3-class head:
     // saccades proposed as blinks, test F1 0) are dropped when a session is restored, with the proposals they made.
     const MODEL_VERSION = 2;
-    const APP_BUILD = '2026-10-25b';
+    const APP_BUILD = '2026-10-26a';
 
     function computeRobustSigma(arr, valid) {
         const vals = [];
@@ -581,9 +607,11 @@
         return out;
     }
 
-    function loadDataset(trials, rateHz = 1000.0, degPerUnit = 1.0, prelabeler = 'hmm') {
+    // extra (optional): {prob: [Float32Array], predLabels: [Int8Array], probParams: {threshold, merge_ms, min_dur_ms}} = the machine detection of the file
+    function loadDataset(trials, rateHz = 1000.0, degPerUnit = 1.0, prelabeler = 'hmm', extra = null) {
         state.trials = trials;
-        state.prelabelerMode = prelabeler === 'none' ? 'none' : 'hmm';
+        setFileDetection(trials, rateHz, extra);
+        state.prelabelerMode = prelabeler === 'none' ? 'none' : (state.fileEvents.some(Boolean) ? 'file' : 'hmm');
         if (elements.startModal) elements.startModal.classList.add('hidden');
         state.rateHz = rateHz;
         state.degPerUnit = degPerUnit;
@@ -602,6 +630,9 @@
         state.expertEvents = Array.from({ length: n }, () => []);
         state.prelabels = Array.from({ length: n }, () => []);
         state.undoStack = Array.from({ length: n }, () => []);
+        state.viewedRanges = Array.from({ length: n }, () => []);
+        state.rejectedNearMisses = Array.from({ length: n }, () => []);
+        state.nearMiss.active = false; state.nearMiss.queue = []; state.nearMiss.idx = 0;
 
         // Pick test set (every 4th trial, min 2)
         state.testTrials = new Set();
@@ -632,6 +663,32 @@
         });
     }
 
+    // --- Machine detection stored in the file (U'n'Eye output: pred_labels, prob) ---
+    // pred_labels -> proposals as they are; prob alone -> thresholded with the U'n'Eye post-processing (merge gaps < 5 ms, drop events < 5 ms)
+    function setFileDetection(trials, rateHz, extra) {
+        const n = trials.length, ex = extra || {};
+        const pp = ex.probParams || {};
+        state.probThreshold = pp.threshold > 0 && pp.threshold < 1 ? pp.threshold : 0.5;
+        state.prob = Array.from({ length: n }, (_, t) => (ex.prob && ex.prob[t] && ex.prob[t].length === trials[t].x.length) ? ex.prob[t] : null);
+        state.hasProb = state.prob.some(Boolean);
+        state.fileEvents = Array.from({ length: n }, (_, t) => {
+            if (ex.predLabels && ex.predLabels[t]) return UnEyeProb.eventsFromLabels(ex.predLabels[t]);
+            if (state.prob[t]) return UnEyeProb.eventsFromProb(state.prob[t], rateHz, { threshold: state.probThreshold, mergeMs: pp.merge_ms !== undefined ? pp.merge_ms : 5, minDurMs: pp.min_dur_ms !== undefined ? pp.min_dur_ms : 5 }).map(e => ({ onset: e.onset, offset: e.offset, cls: CLS_SACCADE }));
+            return null;
+        });
+        updateProbUI();
+    }
+
+    // the near-miss buttons exist only when the file gave a probability trace
+    function updateProbUI() {
+        if (elements.nearMissBtn) elements.nearMissBtn.classList.toggle('hidden', !state.hasProb);
+        if (elements.nearMissMenuGroup) elements.nearMissMenuGroup.classList.toggle('hidden', !state.hasProb);
+        if (elements.nearMissBtn) elements.nearMissBtn.textContent = state.nearMiss.active ? 'Exit near misses' : 'Near misses';
+        if (elements.nearMissMenuBtn) elements.nearMissMenuBtn.textContent = state.nearMiss.active ? 'Exit near misses' : 'Near misses';
+        if (elements.nearMissBtn) elements.nearMissBtn.classList.toggle('btn-accent', state.nearMiss.active);
+        if (elements.acceptPreBtn) elements.acceptPreBtn.textContent = state.nearMiss.active ? 'Accept' : 'Accept Pre-label';
+    }
+
     // --- Pre-labeler: label-free universal HMM + acceleration-zero boundaries (hmm_prelabel.js = the C++ detector "hmm_accel"), blinks = NaN runs ---
     // Proposals only: they never count as labels. A trained network replaces them only when the "Network suggestions" toggle is on.
     function runPrelabeler(trialIdx, mode) {
@@ -656,8 +713,12 @@
             }
         }
 
-        // 2. Saccades: HMM on the raw trace (unit-free score; the display filter is not used)
-        for (const e of UnEyeHMM.detect(tr.x, tr.y, tr.valid, state.rateHz)) {
+        // 2. Saccades: the file's own detection (pred_labels / prob), or the HMM on the raw trace (unit-free score; the display filter is not used)
+        const fileEv = mode === 'file' ? (state.fileEvents[trialIdx] || []) : null;
+        if (fileEv) for (const e of fileEv) {
+            if (e.cls === CLS_BLINK && !pre.some(b => b.cls === CLS_BLINK && !(e.offset < b.onset || e.onset > b.offset))) pre.push({ onset: e.onset, offset: e.offset, cls: CLS_BLINK });
+        }
+        for (const e of (fileEv ? fileEv.filter(e => e.cls === CLS_SACCADE) : UnEyeHMM.detect(tr.x, tr.y, tr.valid, state.rateHz))) {
             const overlapsBlink = pre.some(b => b.cls === CLS_BLINK && !(e.offset < b.onset || e.onset > b.offset));
             if (!overlapsBlink) pre.push({ onset: e.onset, offset: e.offset, cls: CLS_SACCADE });
         }
@@ -874,6 +935,7 @@
     // --- Pass Switching & Navigation ---
     function setPass(newPass) {
         resetGesture();
+        if (state.nearMiss.active) { state.nearMiss.active = false; updateProbUI(); }
         const leavingPassTwo = state.pass === PASS_TWO && newPass === PASS_ONE;
         if (state.pass === PASS_ONE && newPass === PASS_TWO) scanCurrentWindow();     // the window on screen has been seen
         state.pass = newPass;
@@ -952,6 +1014,7 @@
      * Window: centered on [putativeOnset, putativeOffset] with ±50 ms padding around the event.
      */
     function focusCurrentMark() {
+        if (state.nearMiss.active) { nmFocus(); return; }
         const trialIdx = state.currentTrialIdx;
         if (state.refineQueue.length === 0) {
             const nt = findTrialWithEvents(trialIdx, 1);
@@ -1035,6 +1098,120 @@
             const clsName = state.activeClass === CLS_SACCADE ? "Saccade" : "Blink";
             elements.eventCounterBadge.textContent = `Event ${state.refineIdx + 1}/${state.refineQueue.length} (${clsName})`;
         }
+    }
+
+    // --- Near misses: potential events the network did not detect (P(saccade) peak below the threshold), all trials, highest peak first ---
+    // A sub-mode of pass 2 (same frame, handles, gestures); Accept = an expert saccade with the current bounds, Not an Event = rejected
+    // (kept, saved) and the window on screen counts as seen (reviewed as fixation).
+    function nearMissExclusions(t) {
+        const ex = [];
+        for (const e of state.expertEvents[t] || []) ex.push([e.onset, e.offset]);
+        for (const p of state.prelabels[t] || []) if (p.cls === CLS_SACCADE) ex.push([p.onset, p.offset]);
+        for (const r of state.rejectedNearMisses[t] || []) ex.push([r.onset, r.offset]);
+        return ex;
+    }
+    function buildNearMissQueue() {
+        state.nearMiss.queue = UnEyeProb.buildNearMissQueue(state.prob, { lower: state.nearMiss.lower, threshold: state.probThreshold, excludeOf: nearMissExclusions });
+        state.nearMiss.idx = 0;
+        return state.nearMiss.queue;
+    }
+    function enterNearMiss() {
+        if (!state.hasProb || !state.trials.length) return;
+        if (state.pass !== PASS_TWO) setPass(PASS_TWO);
+        resetGesture();
+        state.nearMiss.active = true;
+        state.zoomMultiplier = 1.0;
+        buildNearMissQueue();
+        elements.passIndicator.textContent = `Near misses (P < ${state.probThreshold})`;
+        elements.passIndicator.className = "badge pass-badge pass-two";
+        updateProbUI();
+        nmFocus();
+        updateStatus();
+        render();
+    }
+    function exitNearMiss() {
+        if (!state.nearMiss.active) return;
+        resetGesture();
+        state.nearMiss.active = false;
+        updateProbUI();
+        elements.passIndicator.textContent = "Pass 2: Refine (Onset / Offset)";
+        state.zoomMultiplier = 1.0;
+        buildRefineQueue();
+        state.refineIdx = 0;
+        focusCurrentMark();
+        updateStatus();
+        render();
+    }
+    const nmOverlapsExpert = c => (state.expertEvents[c.trial] || []).some(e => !(c.offset < e.onset || c.onset > e.offset));
+    function nmFocus() {
+        const nm = state.nearMiss, q = nm.queue;
+        if (nm.idx >= q.length) nm.idx = q.length - 1;
+        if (nm.idx < 0) nm.idx = 0;
+        while (q.length && nmOverlapsExpert(q[nm.idx])) {          // labelled in the meantime (pass 1, a gesture): no longer a near miss
+            q.splice(nm.idx, 1);
+            if (nm.idx >= q.length) nm.idx = q.length - 1;
+            if (nm.idx < 0) nm.idx = 0;
+        }
+        if (!q.length) {
+            state.currentMarkAt = -1;
+            state.currentPutativeOnset = -1;
+            state.currentPutativeOffset = -1;
+            if (elements.eventCounterBadge) elements.eventCounterBadge.textContent = 'No near misses left ✓';
+            return;
+        }
+        const c = q[nm.idx];
+        if (state.currentTrialIdx !== c.trial) { state.currentTrialIdx = c.trial; state.undoStack[c.trial] = state.undoStack[c.trial] || []; }
+        state.activeClass = CLS_SACCADE;
+        state.currentMarkAt = c.at;
+        state.currentPutativeOnset = c.onset;
+        state.currentPutativeOffset = c.offset;
+        const mult = state.zoomMultiplier || 1.0;
+        const pad50ms = Math.round(50.0 * (state.rateHz / 1000.0) * mult);
+        const evCenter = Math.round((c.onset + c.offset) / 2);
+        const halfSpan = Math.max(pad50ms, Math.round((c.offset - c.onset) / 2) + pad50ms);
+        state.fromSample = Math.max(0, evCenter - halfSpan);
+        state.toSample = Math.min(curLen() - 1, evCenter + halfSpan);
+        if (elements.eventCounterBadge) elements.eventCounterBadge.textContent = nmLabel();
+    }
+    function nmLabel() {
+        const q = state.nearMiss.queue, c = q[state.nearMiss.idx];
+        return c ? `Near miss ${state.nearMiss.idx + 1}/${q.length} (p = ${(Math.floor(c.peak * 100) / 100).toFixed(2)})` : 'No near misses left ✓';      // truncated: 0.499 reads 0.49, not 0.50
+    }
+    // Accept: an expert saccade with the given bounds (as a pass-2 refinement), then the next candidate
+    function nmAccept(onset, offset) {
+        const nm = state.nearMiss, c = nm.queue[nm.idx];
+        if (!c) return false;
+        if (onset === undefined) { onset = state.currentPutativeOnset >= 0 ? state.currentPutativeOnset : c.onset; offset = state.currentPutativeOffset >= 0 ? state.currentPutativeOffset : c.offset; }
+        refineMark(c.trial, c.at, onset, offset, CLS_SACCADE);
+        nm.queue.splice(nm.idx, 1);
+        state.zoomMultiplier = 1.0;
+        nmFocus();
+        return true;
+    }
+    // Not an Event: rejected (kept in the session and the saved labels), the window on screen counts as seen (reviewed as fixation)
+    function nmReject() {
+        const nm = state.nearMiss, c = nm.queue[nm.idx];
+        if (!c) return false;
+        const t = c.trial;
+        if (!state.rejectedNearMisses[t]) state.rejectedNearMisses[t] = [];
+        state.rejectedNearMisses[t].push({ onset: c.onset, offset: c.offset, at: c.at, peak: Math.round(c.peak * 1e4) / 1e4 });
+        if (state.scanWins[t] && t === state.currentTrialIdx) {
+            const f = Math.max(0, state.fromSample), e = Math.min(trialLenOf(t) - 1, state.toSample);
+            if (!state.scanWins[t].some(r => r[0] === f && r[1] === e)) state.scanWins[t].push([f, e]);
+        }
+        recomputeReviewed(t, true);
+        nm.queue.splice(nm.idx, 1);
+        state.zoomMultiplier = 1.0;
+        nmFocus();
+        return true;
+    }
+    function nmStep(dir) {
+        const nm = state.nearMiss;
+        if (!nm.queue.length) return;
+        nm.idx = Math.max(0, Math.min(nm.queue.length - 1, nm.idx + dir));
+        state.zoomMultiplier = 1.0;
+        resetGesture();
+        nmFocus();
     }
 
     // Pass 1: next window of the same trial (10 % overlap), then the first window of the next trial
@@ -1152,12 +1329,16 @@
         }
 
         ensureDerived(state.currentTrialIdx);
+        markViewed();
 
         // Layout lanes (2 lanes: position X and Y on the same axes, then speed) with top margin in Pass 2 so header never collides with the trace
         const topMargin = state.pass === PASS_TWO ? 26 : 0;
         const availH = height - topMargin;
         const posLane = { top: topMargin, bottom: topMargin + availH * 0.66 };
-        const speedLane = { top: posLane.bottom, bottom: height };
+        // a file with the network's P(saccade): a thin band at the bottom (0..1), under the speed
+        const probArr = state.prob[state.currentTrialIdx] || null;
+        const probH = probArr ? Math.max(30, Math.min(64, Math.round(availH * 0.14))) : 0;
+        const speedLane = { top: posLane.bottom, bottom: height - probH };
 
         // 1. Draw Grid & Lane Dividers
         ctx.strokeStyle = '#ECEFF1';
@@ -1176,10 +1357,71 @@
 
         // 4. Draw Velocity Lane
         drawVelocity(tr, speedLane, '#7E57C2', 'Velocity (°/s)', width);
+        if (probArr) drawProbBand(probArr, { top: height - probH, bottom: height }, width);
 
         // 5. Draw Prelabels & Annotations
         drawAnnotations(width, height);
 
+    }
+
+    // every window drawn on screen is recorded as viewed (merged ranges per trial, autosaved, saved in the labels file)
+    function markViewed() {
+        const t = state.currentTrialIdx;
+        if (!state.trials[t]) return;
+        if (!state.viewedRanges[t]) state.viewedRanges[t] = [];
+        const n = trialLenOf(t), s = Math.max(0, Math.min(n - 1, state.fromSample)), e = Math.max(0, Math.min(n - 1, state.toSample));
+        if (e < s) return;
+        const next = UnEyeProb.addRange(state.viewedRanges[t], s, e, n);
+        if (next !== state.viewedRanges[t]) { state.viewedRanges[t] = next; saveToIndexedDB(); }
+    }
+
+    // P(saccade) of the network (file variable prob): line 0..1, dashed line at the threshold; in near-miss mode a dotted line at the lower bound
+    function drawProbBand(prob, lane, w) {
+        const from = state.fromSample, last = Math.min(state.toSample, prob.length - 1);
+        const y0 = lane.bottom - 3, y1 = lane.top + 4, yOf = p => y0 - Math.max(0, Math.min(1, p)) * (y0 - y1);
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 243, 224, 0.55)';
+        ctx.fillRect(0, lane.top, w, lane.bottom - lane.top);
+        ctx.strokeStyle = '#ECEFF1'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, lane.top + 0.5); ctx.lineTo(w, lane.top + 0.5); ctx.stroke();
+        const thr = state.probThreshold;
+        ctx.strokeStyle = 'rgba(230, 81, 0, 0.75)'; ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(0, yOf(thr)); ctx.lineTo(w, yOf(thr)); ctx.stroke();
+        if (state.nearMiss.active) {
+            ctx.strokeStyle = 'rgba(230, 81, 0, 0.45)'; ctx.setLineDash([2, 3]);
+            ctx.beginPath(); ctx.moveTo(0, yOf(state.nearMiss.lower)); ctx.lineTo(w, yOf(state.nearMiss.lower)); ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.font = '500 11px var(--font-stack)';
+        ctx.fillStyle = '#E65100';
+        ctx.textAlign = 'left';
+        ctx.fillText('P(saccade)', 16, lane.top + 12);
+        ctx.textAlign = 'right';
+        ctx.fillText(String(thr), w - 16, yOf(thr) - 2);
+        ctx.strokeStyle = '#EF6C00';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        let started = false;
+        if (last - from + 1 > 2 * w) {                  // one min-max pair per pixel column; NaN breaks the line
+            let col = NaN, lo = 0, hi = 0;
+            const flush = () => { const px = col + 0.5; if (!started) { ctx.moveTo(px, yOf(lo)); started = true; } else ctx.lineTo(px, yOf(lo)); if (hi !== lo) ctx.lineTo(px, yOf(hi)); };
+            for (let i = from; i <= last; i++) {
+                const v = prob[i];
+                if (v !== v) { if (col === col) flush(); col = NaN; started = false; continue; }
+                const c = Math.floor(sampleToPx(i, w));
+                if (c !== col) { if (col === col) flush(); col = c; lo = hi = v; } else { if (v < lo) lo = v; if (v > hi) hi = v; }
+            }
+            if (col === col) flush();
+        } else {
+            for (let i = from; i <= last; i++) {
+                const v = prob[i];
+                if (v !== v) { started = false; continue; }
+                const px = sampleToPx(i, w), py = yOf(v);
+                if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+            }
+        }
+        ctx.stroke();
+        ctx.restore();
     }
 
     function drawEmptyState(w, h) {
@@ -1423,6 +1665,14 @@
             ctx.setLineDash([]);
         }
 
+        // 1b. Rejected near misses: an orange bar at the top
+        for (const r of (state.rejectedNearMisses[trialIdx] || [])) {
+            if (r.offset < state.fromSample || r.onset > state.toSample) continue;
+            const x1 = sampleToPx(r.onset, w), x2 = sampleToPx(r.offset, w);
+            ctx.fillStyle = 'rgba(251, 140, 0, 0.8)';
+            ctx.fillRect(x1, 4, Math.max(3, x2 - x1), 5);
+        }
+
         // 2. Point marks (Pass 1 - Triangles)
         for (const m of state.pointMarks[trialIdx]) {
             if (m.at < state.fromSample || m.at > state.toSample) continue;
@@ -1485,7 +1735,9 @@
             ctx.textAlign = 'center';
             const clsName = state.activeClass === CLS_SACCADE ? 'Saccade' : 'Blink';
             const durMs = Math.round((offset - onset) * (1000.0 / state.rateHz));
-            const bannerText = w < 520
+            const bannerText = state.nearMiss.active
+                ? (w < 520 ? `${nmLabel()} [${onset}..${offset}]` : `${nmLabel()}: trial ${state.currentTrialIdx + 1}, [${onset}..${offset}] (${durMs} ms) — Accept, drag the bounds, or Not an Event`)
+                : w < 520
                 ? `Event ${state.refineIdx + 1}/${state.refineQueue.length} (${clsName}, ${durMs} ms) [${onset}..${offset}]`
                 : `Pass 2: Event ${state.refineIdx + 1}/${state.refineQueue.length} (${clsName}) — Putative: [${onset}..${offset}] (${durMs} ms) — Window: [-50ms .. +50ms]`;
             ctx.fillText(bannerText, w / 2, 17);
@@ -1646,7 +1898,9 @@
                         // Completed Span Drag
                         const onset = Math.min(state.dragStartSample, state.dragCurrentSample);
                         const offset = Math.max(state.dragStartSample, state.dragCurrentSample);
-                        if (offset - onset >= 5) {
+                        if (offset - onset >= 5 && state.nearMiss.active && state.currentMarkAt >= 0) {
+                            nmAccept(onset, offset);          // near miss: the dragged span is the accepted saccade
+                        } else if (offset - onset >= 5) {
                             const markAt = state.currentMarkAt >= 0 ? state.currentMarkAt : state.dragStartSample;
                             const prevLen = state.refineQueue.length;
                             refineMark(state.currentTrialIdx, markAt, onset, offset, state.activeClass);
@@ -1701,6 +1955,11 @@
     function commitHandleDrag(hd) {
         const t = state.currentTrialIdx;
         if (hd.onset === hd.on0 && hd.offset === hd.off0) return;
+        if (!hd.ev && state.nearMiss.active) {          // near miss: the bounds move, Accept stores them
+            const c = state.nearMiss.queue[state.nearMiss.idx];
+            if (c) { c.onset = hd.onset; c.offset = hd.offset; }
+            return;
+        }
         if (hd.ev) {
             saveUndo(t);
             const i = state.expertEvents[t].indexOf(hd.ev);
@@ -1711,7 +1970,7 @@
         } else {
             refineMark(t, state.currentMarkAt, hd.onset, hd.offset, state.activeClass);      // the proposal under refinement becomes a refined event
         }
-        if (state.pass !== PASS_TWO) return;
+        if (state.pass !== PASS_TWO || state.nearMiss.active) return;
         const at = hd.current ? Math.round((hd.onset + hd.offset) / 2) : state.currentMarkAt;
         buildRefineQueue();
         const i = state.refineQueue.findIndex(q => q.isExpert ? q.onset <= at && at <= q.offset : q.at === at);
@@ -1759,6 +2018,12 @@
         state.lastTapSample = sample;
 
         if (isDoubleTap) {
+            if (state.pass === PASS_TWO && state.currentMarkAt >= 0 && state.nearMiss.active) {
+                nmAccept();
+                updateStatus();
+                render();
+                return;
+            }
             if (state.pass === PASS_TWO && state.currentMarkAt >= 0) {
                 const onset = state.currentPutativeOnset >= 0 ? state.currentPutativeOnset : sample - 15;
                 const offset = state.currentPutativeOffset >= 0 ? state.currentPutativeOffset : sample + 15;
@@ -2148,7 +2413,9 @@
             const tx = db.transaction(STORE_NAME, 'readwrite');
             const store = tx.objectStore(STORE_NAME);
             if (savedTrials !== state.trials) {
-                store.put(state.trials.map(tr => ({ x: tr.x, y: tr.y, valid: tr.valid, name: tr.name })), 'autosave_trials');
+                // the file's probability trace goes with the traces (written once per dataset), as Uint16 (half the size of float32)
+                store.put(state.trials.map((tr, t) => ({ x: tr.x, y: tr.y, valid: tr.valid, name: tr.name,
+                    probQ: state.prob[t] ? UnEyeProb.encodeProb(state.prob[t]) : null, fileEvents: state.fileEvents[t] || null })), 'autosave_trials');
                 savedTrials = state.trials;
             }
             const payload = {
@@ -2161,6 +2428,9 @@
                 pointMarks: state.pointMarks,
                 prelabels: state.prelabels,
                 prelabelerMode: state.prelabelerMode,
+                probThreshold: state.probThreshold,
+                viewedRanges: state.viewedRanges,
+                rejectedNearMisses: state.rejectedNearMisses,
                 rateHz: state.rateHz,
                 scale: state.scale,
                 convergenceHistory: state.convergenceHistory,
@@ -2200,6 +2470,14 @@
                 }));
                 savedTrials = data.trials ? null : state.trials;     // an old-format session is rewritten in the new layout at the next save
                 const n = state.trials.length;
+                state.prob = savedTr.map(tr => (tr.probQ && tr.probQ.length ? UnEyeProb.decodeProb(tr.probQ) : null));
+                state.hasProb = state.prob.some(Boolean);
+                state.fileEvents = savedTr.map(tr => tr.fileEvents || null);
+                state.probThreshold = data.probThreshold > 0 && data.probThreshold < 1 ? data.probThreshold : 0.5;
+                state.viewedRanges = Array.from({ length: n }, (_, t) => (data.viewedRanges && data.viewedRanges[t]) || []);
+                state.rejectedNearMisses = Array.from({ length: n }, (_, t) => (data.rejectedNearMisses && data.rejectedNearMisses[t]) || []);
+                state.nearMiss.active = false; state.nearMiss.queue = []; state.nearMiss.idx = 0;
+                updateProbUI();
                 state.undoStack = Array.from({ length: n }, () => []);
                 state.labels = data.labels.map(l => new Uint8Array(l));
                 state.reviewedRanges = data.reviewedRanges || Array.from({ length: n }, () => []);
@@ -2211,7 +2489,7 @@
                 state.prelabels = data.prelabels || Array.from({ length: n }, () => []);
                 state.rateHz = data.rateHz || 1000.0;
                 state.scale = data.scale || 1.0;
-                state.prelabelerMode = data.prelabelerMode === 'none' ? 'none' : 'hmm';
+                state.prelabelerMode = data.prelabelerMode === 'none' ? 'none' : ((data.prelabelerMode === 'file' && state.fileEvents.some(Boolean)) ? 'file' : 'hmm');
                 state.convergenceHistory = data.convergenceHistory || [];
                 state.trainedModelBin = data.trainedModelBin || null;
                 state.trainedModelJson = data.trainedModelJson || null;
@@ -2509,7 +2787,7 @@
                     if (!(elements.alwaysExplorer && elements.alwaysExplorer.checked)) { try { r = await UnEyeFormats.readTrialsFile(file.name, e.target.result, loadH5Lib); } catch (err) { r = null; } }
                     if (!r) { await loadWithExplorer(file, rate, scale, prelabeler); return; }
                     elements.loadModal.classList.add('hidden');
-                    loadDataset(r.trials, r.fs || rate, scale, prelabeler);
+                    loadDataset(r.trials, r.fs || rate, scale, prelabeler, { prob: r.prob, predLabels: r.predLabels, probParams: r.probParams });
                     if (r.labels) {
                         applyLoadedLabels(r.labels);
                     }
@@ -2517,7 +2795,7 @@
                         await loadPreviousLabels(pendingLabelsFile);
                     }
                     const lens = r.trials.map(t => t.x.length);
-                    console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples${r.fs ? ', ' + r.fs + ' Hz' : ''}${r.labels ? ', with labels' : ''}`);
+                    console.info(`${file.name}: ${r.trials.length} trials, ${Math.min(...lens)}-${Math.max(...lens)} samples${r.fs ? ', ' + r.fs + ' Hz' : ''}${r.labels ? ', with labels' : ''}${r.predLabels ? ', with pred_labels' : ''}${r.prob ? ', with prob' : ''}`);
                 } catch (err) {
                     elements.loadModal.classList.add('hidden');
                     alert('Cannot read ' + file.name + ': ' + err.message);
@@ -2683,6 +2961,8 @@
                 reviewedRanges: state.reviewedRanges[t],
                 expertEvents: state.expertEvents[t].map(e => ({ onset: e.onset, offset: e.offset, cls: e.cls })),
                 pointMarks: state.pointMarks[t],
+                viewedRanges: state.viewedRanges[t] || [],
+                rejectedNearMisses: state.rejectedNearMisses[t] || [],
             })),
         };
         const d = new Date(), p = v => String(v).padStart(2, '0');
@@ -2744,10 +3024,21 @@
             keptMarks.sort((a, b) => a.at - b.at);
             state.pointMarks[t] = keptMarks;
 
+            // 4) windows displayed and rejected near misses (files saved before these fields existed have none)
+            if (Array.isArray(src.viewedRanges)) state.viewedRanges[t] = UnEyeProb.mergeRanges([...(state.viewedRanges[t] || []), ...src.viewedRanges], n);
+            if (Array.isArray(src.rejectedNearMisses)) {
+                const rej = state.rejectedNearMisses[t] || (state.rejectedNearMisses[t] = []);
+                for (const r of src.rejectedNearMisses) {
+                    if (!(r && r.onset >= 0 && r.offset >= r.onset && r.offset < n)) continue;
+                    if (!rej.some(q => q.onset === r.onset && q.offset === r.offset)) rej.push({ onset: r.onset, offset: r.offset, at: r.at !== undefined ? r.at : r.onset, peak: r.peak });
+                }
+            }
+
             recomputeReviewed(t, false);
             syncRenderedLabels(t);
             applied++;
         }
+        if (state.nearMiss.active) buildNearMissQueue();
         if (state.pass === PASS_TWO) { buildRefineQueue(); state.refineIdx = 0; focusCurrentMark(); }
         updateStatus(); render(); saveToIndexedDB();
         alert(`Labels loaded for ${applied} trial(s)${skipped ? `; ${skipped} trial(s) skipped (name or length does not match)` : ''}.`);
@@ -2877,6 +3168,149 @@
             alert('Cannot open ' + filename + ': ' + e.message);
         }
     };
+
+    // lower bound of P(saccade) of a near miss (menu field, remembered)
+    function setNearMissLower(v) {
+        if (!(v > 0 && v < state.probThreshold)) { if (elements.nearMissLowerInput) elements.nearMissLowerInput.value = String(state.nearMiss.lower); return; }
+        state.nearMiss.lower = v;
+        try { localStorage.setItem('uneye_nearMissLower', String(v)); } catch (e) { }
+        if (elements.nearMissLowerInput) elements.nearMissLowerInput.value = String(v);
+        if (state.nearMiss.active) { buildNearMissQueue(); nmFocus(); updateStatus(); render(); }
+    }
+
+    // --- Viewed periods: one row per trial, time on x (samples from the trial start, all trials on the scale of the longest) ---
+    // The rows are drawn once per opening into an offscreen image of one pixel row per trial (one column per screen pixel, the highest
+    // category of the samples of each column), then scaled into the visible part of the scroll area: fast for thousands of trials.
+    const VIEW_RGB = [[255, 255, 255], [207, 216, 220], [144, 202, 249], [102, 187, 106], [251, 140, 0], [13, 71, 161], [198, 40, 40]];   // beyond the trial, not viewed, viewed, reviewed, rejected near miss, saccade, blink
+    const VIEW_LEFT = 46, VIEW_TOP = 18;
+    const viewed = { img: null, W: 0, maxLen: 1, rowH: 4 };
+
+    function viewedTotals() {
+        let total = 0, seen = 0, rev = 0, full = 0, rej = 0, nEv = 0;
+        for (let t = 0; t < state.trials.length; t++) {
+            const n = trialLenOf(t), v = UnEyeProb.rangeLength(state.viewedRanges[t]);
+            total += n; seen += v; rev += UnEyeProb.rangeLength(state.reviewedRanges[t]);
+            if (v >= n) full++;
+            rej += (state.rejectedNearMisses[t] || []).length;
+            nEv += (state.expertEvents[t] || []).length;
+        }
+        return { total, seen, rev, full, rej, nEv, n: state.trials.length };
+    }
+
+    function buildViewedImage(W) {
+        const n = state.trials.length;
+        let maxLen = 1; for (let t = 0; t < n; t++) maxLen = Math.max(maxLen, trialLenOf(t));
+        const off = document.createElement('canvas'); off.width = W; off.height = Math.max(1, n);
+        const octx = off.getContext('2d'), img = octx.createImageData(W, Math.max(1, n)), px = img.data;
+        const lvl = new Uint8Array(W), col = s => Math.max(0, Math.min(W - 1, Math.floor(s * W / maxLen)));
+        const paint = (s, e, level) => { for (let c = col(s), c1 = col(e); c <= c1; c++) if (lvl[c] < level) lvl[c] = level; };
+        for (let t = 0; t < n; t++) {
+            lvl.fill(0);
+            const L = trialLenOf(t);
+            lvl.fill(1, 0, Math.max(1, Math.ceil(L * W / maxLen)));
+            for (const r of state.viewedRanges[t] || []) paint(r[0], r[1], 2);
+            for (const r of state.reviewedRanges[t] || []) paint(r[0], r[1], 3);
+            for (const r of state.rejectedNearMisses[t] || []) paint(r.onset, r.offset, 4);
+            for (const e of state.expertEvents[t] || []) paint(e.onset, e.offset, e.cls === CLS_BLINK ? 6 : 5);
+            for (let c = 0, o = t * W * 4; c < W; c++, o += 4) { const rgb = VIEW_RGB[lvl[c]]; px[o] = rgb[0]; px[o + 1] = rgb[1]; px[o + 2] = rgb[2]; px[o + 3] = 255; }
+        }
+        octx.putImageData(img, 0, 0);
+        viewed.img = off; viewed.W = W; viewed.maxLen = maxLen;
+    }
+
+    function drawViewed() {
+        const sc = elements.viewedScroll, cv = elements.viewedCanvas;
+        if (!sc || !cv || elements.viewedModal.classList.contains('hidden')) return;
+        const dpr = window.devicePixelRatio || 1, cw = sc.clientWidth, ch = sc.clientHeight, n = state.trials.length;
+        if (cv.width !== Math.round(cw * dpr) || cv.height !== Math.round(ch * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); }
+        cv.style.height = ch + 'px';
+        if (elements.viewedSizer) elements.viewedSizer.style.height = Math.max(0, VIEW_TOP + n * viewed.rowH - ch) + 'px';
+        const c = cv.getContext('2d');
+        c.setTransform(dpr, 0, 0, dpr, 0, 0);
+        c.clearRect(0, 0, cw, ch);
+        const plotW = Math.max(10, cw - VIEW_LEFT - 8), rowH = viewed.rowH, top = sc.scrollTop;
+        if (!viewed.img || viewed.W !== Math.min(4000, Math.round(plotW * dpr))) buildViewedImage(Math.min(4000, Math.round(plotW * dpr)));
+        const first = Math.max(0, Math.floor(top / rowH)), last = Math.min(n - 1, Math.ceil((top + ch - VIEW_TOP) / rowH));
+        c.imageSmoothingEnabled = false;
+        if (last >= first) c.drawImage(viewed.img, 0, first, viewed.W, last - first + 1, VIEW_LEFT, VIEW_TOP + first * rowH - top, plotW, (last - first + 1) * rowH);
+        // current trial
+        const cy = VIEW_TOP + state.currentTrialIdx * rowH - top;
+        if (cy + rowH >= VIEW_TOP && cy <= ch) { c.strokeStyle = '#000'; c.lineWidth = 1; c.strokeRect(VIEW_LEFT - 0.5, cy - 0.5, plotW + 1, rowH + 1); }
+        // trial numbers on the left
+        c.clearRect(0, 0, VIEW_LEFT - 1, ch);
+        c.fillStyle = '#546E7A'; c.font = '500 10px sans-serif'; c.textAlign = 'right'; c.textBaseline = 'middle';
+        let step = 1; for (const k of [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]) { step = k; if (k * rowH >= 14) break; }
+        for (let t = Math.ceil(first / step) * step; t <= last; t += step) { const y = VIEW_TOP + t * rowH - top + rowH / 2; if (y > VIEW_TOP) c.fillText(String(t + 1), VIEW_LEFT - 5, y); }
+        // time axis (top strip)
+        c.clearRect(0, 0, cw, VIEW_TOP);
+        c.textBaseline = 'alphabetic'; c.textAlign = 'center';
+        const totalMs = viewed.maxLen * 1000 / state.rateHz;
+        let tick = 100; for (const k of [100, 200, 500, 1000, 2000, 5000, 10000, 20000, 60000]) { tick = k; if (plotW * k / totalMs >= 60) break; }
+        for (let ms = 0; ms <= totalMs; ms += tick) {
+            const x = VIEW_LEFT + plotW * ms / totalMs;
+            c.textAlign = ms === 0 ? 'left' : (x > VIEW_LEFT + plotW - 20 ? 'right' : 'center');
+            c.fillText(ms >= 1000 ? (ms / 1000) + ' s' : ms + ' ms', x, 12);
+        }
+        c.textAlign = 'right'; c.fillText('trial', VIEW_LEFT - 5, 12);
+    }
+
+    function viewedHit(e) {
+        const r = elements.viewedCanvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+        const plotW = Math.max(10, elements.viewedScroll.clientWidth - VIEW_LEFT - 8);
+        if (x < VIEW_LEFT || y < VIEW_TOP) return null;
+        const t = Math.floor((y - VIEW_TOP + elements.viewedScroll.scrollTop) / viewed.rowH);
+        if (t < 0 || t >= state.trials.length) return null;
+        const sample = Math.max(0, Math.min(trialLenOf(t) - 1, Math.round((x - VIEW_LEFT) / plotW * viewed.maxLen)));
+        return { t, sample, beyond: (x - VIEW_LEFT) / plotW * viewed.maxLen >= trialLenOf(t) };
+    }
+
+    // a click on a row: that trial, pass 1, the window that contains the time clicked
+    function jumpToTrialTime(t, sample) {
+        if (!state.trials[t]) return;
+        if (elements.viewedModal) elements.viewedModal.classList.add('hidden');
+        if (state.pass !== PASS_ONE) setPass(PASS_ONE); else scanCurrentWindow();
+        resetGesture();
+        state.currentTrialIdx = t;
+        state.zoomMultiplier = 1.0;
+        state.winIdx = Math.max(0, Math.min(numWindows(t) - 1, Math.floor(sample / winStep())));
+        applyGridWindow();
+        updateStatus();
+        render();
+    }
+
+    function openViewedPeriods() {
+        if (!state.trials.length || !elements.viewedModal) return;
+        const n = state.trials.length;
+        viewed.rowH = n <= 40 ? 14 : n <= 150 ? 8 : n <= 600 ? 5 : 4;
+        viewed.img = null;
+        const tot = viewedTotals(), pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '0.0') + ' %';
+        if (elements.viewedSummary) elements.viewedSummary.textContent = `Viewed ${pct(tot.seen, tot.total)} of the samples (${(tot.seen / state.rateHz).toFixed(1)} of ${(tot.total / state.rateHz).toFixed(1)} s), ` +
+            `${tot.full}/${tot.n} trials fully viewed · reviewed ${pct(tot.rev, tot.total)} · ${tot.nEv} expert events · ${tot.rej} rejected near misses`;
+        elements.viewedModal.classList.remove('hidden');
+        const sc = elements.viewedScroll;
+        requestAnimationFrame(() => {
+            sc.scrollTop = Math.max(0, state.currentTrialIdx * viewed.rowH - sc.clientHeight / 2);
+            drawViewed();
+        });
+    }
+
+    function setupViewedPeriods() {
+        const sc = elements.viewedScroll, cv = elements.viewedCanvas;
+        if (!sc || !cv) return;
+        let queued = false;
+        sc.addEventListener('scroll', () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; drawViewed(); }); });
+        window.addEventListener('resize', () => { viewed.img = null; drawViewed(); });
+        cv.addEventListener('mousemove', (e) => {
+            const h = viewedHit(e);
+            if (!h) { cv.title = ''; return; }
+            const t = h.t, n = trialLenOf(t), name = (state.trialNames && state.trialNames[t]) || state.trials[t].name || '';
+            const v = UnEyeProb.rangeLength(state.viewedRanges[t]), r = UnEyeProb.rangeLength(state.reviewedRanges[t]);
+            const txt = `Trial ${t + 1}/${state.trials.length}${name ? ' · ' + name : ''} · ${h.beyond ? 'after the end' : Math.round(h.sample * 1000 / state.rateHz) + ' ms'} (of ${Math.round(n * 1000 / state.rateHz)} ms) · viewed ${(100 * v / n).toFixed(0)} % · reviewed ${(100 * r / n).toFixed(0)} %`;
+            cv.title = txt;
+            if (elements.viewedTip) elements.viewedTip.textContent = txt;
+        });
+        cv.addEventListener('click', (e) => { const h = viewedHit(e); if (h) jumpToTrialTime(h.t, h.sample); });
+    }
 
     // --- Setup UI Listeners ---
     function setActiveClass(cls) {
@@ -3082,6 +3516,7 @@
 
         // Pass 2: Navigation across events
         elements.prevEventBtn.addEventListener('click', () => {
+            if (state.nearMiss.active) { nmStep(-1); updateStatus(); render(); return; }
             if (state.refineIdx > 0) {
                 state.refineIdx--;
             } else {
@@ -3096,6 +3531,7 @@
         });
 
         elements.nextEventBtn.addEventListener('click', () => {
+            if (state.nearMiss.active) { nmStep(1); updateStatus(); render(); return; }
             if (state.refineIdx < state.refineQueue.length - 1) {
                 state.refineIdx++;
             } else {
@@ -3110,6 +3546,7 @@
         });
 
         elements.notEventBtn.addEventListener('click', () => {
+            if (state.nearMiss.active) { nmReject(); updateStatus(); render(); return; }
             if (state.currentMarkAt >= 0) {
                 deleteMarkAt(state.currentTrialIdx, state.currentMarkAt);
                 buildRefineQueue();
@@ -3126,7 +3563,17 @@
             render();
         });
 
+        // Near misses (only with a probability trace): pass-2 button and menu button toggle the mode; the lower bound is remembered
+        const toggleNearMiss = () => { if (state.nearMiss.active) exitNearMiss(); else enterNearMiss(); };
+        if (elements.nearMissBtn) elements.nearMissBtn.addEventListener('click', toggleNearMiss);
+        if (elements.nearMissMenuBtn) elements.nearMissMenuBtn.addEventListener('click', toggleNearMiss);
+        if (elements.nearMissLowerInput) elements.nearMissLowerInput.addEventListener('change', e => setNearMissLower(parseFloat(e.target.value)));
+        if (elements.viewedBtn) elements.viewedBtn.addEventListener('click', openViewedPeriods);
+        if (elements.viewedCloseBtn) elements.viewedCloseBtn.addEventListener('click', () => elements.viewedModal.classList.add('hidden'));
+        setupViewedPeriods();
+
         elements.acceptPreBtn.addEventListener('click', () => {
+            if (state.nearMiss.active) { nmAccept(); updateStatus(); render(); return; }
             if (state.currentMarkAt >= 0) {
                 const onset = state.currentPutativeOnset >= 0 ? state.currentPutativeOnset : state.currentMarkAt - 15;
                 const offset = state.currentPutativeOffset >= 0 ? state.currentPutativeOffset : state.currentMarkAt + 15;
@@ -3148,6 +3595,8 @@
         try { const w = parseFloat(localStorage.getItem('uneye_winMs')); if (w >= 20) state.winMs = w; } catch (e) { }
         if (elements.winMsInput) elements.winMsInput.value = String(state.winMs);
         if (elements.modalWinMs) elements.modalWinMs.value = String(state.winMs);
+        try { const v = parseFloat(localStorage.getItem('uneye_nearMissLower')); if (v > 0 && v < 0.5) state.nearMiss.lower = v; } catch (e) { }
+        if (elements.nearMissLowerInput) elements.nearMissLowerInput.value = String(state.nearMiss.lower);
         setupListeners();
         setupPointerEvents();
         resizeCanvas();
@@ -3191,4 +3640,13 @@
     window.saveLabelsJson = saveLabelsJson;
     window.recomputeReviewed = recomputeReviewed;
     window.buildRefineQueue = buildRefineQueue;
+    window.loadDataset = loadDataset;
+    window.enterNearMiss = enterNearMiss;
+    window.exitNearMiss = exitNearMiss;
+    window.nearMissAccept = nmAccept;
+    window.nearMissReject = nmReject;
+    window.setNearMissLower = setNearMissLower;
+    window.openViewedPeriods = openViewedPeriods;
+    window.jumpToTrialTime = jumpToTrialTime;
+    window.viewedTotals = viewedTotals;
 })();

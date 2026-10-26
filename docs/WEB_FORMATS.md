@@ -13,6 +13,7 @@
 | `eye` + `trial_offset` | the eye traces of the mocol export (`mocol_aMUA_eye_sessionNN.h5`); the huge `amua` dataset is not read |
 | `x`, `y` | one trial |
 | optional | `names` (one string per trial, shown next to the trial number), `fs` (Hz), `labels` (same layout as the positions: int8, 0 fixation, 1 saccade, 2 blink, -1 not reviewed; a cell array in MAT) |
+| optional, machine detection | `pred_labels` (int8, 1 saccade, 0 none, 2 blink) and `prob` (float32, the network's P(saccade) before the threshold, NaN allowed), same layout as the positions (xy / eye + offsets, trials x time, MAT cells). Never read as labels: `pred_labels` become the proposals (`prob` alone is thresholded with the U'n'Eye post-processing: > 0.5, gaps < 5 ms merged, events < 5 ms dropped; HDF5 attributes `threshold`, `merge_ms`, `min_dur_ms` override), `prob` is drawn under the speed and feeds the *Near misses* queue. |
 
 **Write:** the "Export" format selector: CSV (L.csv, X.csv, Y.csv as before) or one file `unEye_labeled.npz` / `.mat` / `.h5` with the raw positions, `labels`, `names`, `fs`
 (+ `uneye_config.json` always). A file written by the page can be opened again: the labels come back (reviewed ranges, events).
