@@ -13,6 +13,9 @@
 //   x, y    one trial (vectors)
 // Optional: names (one string per trial), fs (sampling rate, Hz), labels (same layout as the positions: int8, 0 fixation, 1 saccade,
 // 2 blink, -1 not reviewed; a cell array in MAT) which are loaded as the labels of the page.
+// Optional machine detection (same layout as labels; never treated as reviewed labels): pred_labels (int8, 1 saccade, 0 none, 2 blink) and
+// prob (float32, the network's P(saccade) before the threshold; NaN allowed) -> out.predLabels [Int8Array], out.prob [Float32Array];
+// HDF5 attributes threshold / merge_ms / min_dur_ms of the post-processing -> out.probParams.
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.UnEyeFormats = factory();
@@ -314,7 +317,7 @@
     return dir;
   }
 
-  const H5_WANTED = /^(xy|eye|x|y|trial_offset|trial_lengths|lengths|names|fs|labels|trials?.*|x_\d+|y_\d+)$/i;
+  const H5_WANTED = /^(xy|eye|x|y|trial_offset|trial_lengths|lengths|names|fs|labels|pred_labels|predlabels|prob|trials?.*|x_\d+|y_\d+)$/i;
 
   // opts.all: every numeric dataset (up to 40 M values each), not only the layouts of this page - for the column explorer
   async function readH5(buf, h5, opts) {
@@ -338,7 +341,11 @@
       };
       walk(f, '');
       const attrs = f.attrs || {};
-      for (const k of Object.keys(attrs)) if (/^fs$/i.test(k) && !vars.fs) vars.fs = { shape: [], data: [Number(attrs[k].value !== undefined ? attrs[k].value : attrs[k])] };
+      for (const k of Object.keys(attrs)) {
+        const val = () => Number(attrs[k].value !== undefined ? attrs[k].value : attrs[k]);
+        if (/^fs$/i.test(k) && !vars.fs) vars.fs = { shape: [], data: [val()] };
+        else if (/^(threshold|merge_ms|min_dur_ms)$/i.test(k) && !all) { const v = val(); if (isFinite(v)) vars['@' + k.toLowerCase()] = v; }
+      }
       f.close();
     } finally { try { FS.unlink(path); } catch (e) { /* ignore */ } }
     return vars;
@@ -385,9 +392,10 @@
     throw new Error('A trial must be an N x 2 or 2 x N matrix of x and y (found ' + a + ' x ' + b + ').');
   }
 
-  // returns {trials: [{x, y, valid, name}], fs, labels: [Int8Array|null] or null}
+  // returns {trials: [{x, y, valid, name}], fs, labels: [Int8Array|null] or null, predLabels: [Int8Array] or null, prob: [Float32Array] or null, probParams}
   function trialsFromVars(vars0) {
-    const vars = lc(vars0), out = { trials: [], fs: null, labels: null };
+    const vars = lc(vars0), out = { trials: [], fs: null, labels: null, predLabels: null, prob: null, probParams: null };
+    if (!vars.pred_labels && vars.predlabels) vars.pred_labels = vars.predlabels;
     const names = strList(vars.names);
     if (vars.fs) { const f = toC(vars.fs); const d = f.data; const fv = Number(d && d.length ? d[0] : d); if (isFinite(fv) && fv > 0) out.fs = fv; }
     const num = k => (vars[k] ? toC(vars[k]) : null);
@@ -406,11 +414,15 @@
     if (vars.trials && vars.trials.cells) {                                       // MAT cell of N x 2 matrices
       out.trials = vars.trials.cells.map((c, k) => { const m = toC(c); const [x, y] = xyOf(m.shape || m.dims, m.data); return mkTrial(x, y, names ? names[k] : undefined); });
       if (vars.labels && vars.labels.cells) out.labels = vars.labels.cells.map((c, k) => Int8Array.from(toC(c).data.subarray(0, out.trials[k].x.length)));
+      if (vars.pred_labels && vars.pred_labels.cells) out.predLabels = perTrial(vars.pred_labels, null, out.trials, Int8Array);
+      if (vars.prob && vars.prob.cells) out.prob = perTrial(vars.prob, null, out.trials, Float32Array);
     } else if (vars.x && vars.x.cells && vars.y && vars.y.cells) {                // two cell arrays
       out.trials = vars.x.cells.map((c, k) => mkTrial(c.data, vars.y.cells[k].data, names ? names[k] : undefined));
     } else if (vars.xy || vars.eye) {
       const key = vars.xy ? 'xy' : 'eye'; const r = splitByOffsets(num(key), key); out.trials = r.trials;
       if (vars.labels) out.labels = labelsByOffsets(num('labels'), r.offs, out.trials);
+      if (vars.pred_labels) out.predLabels = perTrial(num('pred_labels'), r.offs, out.trials, Int8Array);
+      if (vars.prob) out.prob = perTrial(num('prob'), r.offs, out.trials, Float32Array);
     } else if (vars.trials && vars.trials.shape) {                                // numeric 3-D (n, T, 2) or (n, 2, T)
       const t = num('trials'), [n, a, b] = t.shape;
       if (t.shape.length !== 3) throw new Error('"trials" must be a cell array or a 3-D array.');
@@ -419,6 +431,9 @@
       const X = num('x'), Y = num('y'), [n, T] = X.shape;
       for (let k = 0; k < n; k++) out.trials.push(mkTrial(X.data.subarray(k * T, (k + 1) * T), Y.data.subarray(k * T, (k + 1) * T), names ? names[k] : undefined));
       if (vars.labels) { const L = num('labels'); out.labels = []; for (let k = 0; k < n; k++) out.labels.push(Int8Array.from(L.data.subarray(k * T, k * T + out.trials[k].x.length))); }
+      const rowsOf = (key, Type) => { const L = num(key); if (!L || !L.shape || L.shape[0] !== n || L.shape[1] !== T) return null; const o = []; for (let k = 0; k < n; k++) o.push(Type.from(L.data.subarray(k * T, k * T + out.trials[k].x.length))); return o; };
+      if (vars.pred_labels) out.predLabels = rowsOf('pred_labels', Int8Array);
+      if (vars.prob) out.prob = rowsOf('prob', Float32Array);
     } else if (vars.x && vars.y) {                                                // one trial
       out.trials = [mkTrial(num('x').data, num('y').data, names ? names[0] : undefined)];
     } else {                                                                      // group / dataset names trial_k (T x 2), x_k / y_k
@@ -431,6 +446,19 @@
       }
     }
     if (!out.trials.length) throw new Error('The file holds no trial.');
+    const pp = {}; for (const k of ['threshold', 'merge_ms', 'min_dur_ms']) if (vars['@' + k] !== undefined) pp[k] = vars['@' + k];
+    if (Object.keys(pp).length) out.probParams = pp;
+    return out;
+  }
+
+  // a per-sample variable (prob, pred_labels) cut like the positions: offsets (offs) of the concatenated layout, or a cell per trial;
+  // null when its length does not match the positions
+  function perTrial(L, offs, trials, Type) {
+    if (!L) return null;
+    if (L.cells) { if (L.cells.length < trials.length) return null; return trials.map((t, k) => Type.from(toC(L.cells[k]).data.subarray(0, t.x.length))); }
+    if (!offs || L.data.length < offs[offs.length - 1]) return null;
+    const out = [];
+    for (let k = 0; k + 1 < offs.length; k++) out.push(Type.from(L.data.subarray(offs[k], offs[k + 1]).subarray(0, trials[k].x.length)));
     return out;
   }
 
@@ -520,5 +548,5 @@
     return buildH5(vars, { fs }, typeof h5 === 'function' ? await h5() : h5);
   }
 
-  return { readTrialsFile, readVarsFile, readNpz, readMat5, readH5, readZip, parseNpy, trialsFromVars, writeNpzFile, writeMatFile, writeH5File, buildNpz, buildMat5, buildZip, crc32, extOf };
+  return { readTrialsFile, readVarsFile, readNpz, readMat5, readH5, readZip, parseNpy, trialsFromVars, writeNpzFile, writeMatFile, writeH5File, buildNpz, buildMat5, buildH5, buildZip, crc32, extOf };
 }));

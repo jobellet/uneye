@@ -59,6 +59,7 @@ val syncWebAssets by tasks.registering(Copy::class) {
         include("import.js")
         include("import_ui.js")
         include("hmm_prelabel.js")
+        include("nearmiss.js")
         include("train_worker.js")
         include("sw.js")
         include("logo.jpeg")
