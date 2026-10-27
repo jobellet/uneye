@@ -50,3 +50,4 @@ cpp/build_win/
 dist/
 results_ptb_game_*.mat
 results_psychopy_game_*.json
+results_simulation_dataset.*
