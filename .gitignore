@@ -47,3 +47,6 @@ cpp/build_win/
 /build-android/
 /android/build-android-ndk
 /cpp/build*/
+dist/
+results_ptb_game_*.mat
+results_psychopy_game_*.json

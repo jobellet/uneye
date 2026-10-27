@@ -1,0 +1,161 @@
+================================================================================
+EXPERIMENT IMPLEMENTATION GUIDE: MATLAB (PSYCHTOOLBOX) VS PYTHON (PSYCHOPY)
+Task: Three-Target Real-Time Gaze Prediction & Dodge Game
+================================================================================
+
+1. OVERVIEW & TASK DESCRIPTION
+--------------------------------------------------------------------------------
+This experiment tests real-time saccade detection and landing prediction:
+  1. Fixation: The participant fixates a central cross (< 1.5 DVA for >= 400 ms).
+  2. Stimuli: Three colored targets (Red, Green, Blue) appear equidistant from
+     center (eccentricity: 7.0 DVA), in an equilateral triangle layout with
+     randomized orientation per trial.
+  3. Choice: The participant freely chooses which of the three targets to saccade to.
+  4. Real-Time Prediction & Dodge:
+     - As soon as the saccade is launched (gaze > 1.8 DVA from center or speed > threshold),
+       the algorithm predicts in real-time which target is being targeted:
+         * Method A: EyeLive LandingNet deep neural network prediction (pred_x, pred_y, pred_valid)
+         * Method B: Kinematic saccadic displacement vector alignment (cosine similarity)
+     - The algorithm immediately dodges by shifting the predicted target outward (+5.0 DVA).
+  5. Scoring Rule:
+     - If the participant's fovea lands within < 2.0 DVA of ANY of the targets
+       (by anticipating the dodge or making a rapid corrective saccade),
+       the participant scores +10 points!
+     - Sound feedback and visual feedback are displayed after each trial.
+
+
+2. FILE MAPPING: MATLAB VS PYTHON
+--------------------------------------------------------------------------------
+Feature                 MATLAB (Psychtoolbox)                   Python (PsychoPy)
+--------------------------------------------------------------------------------
+Main Experiment Script  experiments/ptb_three_targets_game.m    experiments/psychopy_three_targets_game.py
+                        cpp/app/readers/matlab/                 cpp/app/readers/python/
+Shared Memory Reader    eyelive_open.m, eyelive_state.m         eyelive_reader.py (StateReader)
+Display Library         Psychtoolbox-3 (Screen.mex)             PsychoPy (visual, core, event)
+Coordinate Units        DVA <-> Pixels (PPD calculation)        DVA <-> Pixels (PPD calculation or units='deg')
+Stimulus Colors         RGB [235, 65, 65] (Red)                 RGB [0.84, -0.49, -0.49]
+                        RGB [55, 215, 75] (Green)               RGB [-0.57, 0.69, -0.41]
+                        RGB [60, 140, 255] (Blue)               RGB [-0.53, 0.10, 1.00]
+Gaze Input Modes        'auto', 'eyelive', 'mouse'              'auto', 'eyelive', 'mouse'
+Test / CI Mode          'TestMode', true                        --test-mode
+Output Format           results_ptb_game_<ts>.mat               results_psychopy_game_<ts>.json
+
+
+3. PYTHON ENVIRONMENT SETUP
+--------------------------------------------------------------------------------
+To run the PsychoPy version on any lab or development computer:
+
+  # 1. Install dependencies:
+  pip install psychopy psychtoolbox numpy
+
+  # Note: If running on a headless server without display or without PsychoPy,
+  # the script automatically falls back to its built-in simulation engine.
+
+
+4. HOW TO RUN
+--------------------------------------------------------------------------------
+A. Interactive Mode with Mouse (Simulation without eye-tracker):
+  # Python / PsychoPy:
+  python experiments/psychopy_three_targets_game.py --source mouse
+
+  # MATLAB:
+  ptb_three_targets_game('Source', 'mouse')
+
+B. Live Mode with EyeLive Shared Memory Stream:
+  # 1. Launch EyeLive acquisition in the background:
+  #    ./eyelive --source dummy --stream stream.eyelive
+  # 2. Launch the experiment:
+  python experiments/psychopy_three_targets_game.py --source eyelive --session stream.eyelive
+
+  # MATLAB:
+  ptb_three_targets_game('Source', 'eyelive', 'Session', 'stream.eyelive')
+
+C. Automated CI / Headless Test:
+  # Python:
+  python experiments/psychopy_three_targets_game.py --test-mode --num-trials 2
+
+  # MATLAB:
+  ptb_three_targets_game('TestMode', true, 'NumTrials', 2)
+
+
+5. CORE ALGORITHM & EQUIVALENT PSYCHOPY IMPLEMENTATION
+--------------------------------------------------------------------------------
+
+A. Visual Geometry & PPD (Pixels Per Degree of Visual Angle):
+------------------------------------------------------------
+Python:
+  def compute_ppd(screen_width_px, screen_width_cm, screen_dist_cm):
+      px_per_cm = screen_width_px / screen_width_cm
+      deg_per_cm = math.degrees(math.atan2(1.0, screen_dist_cm))
+      return px_per_cm / deg_per_cm
+
+  ppd = compute_ppd(1024, 53.0, 60.0)
+  fovea_radius_px = 2.0 * ppd       # 2.0 DVA threshold
+  target_ecc_px   = 7.0 * ppd       # 7.0 DVA eccentricity
+  shift_dist_px   = 5.0 * ppd       # 5.0 DVA dodge distance
+
+B. Real-Time EyeLive Memory-Mapped Reader:
+-----------------------------------------
+Python (from cpp/app/readers/python/eyelive_reader.py):
+  from eyelive_reader import StateReader
+  reader = StateReader("stream.eyelive")
+  state = reader.latest()
+  if state is not None:
+      gaze_x_px = state['x'] * ppd
+      gaze_y_px = state['y'] * ppd
+      is_in_saccade = bool(state['in_event'])
+      if state['pred_valid']:
+          predicted_x_px = state['pred_x'] * ppd
+          predicted_y_px = state['pred_y'] * ppd
+
+C. Real-Time Saccade Prediction & Dodge:
+---------------------------------------
+Python:
+  # 1. LandingNet model prediction (if available):
+  if state['pred_valid']:
+      dists = [math.hypot(target[0] - pred_x, target[1] - pred_y) for target in targets_curr]
+      predicted_idx = dists.index(min(dists))
+  else:
+      # 2. Kinematic trajectory vector cosine alignment:
+      gaze_len = math.hypot(gx, gy)
+      if gaze_len > 1.0:
+          alignments = []
+          for tx, ty in targets_orig:
+              t_len = math.hypot(tx, ty)
+              cos_sim = (gx * tx + gy * ty) / (gaze_len * t_len)
+              alignments.append(cos_sim)
+          if max(alignments) > 0.50:
+              predicted_idx = alignments.index(max(alignments))
+
+  # 3. Apply outward shift:
+  orig_x, orig_y = targets_orig[predicted_idx]
+  orig_len = math.hypot(orig_x, orig_y)
+  out_x = (orig_x / orig_len) * shift_dist_px
+  out_y = (orig_y / orig_len) * shift_dist_px
+  targets_curr[predicted_idx] = (orig_x + out_x, orig_y + out_y)
+
+D. Landing Scoring Condition (< 2.0 DVA):
+----------------------------------------
+Python:
+  dists_to_targets_dva = [
+      math.hypot(target[0] - final_gaze_x, target[1] - final_gaze_y) / ppd
+      for target in targets_curr
+  ]
+  min_dist_dva = min(dists_to_targets_dva)
+  is_hit = min_dist_dva < 2.0  # Fovea entered within 2 DVA of any target!
+  if is_hit:
+      score += 10
+      verdict = "TOUCHÉ (+10 pts)"
+  else:
+      verdict = "ESQUIVÉ (0 pt)"
+
+
+6. SUMMARY
+--------------------------------------------------------------------------------
+Both MATLAB/PTB and Python/PsychoPy implementations share:
+  - Identical geometric angle conversions and timing
+  - Identical EyeLive shared memory IPC interface
+  - Identical prediction kinematics and dodge distance (5.0 DVA)
+  - Identical scoring logic (< 2.0 DVA fovea radius, +10 points)
+  - Automated non-blocking test modes for headless validation
+================================================================================
