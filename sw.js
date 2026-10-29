@@ -2,10 +2,11 @@
 // 1. Full offline caching for all assets (.html, .js, .wasm, .bin, .json, .css)
 // 2. coi-serviceworker functionality: adds COOP/COEP headers to enable Cross-Origin Isolation (SharedArrayBuffer)
 
-const CACHE_NAME = 'uneye-cache-v11';
+const CACHE_NAME = 'uneye-cache-v15';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
+    './manifest.json',
     './style.css',
     './app.js',
     './formats.js',
@@ -46,15 +47,15 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// Network-first strategy with cache fallback:
-// When connected to the internet, always fetch the latest version and update the cache.
+// Network-first strategy with cache revalidation and offline fallback:
+// When connected to the internet, always revalidate with the server (cache: 'no-cache') so every web update is fetched immediately.
 // When offline, immediately serve from cache.
 self.addEventListener('fetch', (event) => {
     const request = event.request;
     if (request.method !== 'GET') return;
 
     event.respondWith(
-        fetch(request)
+        fetch(new Request(request, { cache: 'no-cache' }))
             .then((networkResponse) => {
                 if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
                     const responseToCache = networkResponse.clone();

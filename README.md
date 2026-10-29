@@ -28,7 +28,8 @@ This repository is a **fork of [berenslab/uneye](https://github.com/berenslab/un
 ### Install on a device
 - **iPad / iPhone (Safari)**: open the page, wait for it to finish loading once, then *Share → Add to Home Screen*. It then starts like an app and works **offline**.
 - **Android (Chrome)**: open the page, menu *⋮ → Install app / Add to Home screen*.
-- **Laptop (Chrome, Edge, Safari, Firefox)**: just open the page; to work offline keep the tab or install it from the address bar.
+- **macOS native app (`U'n'Eye.app`)**: run `./macos/build_mac_app.sh` to build and install `/Applications/U'n'Eye.app` (universal binary `arm64` + `x86_64`). It works offline and automatically synchronizes with the latest web version (`https://jobellet.github.io/uneye/` and any local repository updates) on launch, when switching to the app, or via *View → Sync & Reload from Web* (`Cmd+R`).
+- **Laptop (Chrome, Edge, Safari, Firefox)**: just open the page; to work offline keep the tab or install it as a PWA from the address bar (`manifest.json`).
 - After a new version, reload the page twice (the service worker updates the offline copy).
 - Self-hosting: serve this folder with any static server (`python3 -m http.server`) and open `index.html`.
 

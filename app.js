@@ -85,15 +85,24 @@
         isTraining: false,
         trainedModelBin: null,
         trainedModelJson: null,
+        sessionTrainedModelBin: null,
+        customModelBin: null,
+        customModelName: '',
+        pretrainedModelBin: null,
+        activeModelSource: 'hmm',   // 'hmm' | 'pretrained' | 'session' | 'custom' | 'none'
+        activeModelName: '',
+        modelPredictedTrials: new Set(),
+        predictingTrialInFlight: false,
         previousPrelabels: null,
         wakeLock: null,
         initialWeightsMode: 'pretrained',
-        prelabelerMode: 'hmm',      // 'hmm' (label-free HMM, hmm_prelabel.js), 'file' (the machine detection stored in the file: pred_labels, or prob thresholded) or 'none'
+        prelabelerMode: 'hmm',      // 'hmm' (label-free HMM, hmm_prelabel.js), 'file' (the machine detection stored in the file: pred_labels, or prob thresholded), 'pretrained', 'custom' or 'none'
 
         // Machine detection read from the file (never labels, never reviewed):
         // prob[t] = Float32Array P(saccade) of the network (NaN = none) or null; fileEvents[t] = [{onset, offset, cls}] its detected events
         // (pred_labels runs, or prob thresholded with the U'n'Eye post-processing) = the proposals of the 'file' source
         prob: [],
+        fileProb: [],
         hasProb: false,
         probThreshold: 0.5,
         fileEvents: [],
@@ -172,7 +181,10 @@
         eventsStatus: document.getElementById('eventsStatus'),
         trainStatus: document.getElementById('trainStatus'),
         cancelTrainBtn: document.getElementById('cancelTrainBtn'),
+        loadWeightsBtn: document.getElementById('loadWeightsBtn'),
         downloadModelBtn: document.getElementById('downloadModelBtn'),
+        mainModelSelect: document.getElementById('mainModelSelect'),
+        mainModelInput: document.getElementById('mainModelInput'),
         initialModelSelect: document.getElementById('initialModelSelect'),
         fileInput: document.getElementById('fileInput'),
         exportFormat: document.getElementById('exportFormat'),
@@ -192,6 +204,9 @@
         modalModelFileName: document.getElementById('modalModelFileName'),
         modalPickModelBtn: document.getElementById('modalPickModelBtn'),
         modalModelFile: document.getElementById('modalModelFile'),
+        prelabelerModelRow: document.getElementById('prelabelerModelRow'),
+        prelabelerModelFileName: document.getElementById('prelabelerModelFileName'),
+        prelabelerPickModelBtn: document.getElementById('prelabelerPickModelBtn'),
         modalLabelsFileName: document.getElementById('modalLabelsFileName'),
         modalPrevLabelsVar: document.getElementById('modalPrevLabelsVar'),
         modalPickLabelsBtn: document.getElementById('modalPickLabelsBtn'),
@@ -636,7 +651,12 @@
     function loadDataset(trials, rateHz = 1000.0, degPerUnit = 1.0, prelabeler = 'hmm', extra = null) {
         state.trials = trials;
         setFileDetection(trials, rateHz, extra);
-        state.prelabelerMode = prelabeler === 'none' ? 'none' : (state.fileEvents.some(Boolean) ? 'file' : 'hmm');
+        const useModelPrelabeler = (prelabeler === 'pretrained' || prelabeler === 'custom') && Boolean(state.trainedModelBin);
+        state.prelabelerMode = prelabeler === 'none'
+            ? 'none'
+            : useModelPrelabeler
+            ? prelabeler
+            : (state.fileEvents.some(Boolean) ? 'file' : 'hmm');
         if (elements.startModal) elements.startModal.classList.add('hidden');
         state.rateHz = rateHz;
         state.degPerUnit = degPerUnit;
@@ -659,6 +679,7 @@
         state.viewedRanges = Array.from({ length: n }, () => []);
         state.rejectedNearMisses = Array.from({ length: n }, () => []);
         state.nearMiss.active = false; state.nearMiss.queue = []; state.nearMiss.idx = 0;
+        state.modelPredictedTrials = new Set();
 
         // Pick test set (every 4th trial, min 2)
         state.testTrials = new Set();
@@ -670,16 +691,25 @@
         preprocessAllTrials();
 
         // 2. Proposals & initial file pre-labels (file pre-labels are loaded directly as ground truth so they don't need to be confirmed one by one)
-        for (let t = 0; t < n; t++) {
-            runPrelabeler(t, state.prelabelerMode);
-            if (state.prelabelerMode === 'file' && state.fileEvents[t] && state.fileEvents[t].length > 0) {
-                state.expertEvents[t] = state.fileEvents[t].map(e => ({ onset: e.onset, offset: e.offset, cls: e.cls, fromPrelabel: false }));
-                mergeOverlappingEvents(t);
-                recomputeReviewed(t, false);
+        if (useModelPrelabeler) {
+            state.activeModelSource = prelabeler;
+            setNetSuggestions(true);
+            syncMainModelSelectUI();
+            applyModelAsPrelabeler({ asGroundTruthIfEmpty: true, updateProbs: true });
+        } else {
+            state.activeModelSource = prelabeler === 'none' ? 'none' : 'hmm';
+            for (let t = 0; t < n; t++) {
+                runPrelabeler(t, state.prelabelerMode);
+                if (state.prelabelerMode === 'file' && state.fileEvents[t] && state.fileEvents[t].length > 0) {
+                    state.expertEvents[t] = state.fileEvents[t].map(e => ({ onset: e.onset, offset: e.offset, cls: e.cls, fromPrelabel: false }));
+                    mergeOverlappingEvents(t);
+                    recomputeReviewed(t, false);
+                }
+                syncRenderedLabels(t);
             }
-            syncRenderedLabels(t);
+            if (state.netSuggestions && state.trainedModelBin) refreshSuggestions();
+            syncMainModelSelectUI();
         }
-        if (state.netSuggestions && state.trainedModelBin) refreshSuggestions();
 
         state.convergenceHistory = [];
         state.convergenceState = 'SILENT';
@@ -702,6 +732,7 @@
         const pp = ex.probParams || {};
         state.probThreshold = pp.threshold > 0 && pp.threshold < 1 ? pp.threshold : 0.5;
         state.prob = Array.from({ length: n }, (_, t) => (ex.prob && ex.prob[t] && ex.prob[t].length === trials[t].x.length) ? ex.prob[t] : null);
+        state.fileProb = state.prob.map(p => p ? new Float32Array(p) : null);
         state.hasProb = state.prob.some(Boolean);
         state.fileEvents = Array.from({ length: n }, (_, t) => {
             if (ex.predLabels && ex.predLabels[t]) return UnEyeProb.eventsFromLabels(ex.predLabels[t]);
@@ -780,6 +811,32 @@
             elements.netSuggestBtn.classList.toggle('btn-accent', Boolean(on));
             elements.netSuggestBtn.title = on ? 'Proposals come from the network trained on your labels (HMM until a network has been trained). Tap for HMM proposals.'
                 : 'Proposals come from the label-free HMM. Tap to show the proposals of the network trained on your labels.';
+        }
+        syncMainModelSelectUI();
+    }
+
+    function syncMainModelSelectUI() {
+        const sel = elements.mainModelSelect;
+        if (!sel) return;
+        const optHmm = sel.querySelector('option[value="hmm"]');
+        const optSession = sel.querySelector('option[value="session"]');
+        const optCustom = sel.querySelector('option[value="custom"]');
+        if (optHmm) {
+            optHmm.textContent = (state.fileEvents && state.fileEvents.some(Boolean)) ? 'Predictions: HMM / File' : 'Predictions: HMM';
+        }
+        if (optSession) {
+            optSession.hidden = !state.sessionTrainedModelBin;
+        }
+        if (optCustom) {
+            optCustom.hidden = !state.customModelBin;
+            optCustom.textContent = state.customModelName ? `Predictions: ${state.customModelName}` : 'Predictions: Custom weights (.bin)';
+        }
+        if (state.netSuggestions && state.trainedModelBin) {
+            if (state.activeModelSource === 'custom' && state.customModelBin) sel.value = 'custom';
+            else if (state.activeModelSource === 'session' && state.sessionTrainedModelBin) sel.value = 'session';
+            else sel.value = 'pretrained';
+        } else {
+            sel.value = state.prelabelerMode === 'none' ? 'none' : 'hmm';
         }
     }
 
@@ -1454,6 +1511,17 @@
         }
 
         ensureDerived(state.currentTrialIdx);
+        if (state.netSuggestions && state.trainedModelBin && !state.modelPredictedTrials.has(state.currentTrialIdx) && !state.isTraining && !state.predictingTrialInFlight) {
+            const targetTrial = state.currentTrialIdx;
+            state.predictingTrialInFlight = true;
+            predictSingleTrialWithModel(targetTrial, { asGroundTruthIfEmpty: false, updateProbs: true }).then(() => {
+                state.predictingTrialInFlight = false;
+                updateProbUI();
+                render(false);
+            }).catch(() => {
+                state.predictingTrialInFlight = false;
+            });
+        }
         if (recordViewed !== false && (!elements.viewedModal || elements.viewedModal.classList.contains('hidden'))) {
             markViewed();
         }
@@ -1522,7 +1590,10 @@
         ctx.font = '500 11px var(--font-stack)';
         ctx.fillStyle = '#E65100';
         ctx.textAlign = 'left';
-        ctx.fillText('P(saccade)', 16, lane.top + 12);
+        const probTitle = (state.netSuggestions && state.trainedModelBin && state.activeModelName)
+            ? `P(saccade) · ${state.activeModelName}`
+            : 'P(saccade)';
+        ctx.fillText(probTitle, 16, lane.top + 12);
         ctx.textAlign = 'right';
         ctx.fillText(String(thr), w - 16, yOf(thr) - 2);
         ctx.strokeStyle = '#EF6C00';
@@ -1780,17 +1851,27 @@
     function drawAnnotations(w, h) {
         const trialIdx = state.currentTrialIdx;
 
-        // 1. Prelabels (Dimmed brackets - skipped if already covered by a ground-truth expert event)
+        // 1. Prelabels (Dimmed brackets - when viewing a neural network model's predictions, also draw dashed orange brackets so they can be compared against existing ground-truth expertEvents)
+        const showingModelPreds = Boolean(state.netSuggestions && state.trainedModelBin);
         for (const p of state.prelabels[trialIdx]) {
             if (p.offset < state.fromSample || p.onset > state.toSample) continue;
-            if ((state.expertEvents[trialIdx] || []).some(e => !(p.offset < e.onset || p.onset > e.offset))) continue;
+            const anyOverlap = (state.expertEvents[trialIdx] || []).some(e => !(p.offset < e.onset || p.onset > e.offset));
+            if (!showingModelPreds && anyOverlap) continue;
             const x1 = sampleToPx(p.onset, w);
             const x2 = sampleToPx(p.offset, w);
-            ctx.strokeStyle = p.cls === CLS_SACCADE ? 'rgba(21, 101, 192, 0.45)' : 'rgba(198, 40, 40, 0.45)';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([4, 4]);
-            ctx.strokeRect(x1, 10, Math.max(2, x2 - x1), h - 20);
-            ctx.setLineDash([]);
+            if (showingModelPreds && anyOverlap) {
+                ctx.strokeStyle = p.cls === CLS_SACCADE ? 'rgba(230, 81, 0, 0.85)' : 'rgba(198, 40, 40, 0.85)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 3]);
+                ctx.strokeRect(x1, 14, Math.max(2, x2 - x1), h - 28);
+                ctx.setLineDash([]);
+            } else {
+                ctx.strokeStyle = p.cls === CLS_SACCADE ? (showingModelPreds ? 'rgba(230, 81, 0, 0.75)' : 'rgba(21, 101, 192, 0.45)') : 'rgba(198, 40, 40, 0.45)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 4]);
+                ctx.strokeRect(x1, 10, Math.max(2, x2 - x1), h - 20);
+                ctx.setLineDash([]);
+            }
         }
 
         // 1b. Rejected near misses: an orange bar at the top
@@ -2359,7 +2440,9 @@
     async function runTrainingRound() {
         if (state.isTraining) return;
         const reviewedS = totalReviewedSeconds();
-        if (reviewedS < 0.5) {
+        const counts = totalExpertEventCounts();
+        const hasGroundTruthEvents = (counts.saccades + counts.blinks) > 0;
+        if (reviewedS < 0.5 && !hasGroundTruthEvents) {
             alert("Please label at least 0.5 seconds of reviewed data before training.");
             return;
         }
@@ -2368,6 +2451,7 @@
         elements.trainStatus.className = 'train-active';
         elements.trainStatus.textContent = "Preparing training windows…";
         if (elements.cancelTrainBtn) elements.cancelTrainBtn.classList.remove('hidden');
+        await new Promise(r => setTimeout(r, 10));
 
         // Keep screen awake during training (iPad Safari & Chrome)
         try {
@@ -2378,63 +2462,98 @@
             console.log("WakeLock:", e);
         }
 
-        // Training set: reviewed stretches of NON-test trials only (point marks never train)
-        const traces = [];
+        // Build candidate trial order: current & reviewed/viewed trials first, then trials with ground-truth expertEvents
+        const nTrials = state.trials.length;
         const winSamples = Math.max(25, Math.round(state.rateHz / 25.0) * 25);
-        for (let t = 0; t < state.trials.length; t++) {
-            if (state.testTrials.has(t)) continue;
+        const maxTrainSamples = Math.round(50.0 * state.rateHz);
+        const maxTestSamples = Math.round(20.0 * state.rateHz);
+
+        const trialPriority = (t) => {
+            const revLen = UnEyeProb.rangeLength(state.reviewedRanges[t]);
+            const viewLen = UnEyeProb.rangeLength(state.viewedRanges[t]);
+            const evCount = (state.expertEvents[t] || []).length;
+            const dist = Math.abs(t - state.currentTrialIdx);
+            if (revLen >= winSamples) return 0 + dist * 1e-4;
+            if (viewLen >= winSamples) return 10 + dist * 1e-4;
+            if (revLen > 0 || viewLen > 0) return 20 + dist * 1e-4;
+            if (evCount > 0) return 30 + dist * 1e-4;
+            return 1000;
+        };
+
+        const orderedTrials = Array.from({ length: nTrials }, (_, t) => t)
+            .filter(t => trialPriority(t) < 1000)
+            .sort((a, b) => trialPriority(a) - trialPriority(b));
+
+        // Helper to build a labeled trace for trial t.
+        // If reviewed/viewed ranges cover at least a window (with both fixation and event context), mask to those ranges;
+        // otherwise if the trial has ground-truth expertEvents (e.g. pre-labels loaded as ground truth or after resetting viewed periods),
+        // use the full trial ground-truth labels (humanLabels(t): 0=fixation, 1=saccade, 2=blink).
+        const buildTrialTrainingData = (t, seedBase) => {
             const tr = state.trials[t];
-            const rev = state.reviewedRanges[t];
-            if (!rev || rev.length === 0) continue;
-            let maxRev = 0;
-            for (const [s, e] of rev) {
-                if (e > maxRev) maxRev = e;
-            }
-            const endSample = Math.min(tr.x.length, Math.max(winSamples, maxRev + 1));
+            if (!tr || tr.x.length < winSamples) return null;
+            const hl = humanLabels(t);
+            const marks = state.pointMarks[t] || [];
+            const rev = (state.reviewedRanges[t] || []).filter(([f, e]) => !marks.some(m => m.at >= f && m.at <= e));
+            const view = (state.viewedRanges[t] || []).filter(([f, e]) => !marks.some(m => m.at >= f && m.at <= e));
+            const combinedRanges = mergeRangeList([...rev, ...view], tr.x.length);
+            const covSamples = UnEyeProb.rangeLength(combinedRanges);
+            const evSamples = (state.expertEvents[t] || []).reduce((acc, e) => acc + (e.offset - e.onset + 1), 0);
+
+            // Check whether combinedRanges includes fixation context beyond just the event spans themselves
+            const hasFixationContext = covSamples >= Math.min(tr.x.length, Math.max(Math.round(0.4 * state.rateHz), evSamples + Math.round(0.2 * state.rateHz)));
+            let endSample = tr.x.length;
             const lab = new Uint8Array(endSample).fill(255);
-            const hl = humanLabels(t); // 255 = ignore
-            for (const [s, e] of rev) {
-                for (let i = s; i <= e && i < endSample; i++) {
-                    lab[i] = hl[i];
+            if (hasFixationContext) {
+                let maxEnd = 0;
+                for (const [s, e] of combinedRanges) {
+                    if (e > maxEnd) maxEnd = e;
+                    for (let i = s; i <= e && i < endSample; i++) lab[i] = hl[i];
                 }
+                for (const ev of (state.expertEvents[t] || [])) {
+                    if (ev.offset > maxEnd) maxEnd = ev.offset;
+                    for (let i = ev.onset; i <= ev.offset && i < endSample; i++) lab[i] = ev.cls;
+                }
+                endSample = Math.min(tr.x.length, Math.max(winSamples, maxEnd + 1));
+            } else if ((state.expertEvents[t] || []).length > 0 || covSamples > 0) {
+                for (let i = 0; i < endSample; i++) lab[i] = hl[i];
+            } else {
+                return null;
             }
-            // Training copy: invalid (NaN) stretches filled with noise at 3x
-            // the local fixation noise, so a blink labelled 2 on a tracker
-            // loss keeps its label and stays distinguishable from fixation.
-            // The raw trace (display, prediction) is not modified.
-            const tc = trainingCopyOf(tr, 1000 + t);
-            traces.push({
+            const tc = trainingCopyOf(tr, seedBase + t);
+            return {
                 x: tc.x.subarray(0, endSample),
                 y: tc.y.subarray(0, endSample),
-                labels: lab,
+                labels: lab.subarray(0, endSample),
                 rateHz: state.rateHz
-            });
+            };
+        };
+
+        const traces = [];
+        let trainSamplesCount = 0;
+        for (const t of orderedTrials) {
+            if (state.testTrials.has(t)) continue;
+            if (trainSamplesCount >= maxTrainSamples && traces.length >= 2) break;
+            const item = buildTrialTrainingData(t, 1000);
+            if (item) {
+                traces.push(item);
+                trainSamplesCount += item.x.length;
+            }
         }
 
-        // Held-out test trials for unbiased F1 & kappa: the same fill, so the
-        // metrics measure the class-2 signal the network was trained on.
         const testTrials = [];
-        for (const t of state.testTrials) {
-            const tr = state.trials[t];
-            const rev = state.reviewedRanges[t];
-            if (!rev || rev.length === 0) continue;
-            const lab = new Uint8Array(tr.x.length).fill(255); const hl = humanLabels(t);
-            for (const [s, e] of rev) {
-                for (let i = s; i <= e && i < lab.length; i++) {
-                    lab[i] = hl[i];
-                }
+        let testSamplesCount = 0;
+        for (const t of orderedTrials) {
+            if (!state.testTrials.has(t)) continue;
+            if (testSamplesCount >= maxTestSamples && testTrials.length >= 2) break;
+            const item = buildTrialTrainingData(t, 2000);
+            if (item) {
+                testTrials.push(item);
+                testSamplesCount += item.x.length;
             }
-            const tc = trainingCopyOf(tr, 2000 + t);
-            testTrials.push({
-                x: tc.x,
-                y: tc.y,
-                labels: lab,
-                rateHz: state.rateHz
-            });
         }
 
         if (traces.length === 0) {
-            finishTraining("No non-test reviewed trials to train on");
+            finishTraining("No non-test labeled trials to train on");
             return;
         }
 
@@ -2456,18 +2575,23 @@
 
         const worker = getTrainWorker();
         const trainId = Date.now();
+        const maxEpochs = 30;
+        const trainSec = trainSamplesCount / state.rateHz;
 
         let lastEpoch = 0;
         worker.onmessage = async function(evt) {
             const msg = evt.data;
             if (msg.id !== trainId) return;
 
-            if (msg.type === 'PROGRESS') {
+            if (msg.type === 'STATUS') {
+                elements.trainStatus.className = 'train-active';
+                elements.trainStatus.textContent = msg.message;
+            } else if (msg.type === 'PROGRESS') {
                 const p = msg.data;
                 lastEpoch = p.epoch;
                 const etaStr = p.eta_s > 0 ? ` · ETA ${p.eta_s.toFixed(0)}s` : '';
                 elements.trainStatus.className = 'train-active';
-                elements.trainStatus.textContent = `Epoch ${p.epoch}/60 · Loss: ${p.train_loss.toFixed(3)} · Val F1: ${p.val_event_f1.toFixed(2)}${etaStr}`;
+                elements.trainStatus.textContent = `Epoch ${p.epoch}/${maxEpochs} · Loss: ${p.train_loss.toFixed(3)} · Val F1: ${p.val_event_f1.toFixed(2)}${etaStr}`;
             } else if (msg.type === 'CANCELLED') {
                 finishTraining("Training cancelled");
             } else if (msg.type === 'ERROR') {
@@ -2476,20 +2600,25 @@
             } else if (msg.type === 'TRAIN_COMPLETE') {
                 state.trainedModelBin = msg.binModel;
                 state.trainedModelJson = msg.jsonSidecar;
+                state.sessionTrainedModelBin = msg.binModel;
+                state.activeModelSource = 'session';
+                state.activeModelName = 'session trained';
+                state.modelPredictedTrials = new Set();
+                syncMainModelSelectUI();
 
-                const counts = totalExpertEventCounts();
+                const curCounts = totalExpertEventCounts();
                 const m = msg.metrics || {};
                 const round = {
                     atMs: Date.now(),
-                    labeledSeconds: reviewedS,
+                    labeledSeconds: Math.max(reviewedS, trainSec),
                     epochs: lastEpoch,
                     valF1: m.testF1Saccade || 0.0,
                     testF1Saccade: m.testF1Saccade || 0.0,
                     testF1Blink: m.testF1Blink || 0.0,
                     testKappaSaccade: m.testKappaSaccade || 0.0,
                     testKappaBlink: m.testKappaBlink || 0.0,
-                    nSaccades: counts.saccades,
-                    nBlinks: counts.blinks,
+                    nSaccades: curCounts.saccades,
+                    nBlinks: curCounts.blinks,
                 };
                 state.convergenceHistory.push(round);
                 state.reviewedAtLastTraining = reviewedS;
@@ -2515,18 +2644,19 @@
             updateStatus();
         }
 
+        const useRotAug = trainSec < 25.0;
         worker.postMessage({
             type: 'START_TRAIN',
             id: trainId,
             data: {
                 config: {
                     n_classes: 3,
-                    max_seconds_of_data: 3600.0,        // all the reviewed labels (the budget is a total over the traces)
-                    rotation_aug: true,
-                    rotations: 4,
+                    max_seconds_of_data: 50.0,
+                    rotation_aug: useRotAug,
+                    rotations: useRotAug ? 2 : 0,
                     val_fraction: 0.2,
                     max_speed_deg_s: 1300.0,
-                    max_epochs: 60,
+                    max_epochs: maxEpochs,
                     patience: 4,
                     learning_rate: 1e-3,
                     seed: 1,
@@ -2538,52 +2668,163 @@
         });
     }
 
-    async function applyModelAsPrelabeler() {
-        if (!state.trainedModelBin || state.trials.length === 0) return;
+    function loadBytesIntoWorker(bytes) {
+        if (!bytes || !bytes.length) return Promise.resolve(false);
         const worker = getTrainWorker();
+        return new Promise((resolve) => {
+            const reqId = Date.now() + Math.random();
+            const timer = setTimeout(() => {
+                worker.removeEventListener('message', handler);
+                resolve(false);
+            }, 15000);
+            const handler = (e) => {
+                if (e.data && e.data.id === reqId && e.data.type === 'LOAD_MODEL_RESULT') {
+                    clearTimeout(timer);
+                    worker.removeEventListener('message', handler);
+                    resolve(Boolean(e.data.success));
+                }
+            };
+            worker.addEventListener('message', handler);
+            worker.postMessage({ type: 'LOAD_MODEL', id: reqId, data: bytes });
+        });
+    }
+
+    async function loadPretrainedCombinedModel() {
+        try {
+            if (!state.pretrainedModelBin) {
+                const resp = await fetch('models/combined.bin');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const buf = await resp.arrayBuffer();
+                state.pretrainedModelBin = new Uint8Array(buf);
+            }
+            const ok = await loadBytesIntoWorker(state.pretrainedModelBin);
+            if (!ok) throw new Error('WASM trainer could not load models/combined.bin');
+            state.trainedModelBin = state.pretrainedModelBin;
+            state.activeModelSource = 'pretrained';
+            state.activeModelName = 'combined.bin';
+            state.modelPredictedTrials = new Set();
+            syncMainModelSelectUI();
+            return true;
+        } catch (err) {
+            console.error('Failed to load pretrained model:', err);
+            alert('Cannot load pretrained model (models/combined.bin): ' + err.message);
+            return false;
+        }
+    }
+
+    async function predictSingleTrialWithModel(t, opts = {}) {
+        if (!state.trainedModelBin || !state.trials[t] || state.isTraining) return false;
+        const worker = getTrainWorker();
+        const rawTr = state.trials[t];
+        // same NaN fill as the training copy, otherwise a blink reads as zero velocity and is never predicted
+        const tr = trainingCopyOf(rawTr, 3000 + t);
+        const includeProbs = opts.updateProbs !== false;
+        const res = await new Promise((resolve) => {
+            const reqId = Date.now() + Math.random();
+            const handler = (e) => {
+                if (e.data && e.data.id === reqId && e.data.type === 'PREDICT_RESULT') {
+                    worker.removeEventListener('message', handler);
+                    resolve({ pred: e.data.pred, prob: e.data.prob });
+                }
+            };
+            worker.addEventListener('message', handler);
+            worker.postMessage({
+                type: 'PREDICT',
+                id: reqId,
+                data: { x: tr.x, y: tr.y, rateHz: state.rateHz, maxSpeedDegS: 1300.0, includeProbs }
+            });
+        });
+
+        const pred = res && res.pred;
+        if (!pred) return false;
+
+        const newPre = [];
+        const n = pred.length;
+        // Include NaN/invalid blink stretches (>= 3 samples) so 2-class models (like combined.bin) still mark blinks
+        let blinkStart = -1;
+        for (let i = 0; i <= n; i++) {
+            const isInvalid = i < n && (rawTr.valid[i] === 0 || isNaN(rawTr.x[i]) || isNaN(rawTr.y[i]));
+            if (isInvalid && blinkStart === -1) {
+                blinkStart = i;
+            } else if (!isInvalid && blinkStart !== -1) {
+                if (i - blinkStart >= 3) newPre.push({ onset: blinkStart, offset: i - 1, cls: CLS_BLINK });
+                blinkStart = -1;
+            }
+        }
+
+        for (let i = 0; i < n;) {
+            const c = pred[i];
+            if (c === 1 || c === 2) {
+                let j = i;
+                while (j < n && pred[j] === c) j++;
+                if (j - i >= 3) {
+                    const onset = i, offset = j - 1;
+                    const overlapsBlink = c === CLS_SACCADE && newPre.some(b => b.cls === CLS_BLINK && !(offset < b.onset || onset > b.offset));
+                    if (!overlapsBlink) {
+                        newPre.push({ onset, offset, cls: c });
+                    }
+                }
+                i = j;
+            } else {
+                i++;
+            }
+        }
+        newPre.sort((a, b) => a.onset - b.onset);
+        state.prelabels[t] = newPre;
+
+        if (opts.asGroundTruthIfEmpty && (!state.expertEvents[t] || state.expertEvents[t].length === 0) && newPre.length > 0) {
+            state.expertEvents[t] = newPre.map(e => ({ onset: e.onset, offset: e.offset, cls: e.cls, fromPrelabel: false }));
+            mergeOverlappingEvents(t);
+            recomputeReviewed(t, false);
+        }
+
+        if (includeProbs && res.prob && res.prob.length === n) {
+            const pArr = new Float32Array(n);
+            for (let i = 0; i < n; i++) {
+                pArr[i] = (!rawTr.valid[i] || isNaN(rawTr.x[i]) || isNaN(rawTr.y[i])) ? NaN : res.prob[i];
+            }
+            state.prob[t] = pArr;
+            state.hasProb = true;
+        }
+
+        state.modelPredictedTrials.add(t);
+        syncRenderedLabels(t);
+        return true;
+    }
+
+    async function applyModelAsPrelabeler(opts = {}) {
+        if (!state.trainedModelBin || state.trials.length === 0) return;
         state.previousPrelabels = JSON.parse(JSON.stringify(state.prelabels));
 
-        for (let t = 0; t < state.trials.length; t++) {
-            // same NaN fill as the training copy, otherwise a blink reads as zero velocity and is never predicted
-            const tr = trainingCopyOf(state.trials[t], 3000 + t);
-            const predPromise = new Promise((resolve) => {
-                const reqId = Date.now() + Math.random();
-                const handler = (e) => {
-                    if (e.data.id === reqId && e.data.type === 'PREDICT_RESULT') {
-                        worker.removeEventListener('message', handler);
-                        resolve(e.data.pred);
-                    }
-                };
-                worker.addEventListener('message', handler);
-                worker.postMessage({
-                    type: 'PREDICT',
-                    id: reqId,
-                    data: { x: tr.x, y: tr.y, rateHz: state.rateHz, maxSpeedDegS: 1300.0 }
-                });
-            });
-
-            const pred = await predPromise;
-            if (!pred) continue;
-
-            const newPre = [];
-            const n = pred.length;
-            for (let i = 0; i < n;) {
-                const c = pred[i];
-                if (c === 1 || c === 2) {
-                    let j = i;
-                    while (j < n && pred[j] === c) j++;
-                    if (j - i >= 3) {
-                        newPre.push({ onset: i, offset: j - 1, cls: c });
-                    }
-                    i = j;
-                } else {
-                    i++;
-                }
+        // On large datasets (> 60 trials), predict around the current trial so we don't block the worker for minutes
+        const nTotal = state.trials.length;
+        const indices = [];
+        if (nTotal <= 60) {
+            for (let t = 0; t < nTotal; t++) indices.push(t);
+        } else {
+            const cur = state.currentTrialIdx;
+            indices.push(cur);
+            for (let d = 1; indices.length < 25 && (cur - d >= 0 || cur + d < nTotal); d++) {
+                if (cur + d < nTotal) indices.push(cur + d);
+                if (cur - d >= 0 && indices.length < 25) indices.push(cur - d);
             }
-            state.prelabels[t] = newPre;
-            syncRenderedLabels(t);
         }
-        render();
+
+        for (const t of indices) {
+            if (state.isTraining) break;
+            await predictSingleTrialWithModel(t, opts);
+        }
+        updateProbUI();
+        if (state.nearMiss.active) {
+            buildNearMissQueue();
+            nmFocus();
+        } else if (state.pass === PASS_TWO) {
+            buildRefineQueue();
+            state.refineIdx = Math.min(state.refineIdx, Math.max(0, state.refineQueue.length - 1));
+            focusCurrentMark();
+        }
+        updateStatus();
+        render(false);
     }
 
     // --- IndexedDB Persistence & Model Export ---
@@ -2646,6 +2887,11 @@
                 convergenceHistory: state.convergenceHistory,
                 trainedModelBin: state.trainedModelBin,
                 trainedModelJson: state.trainedModelJson,
+                sessionTrainedModelBin: state.sessionTrainedModelBin,
+                customModelBin: state.customModelBin,
+                customModelName: state.customModelName,
+                activeModelSource: state.activeModelSource,
+                activeModelName: state.activeModelName,
                 modelVersion: MODEL_VERSION
             };
             store.put(payload, 'autosave');
@@ -2681,12 +2927,14 @@
                 savedTrials = data.trials ? null : state.trials;     // an old-format session is rewritten in the new layout at the next save
                 const n = state.trials.length;
                 state.prob = savedTr.map(tr => (tr.probQ && tr.probQ.length ? UnEyeProb.decodeProb(tr.probQ) : null));
+                state.fileProb = state.prob.map(p => p ? new Float32Array(p) : null);
                 state.hasProb = state.prob.some(Boolean);
                 state.fileEvents = savedTr.map(tr => tr.fileEvents || null);
                 state.probThreshold = data.probThreshold > 0 && data.probThreshold < 1 ? data.probThreshold : 0.5;
                 state.viewedRanges = Array.from({ length: n }, (_, t) => (data.viewedRanges && data.viewedRanges[t]) || []);
                 state.rejectedNearMisses = Array.from({ length: n }, (_, t) => (data.rejectedNearMisses && data.rejectedNearMisses[t]) || []);
                 state.nearMiss.active = false; state.nearMiss.queue = []; state.nearMiss.idx = 0;
+                state.modelPredictedTrials = new Set();
                 updateProbUI();
                 state.undoStack = Array.from({ length: n }, () => []);
                 state.globalUndoStack = [];
@@ -2700,17 +2948,24 @@
                 state.prelabels = data.prelabels || Array.from({ length: n }, () => []);
                 state.rateHz = data.rateHz || 1000.0;
                 state.scale = data.scale || 1.0;
-                state.prelabelerMode = data.prelabelerMode === 'none' ? 'none' : ((data.prelabelerMode === 'file' && state.fileEvents.some(Boolean)) ? 'file' : 'hmm');
+                state.prelabelerMode = data.prelabelerMode === 'none' ? 'none' : ((data.prelabelerMode === 'file' && state.fileEvents.some(Boolean)) ? 'file' : (data.prelabelerMode || 'hmm'));
                 state.convergenceHistory = data.convergenceHistory || [];
                 state.trainedModelBin = data.trainedModelBin || null;
                 state.trainedModelJson = data.trainedModelJson || null;
-                const staleModel = state.trainedModelBin && data.modelVersion !== MODEL_VERSION;
+                state.sessionTrainedModelBin = data.sessionTrainedModelBin || null;
+                state.customModelBin = data.customModelBin || null;
+                state.customModelName = data.customModelName || '';
+                state.activeModelSource = data.activeModelSource || (state.trainedModelBin ? 'session' : 'hmm');
+                state.activeModelName = data.activeModelName || '';
+                const staleModel = state.trainedModelBin && data.modelVersion !== MODEL_VERSION && !state.customModelBin;
                 if (staleModel) {          // trained by an earlier, broken version: start again from the pretrained model
                     state.trainedModelBin = null;
                     state.trainedModelJson = null;
+                    state.sessionTrainedModelBin = null;
                     state.convergenceHistory = [];
                     state.reviewedAtLastTraining = 0.0;
                 }
+                syncMainModelSelectUI();
 
                 state.testTrials = new Set();
                 for (let t = 0; t < n; t += 4) state.testTrials.add(t);
@@ -3022,18 +3277,134 @@
         promise.then(res => { if (pendingFileInspection && pendingFileInspection.file === file && res) pendingFileInspection.info = res.info || null; });
     }
 
-    async function loadCustomModel(modelFile) {
-        if (!modelFile) return;
+    async function loadCustomModel(modelFile, opts = {}) {
+        if (!modelFile) return false;
         try {
             const buf = await modelFile.arrayBuffer();
-            state.trainedModelBin = new Uint8Array(buf);
+            const bytes = new Uint8Array(buf);
+            if (!bytes.length) throw new Error('Empty weights file');
+            const ok = await loadBytesIntoWorker(bytes);
+            if (!ok) throw new Error('Invalid or unsupported U\'n\'Eye weights (.bin) file');
+            state.customModelBin = bytes;
+            state.customModelName = modelFile.name;
+            state.trainedModelBin = bytes;
+            state.activeModelSource = 'custom';
+            state.activeModelName = modelFile.name;
             state.initialWeightsMode = 'local';
-            const worker = getTrainWorker();
-            worker.postMessage({ type: 'LOAD_MODEL', data: state.trainedModelBin });
+            state.modelPredictedTrials = new Set();
+            setNetSuggestions(true);
+            syncMainModelSelectUI();
+            if (opts.runPredictions && state.trials.length > 0) {
+                if (elements.trainStatus) {
+                    elements.trainStatus.className = 'train-active';
+                    elements.trainStatus.textContent = `Computing predictions (${modelFile.name})…`;
+                }
+                await applyModelAsPrelabeler({
+                    asGroundTruthIfEmpty: Boolean(opts.asGroundTruthIfEmpty),
+                    updateProbs: opts.updateProbs !== false
+                });
+                if (elements.trainStatus) {
+                    elements.trainStatus.className = 'train-done';
+                    elements.trainStatus.textContent = `Model loaded: ${modelFile.name}`;
+                }
+                saveToIndexedDB();
+            }
+            return true;
         } catch (err) {
             console.error('Failed to load model weights:', err);
             alert('Cannot load custom model weights: ' + err.message);
+            syncMainModelSelectUI();
+            return false;
         }
+    }
+
+    async function switchActiveModelSource(source) {
+        if (source === 'pick_custom') {
+            syncMainModelSelectUI();
+            if (elements.mainModelInput) elements.mainModelInput.click();
+            return;
+        }
+        if (source === 'pretrained') {
+            if (elements.trainStatus && state.trials.length > 0) {
+                elements.trainStatus.className = 'train-active';
+                elements.trainStatus.textContent = 'Computing predictions (combined.bin)…';
+            }
+            const ok = await loadPretrainedCombinedModel();
+            if (ok) {
+                setNetSuggestions(true);
+                syncMainModelSelectUI();
+                if (state.trials.length > 0) {
+                    await applyModelAsPrelabeler({ asGroundTruthIfEmpty: false, updateProbs: true });
+                    if (elements.trainStatus) {
+                        elements.trainStatus.className = 'train-done';
+                        elements.trainStatus.textContent = 'Model: combined.bin';
+                    }
+                }
+            }
+            return;
+        }
+        if (source === 'custom' && state.customModelBin) {
+            const ok = await loadBytesIntoWorker(state.customModelBin);
+            if (ok) {
+                state.trainedModelBin = state.customModelBin;
+                state.activeModelSource = 'custom';
+                state.activeModelName = state.customModelName || 'custom weights';
+                state.modelPredictedTrials = new Set();
+                setNetSuggestions(true);
+                syncMainModelSelectUI();
+                if (state.trials.length > 0) {
+                    if (elements.trainStatus) {
+                        elements.trainStatus.className = 'train-active';
+                        elements.trainStatus.textContent = `Computing predictions (${state.activeModelName})…`;
+                    }
+                    await applyModelAsPrelabeler({ asGroundTruthIfEmpty: false, updateProbs: true });
+                    if (elements.trainStatus) {
+                        elements.trainStatus.className = 'train-done';
+                        elements.trainStatus.textContent = `Model: ${state.activeModelName}`;
+                    }
+                }
+            }
+            return;
+        }
+        if (source === 'session' && state.sessionTrainedModelBin) {
+            const ok = await loadBytesIntoWorker(state.sessionTrainedModelBin);
+            if (ok) {
+                state.trainedModelBin = state.sessionTrainedModelBin;
+                state.activeModelSource = 'session';
+                state.activeModelName = 'session trained';
+                state.modelPredictedTrials = new Set();
+                setNetSuggestions(true);
+                syncMainModelSelectUI();
+                if (state.trials.length > 0) {
+                    await applyModelAsPrelabeler({ asGroundTruthIfEmpty: false, updateProbs: true });
+                    if (elements.trainStatus) {
+                        elements.trainStatus.className = 'train-done';
+                        elements.trainStatus.textContent = 'Model: session trained';
+                    }
+                }
+            }
+            return;
+        }
+        if (source === 'none') {
+            state.activeModelSource = 'none';
+            state.prelabelerMode = 'none';
+            setNetSuggestions(false);
+            state.prob = Array.from({ length: state.trials.length }, () => null);
+            state.hasProb = false;
+            updateProbUI();
+            syncMainModelSelectUI();
+            await refreshSuggestions();
+            return;
+        }
+        // Default: 'hmm' (or file's own pred_labels / prob when present)
+        state.activeModelSource = 'hmm';
+        state.prelabelerMode = (state.fileEvents && state.fileEvents.some(Boolean)) ? 'file' : 'hmm';
+        setNetSuggestions(false);
+        state.prob = Array.from({ length: state.trials.length }, (_, t) => (state.fileProb && state.fileProb[t]) ? new Float32Array(state.fileProb[t]) : null);
+        state.hasProb = state.prob.some(Boolean);
+        updateProbUI();
+        syncMainModelSelectUI();
+        await refreshSuggestions();
     }
 
     function promptPickLabelsVar(fileName, candidates, defaultVar) {
@@ -3227,10 +3598,13 @@
             pendingModelFile = null;
             pendingLabelsFile = null;
             if (elements.modalModelFileName) elements.modalModelFileName.textContent = 'No file chosen';
+            if (elements.prelabelerModelFileName) elements.prelabelerModelFileName.textContent = 'No file chosen';
             if (elements.modalLabelsFileName) elements.modalLabelsFileName.textContent = '(none)';
             if (elements.modalPrevLabelsVar) { elements.modalPrevLabelsVar.innerHTML = ''; elements.modalPrevLabelsVar.classList.add('hidden'); }
             if (elements.localModelRow) elements.localModelRow.classList.add('hidden');
+            if (elements.prelabelerModelRow) elements.prelabelerModelRow.classList.add('hidden');
             if (elements.initialModelSelect) elements.initialModelSelect.value = 'pretrained';
+            if (elements.prelabelerSelect) elements.prelabelerSelect.value = 'hmm';
             elements.loadModal.classList.remove('hidden');
         }
     }
@@ -3242,6 +3616,11 @@
         const rate = parseFloat(elements.rateInput.value) || 1000.0;
         const scale = parseFloat(elements.scaleInput.value) || 1.0;
         const prelabeler = elements.prelabelerSelect.value;
+        if (prelabeler === 'custom' && !pendingModelFile) {
+            alert('Please choose a custom pretrained weights file (.bin) first.');
+            if (elements.modalModelFile) elements.modalModelFile.click();
+            return;
+        }
         if (elements.modalWinMs) setWinMs(parseFloat(elements.modalWinMs.value) || state.winMs);
         const sgVal = parseInt(elements.modalSgWindow.value, 10);
         state.filterSettings.enabled = sgVal > 0;
@@ -3255,10 +3634,18 @@
             probVar: rawProbVar === '__auto__' ? undefined : rawProbVar,
         };
 
-        if (elements.initialModelSelect) {
+        if (prelabeler === 'custom' && pendingModelFile) {
+            const ok = await loadCustomModel(pendingModelFile, { runPredictions: false });
+            if (!ok) return;
+        } else if (prelabeler === 'pretrained') {
+            const ok = await loadPretrainedCombinedModel();
+            if (!ok) return;
+            state.initialWeightsMode = 'pretrained';
+        } else if (elements.initialModelSelect) {
             const mVal = elements.initialModelSelect.value;
             if (mVal === 'local' && pendingModelFile) {
-                await loadCustomModel(pendingModelFile);
+                const ok = await loadCustomModel(pendingModelFile, { runPredictions: false });
+                if (!ok) return;
             } else if (mVal === 'scratch') {
                 state.initialWeightsMode = 'scratch';
                 state.trainedModelBin = null;
@@ -3942,6 +4329,25 @@
         if (elements.downloadModelBtn) {
             elements.downloadModelBtn.addEventListener('click', downloadModel);
         }
+        if (elements.loadWeightsBtn && elements.mainModelInput) {
+            elements.loadWeightsBtn.addEventListener('click', () => elements.mainModelInput.click());
+        }
+        if (elements.mainModelSelect) {
+            elements.mainModelSelect.addEventListener('change', (e) => {
+                switchActiveModelSource(e.target.value);
+            });
+        }
+        if (elements.mainModelInput) {
+            elements.mainModelInput.addEventListener('change', async (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    const f = e.target.files[0];
+                    e.target.value = '';
+                    await loadCustomModel(f, { runPredictions: true, asGroundTruthIfEmpty: false, updateProbs: true });
+                } else {
+                    syncMainModelSelectUI();
+                }
+            });
+        }
         if (elements.initialModelSelect) {
             elements.initialModelSelect.addEventListener('change', (e) => {
                 state.initialWeightsMode = e.target.value;
@@ -3950,12 +4356,34 @@
                 }
             });
         }
+        if (elements.prelabelerSelect) {
+            elements.prelabelerSelect.addEventListener('change', (e) => {
+                const isCustom = e.target.value === 'custom';
+                if (elements.prelabelerModelRow) {
+                    elements.prelabelerModelRow.classList.toggle('hidden', !isCustom);
+                }
+                if (isCustom) {
+                    if (elements.initialModelSelect) {
+                        elements.initialModelSelect.value = 'local';
+                        state.initialWeightsMode = 'local';
+                    }
+                    if (elements.localModelRow) elements.localModelRow.classList.remove('hidden');
+                    if (!pendingModelFile && elements.modalModelFile) {
+                        elements.modalModelFile.click();
+                    }
+                }
+            });
+        }
+        if (elements.prelabelerPickModelBtn && elements.modalModelFile) {
+            elements.prelabelerPickModelBtn.addEventListener('click', () => elements.modalModelFile.click());
+        }
         if (elements.modalPickModelBtn && elements.modalModelFile) {
             elements.modalPickModelBtn.addEventListener('click', () => elements.modalModelFile.click());
             elements.modalModelFile.addEventListener('change', (e) => {
                 if (e.target.files && e.target.files[0]) {
                     pendingModelFile = e.target.files[0];
                     if (elements.modalModelFileName) elements.modalModelFileName.textContent = pendingModelFile.name;
+                    if (elements.prelabelerModelFileName) elements.prelabelerModelFileName.textContent = pendingModelFile.name;
                 }
             });
         }
@@ -4759,6 +5187,8 @@
     window.applyLabelsJson = applyLabelsJson;
     window.applyLoadedLabels = applyLoadedLabels;
     window.loadPreviousLabels = loadPreviousLabels;
+    window.loadCustomModel = loadCustomModel;
+    window.switchActiveModelSource = switchActiveModelSource;
     window.saveLabelsJson = saveLabelsJson;
     window.recomputeReviewed = recomputeReviewed;
     window.buildRefineQueue = buildRefineQueue;

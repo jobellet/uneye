@@ -328,6 +328,28 @@ check(boolRes.modalOpen && boolRes.opts.includes('bool_sacc_a') && boolRes.opts.
   JSON.stringify(boolRes.evAfterCsv) === JSON.stringify([[800, 835, 1]]),
   `boolean variables selectable for Load labels (L): picker opts=${JSON.stringify(boolRes.opts)}, H5=${JSON.stringify(boolRes.evAfterH5)}, CSV(true/false)=${JSON.stringify(boolRes.evAfterCsv)}`);
 
+// --- test custom pretrained weights option in #prelabelerSelect and in main window (#mainModelSelect / loadCustomModel)
+const customModelRes = await ev(async () => {
+  const preOpts = Array.from(document.getElementById('prelabelerSelect').options).map(o => o.value);
+  const mainOpts = Array.from(document.getElementById('mainModelSelect').options).map(o => o.value);
+  const resp = await fetch('models/combined.bin');
+  const binBuf = await resp.arrayBuffer();
+  const expBefore = JSON.stringify(state.expertEvents[0]);
+  const ok = await window.loadCustomModel(new File([binBuf], 'my_custom_weights.bin'), { runPredictions: true, asGroundTruthIfEmpty: false, updateProbs: true });
+  const selValAfter = document.getElementById('mainModelSelect').value;
+  const customOptText = document.querySelector('#mainModelSelect option[value="custom"]').textContent;
+  const expAfter = JSON.stringify(state.expertEvents[0]);
+  const hasModelProb = Boolean(state.prob[0] && state.prob[0].length === state.trials[0].x.length);
+  await window.switchActiveModelSource('hmm');
+  const selValHmm = document.getElementById('mainModelSelect').value;
+  return { preOpts, mainOpts, ok, selValAfter, customOptText, expPreserved: expBefore === expAfter, hasModelProb, selValHmm };
+});
+check(customModelRes.preOpts.includes('custom') && customModelRes.preOpts.includes('pretrained') &&
+  customModelRes.mainOpts.includes('pick_custom') && customModelRes.ok &&
+  customModelRes.selValAfter === 'custom' && customModelRes.customOptText.includes('my_custom_weights.bin') &&
+  customModelRes.expPreserved && customModelRes.hasModelProb && customModelRes.selValHmm === 'hmm',
+  `custom weights selectable in prelabelerSelect (${JSON.stringify(customModelRes.preOpts)}) and main window (${customModelRes.customOptText}, ground-truth preserved=${customModelRes.expPreserved})`);
+
 check(errors.length === 0, 'no page error' + (errors.length ? ': ' + errors.join(' | ') : ''));
 await browser.close();
 console.log(ok ? 'all near-miss flow checks passed' : 'SOME CHECKS FAILED');

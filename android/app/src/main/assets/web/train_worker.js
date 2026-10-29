@@ -34,9 +34,17 @@ self.onmessage = async function(e) {
         }
 
         if (type === 'PREDICT') {
-            // data: { x, y, rateHz, maxSpeedDegS }
+            // data: { x, y, rateHz, maxSpeedDegS, includeProbs }
             const pred = trainer.predictTrial(data.x, data.y, data.rateHz || 1000.0, data.maxSpeedDegS || 1300.0);
-            self.postMessage({ type: 'PREDICT_RESULT', id, pred });
+            let prob = null;
+            if (data.includeProbs && typeof trainer.predictProbs === 'function') {
+                const rawProbs = trainer.predictProbs(data.x, data.y, data.rateHz || 1000.0, data.maxSpeedDegS || 1300.0);
+                const n = data.x.length;
+                if (rawProbs && rawProbs.length >= 2 * n) {
+                    prob = new Float32Array(rawProbs.subarray(n, 2 * n));
+                }
+            }
+            self.postMessage({ type: 'PREDICT_RESULT', id, pred, prob });
             return;
         }
 
@@ -88,6 +96,9 @@ self.onmessage = async function(e) {
                 self.postMessage({ type: 'ERROR', id, message: initErr });
                 return;
             }
+
+            self.postMessage({ type: 'STATUS', id, message: `Training U-Net — Epoch 1/${config.max_epochs || 60}…` });
+            await new Promise(resolve => setTimeout(resolve, 0));
 
             // Train epoch by epoch cooperatively so cancel can interrupt
             while (!trainer.isFinished() && !isCancelled) {

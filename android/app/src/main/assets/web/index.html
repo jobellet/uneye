@@ -9,6 +9,7 @@
     <meta name="theme-color" content="#1565C0">
     <title>U'n'Eye — Offline Saccade Labeler</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" href="logo_circle.png">
     <link rel="apple-touch-icon" href="logo_circle.png">
 
@@ -47,6 +48,14 @@
             </div>
 
             <div class="bar-right">
+                <select id="mainModelSelect" class="btn btn-secondary" style="height: 36px; padding: 0 10px; font-size: 0.85rem; max-width: 245px;" title="Select detector or trained model weights to view its predictions and P(saccade) probability trace">
+                    <option value="hmm">Predictions: HMM / File</option>
+                    <option value="pretrained">Predictions: Pretrained (combined.bin)</option>
+                    <option value="session" hidden>Predictions: Session trained model</option>
+                    <option value="custom" hidden>Predictions: Custom weights (.bin)</option>
+                    <option value="pick_custom">Load custom weights (.bin)…</option>
+                    <option value="none">Predictions: None (manual)</option>
+                </select>
                 <button id="shortcutsTopBtn" class="btn btn-secondary desktop-only" title="Keyboard shortcuts (view &amp; customize)">⌨ Shortcuts</button>
                 <button id="menuBtn" class="btn btn-secondary" title="Show / hide the settings, files, training and export buttons">☰</button>
             </div>
@@ -73,6 +82,7 @@
             <button id="metricsBtn" class="btn btn-secondary">Metrics</button>
             <button id="trainNowBtn" class="btn btn-train">Train</button>
             <button id="cancelTrainBtn" class="btn btn-danger hidden">Cancel</button>
+            <button id="loadWeightsBtn" class="btn btn-secondary" title="Load a custom pretrained weights file (.bin) and compute its predictions">Load weights…</button>
             <button id="downloadModelBtn" class="btn btn-secondary" title="Download model">Model</button>
             <select id="exportFormat" class="btn btn-secondary" title="Export format: CSV (L, X, Y files) or one file with all trials, labels and names">
                     <option value="csv" selected>CSV</option>
@@ -133,6 +143,7 @@
         <!-- no "accept" filter on purpose: iPadOS greys out every file whose extension has no registered type (.npz, .h5, .mat), so they could not be picked; the extension is checked in app.js -->
         <input type="file" id="fileInput" style="display: none;">
         <input type="file" id="labelsInput" style="display: none;">
+        <input type="file" id="mainModelInput" style="display: none;">
         <input type="file" id="filePairInput" accept=".csv,.txt,.dat" multiple style="display: none;">
 
         <!-- Start: no data is loaded until a file is chosen -->
@@ -234,8 +245,17 @@
                     <label for="prelabelerSelect">Automatic pre-labeler:</label>
                     <select id="prelabelerSelect">
                         <option value="hmm" selected>Label-free HMM (no threshold to set), or the file's own detection (pred_labels / prob) when it has one</option>
+                        <option value="pretrained">Pretrained U'n'Eye network (combined.bin)</option>
+                        <option value="custom">Custom pretrained weights file (.bin)…</option>
                         <option value="none">None (manual)</option>
                     </select>
+                </div>
+                <div id="prelabelerModelRow" class="form-row hidden">
+                    <label>Pre-labeler weights (.bin):</label>
+                    <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+                        <span id="prelabelerModelFileName" class="filename-display" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">No file chosen</span>
+                        <button id="prelabelerPickModelBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" type="button">Browse…</button>
+                    </div>
                 </div>
                 <div class="modal-buttons">
                     <button id="modalCancelBtn" class="btn btn-secondary">Cancel</button>
@@ -436,16 +456,19 @@
         </div>
     </div>
 
-    <script src="formats.js?v=13"></script>
-    <script src="import.js?v=13"></script>
-    <script src="import_ui.js?v=13"></script>
-    <script src="hmm_prelabel.js?v=13"></script>
-    <script src="nearmiss.js?v=13"></script>
-    <script src="app.js?v=13"></script>
+    <script src="formats.js?v=15"></script>
+    <script src="import.js?v=15"></script>
+    <script src="import_ui.js?v=15"></script>
+    <script src="hmm_prelabel.js?v=15"></script>
+    <script src="nearmiss.js?v=15"></script>
+    <script src="app.js?v=15"></script>
 <script>
-    if ("serviceWorker" in navigator && !window.AndroidBridge) {
+    if ("serviceWorker" in navigator && !window.AndroidBridge && !window.UnEyeMacApp) {
         window.addEventListener("load", () => {
-            navigator.serviceWorker.register("./sw.js").catch(err => console.log("SW reg failed:", err));
+            navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then(reg => {
+                reg.update().catch(() => {});
+                window.addEventListener("focus", () => reg.update().catch(() => {}));
+            }).catch(err => console.log("SW reg failed:", err));
         });
     }
 </script>
